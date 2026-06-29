@@ -1,0 +1,114 @@
+- github.com/aws/aws-sdk-go-v2 (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/v1.42.0/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/internal/configsources (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/internal/configsources/v1.4.29/internal/configsources/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/internal/endpoints/v2.7.29/internal/endpoints/v2/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/internal/sync/singleflight (BSD-3-Clause)
+  https://github.com/aws/aws-sdk-go-v2/blob/v1.42.0/internal/sync/singleflight/LICENSE
+
+- github.com/aws/aws-sdk-go-v2/service/ec2 (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/ec2/v1.308.0/service/ec2/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/service/eks (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/eks/v1.87.0/service/eks/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/elasticloadbalancingv2/v1.55.4/service/elasticloadbalancingv2/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/internal/accept-encoding/v1.13.12/service/internal/accept-encoding/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/service/internal/presigned-url (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/internal/presigned-url/v1.13.29/service/internal/presigned-url/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/service/route53 (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/route53/v1.63.3/service/route53/LICENSE.txt
+
+- github.com/aws/smithy-go (Apache-2.0)
+  https://github.com/aws/smithy-go/blob/v1.27.1/LICENSE
+
+- github.com/aws/smithy-go/internal/sync/singleflight (BSD-3-Clause)
+  https://github.com/aws/smithy-go/blob/v1.27.1/internal/sync/singleflight/LICENSE
+
+- github.com/beorn7/perks/quantile (MIT)
+  https://github.com/beorn7/perks/blob/v1.0.1/LICENSE
+
+- github.com/cespare/xxhash/v2 (MIT)
+  https://github.com/cespare/xxhash/blob/v2.3.0/LICENSE.txt
+
+- github.com/digitalocean/godo (MIT)
+  https://github.com/digitalocean/godo/blob/v1.197.0/LICENSE.txt
+
+- github.com/google/go-querystring/query (BSD-3-Clause)
+  https://github.com/google/go-querystring/blob/v1.2.0/LICENSE
+
+- github.com/hashicorp/go-cleanhttp (MPL-2.0)
+  https://github.com/hashicorp/go-cleanhttp/blob/v0.5.2/LICENSE
+
+- github.com/hashicorp/go-retryablehttp (MPL-2.0)
+  https://github.com/hashicorp/go-retryablehttp/blob/v0.7.8/LICENSE
+
+- github.com/hetznercloud/hcloud-go/v2/hcloud (MIT)
+  https://github.com/hetznercloud/hcloud-go/blob/v2.44.0/LICENSE
+
+- github.com/munnerz/goautoneg (BSD-3-Clause)
+  https://github.com/munnerz/goautoneg/blob/a7dc8b61c822/LICENSE
+
+- github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil (BSD-3-Clause)
+  https://github.com/prometheus/client_golang/blob/v1.23.2/internal/github.com/golang/gddo/LICENSE
+
+- github.com/prometheus/client_golang/prometheus (Apache-2.0)
+  https://github.com/prometheus/client_golang/blob/v1.23.2/LICENSE
+
+- github.com/prometheus/client_model/go (Apache-2.0)
+  https://github.com/prometheus/client_model/blob/v0.6.2/LICENSE
+
+- github.com/prometheus/common (Apache-2.0)
+  https://github.com/prometheus/common/blob/v0.66.1/LICENSE
+
+- github.com/prometheus/procfs (Apache-2.0)
+  https://github.com/prometheus/procfs/blob/v0.16.1/LICENSE
+
+- github.com/spf13/cobra (Apache-2.0)
+  https://github.com/spf13/cobra/blob/v1.10.2/LICENSE.txt
+
+- github.com/spf13/pflag (BSD-3-Clause)
+  https://github.com/spf13/pflag/blob/v1.0.9/LICENSE
+
+- github.com/vultr/govultr/v3 (MIT)
+  https://github.com/vultr/govultr/blob/v3.31.2/LICENSE
+
+- go.yaml.in/yaml/v2 (Apache-2.0)
+  https://github.com/yaml/go-yaml/blob/v2.4.2/LICENSE
+
+- golang.org/x/crypto (BSD-3-Clause)
+  https://cs.opensource.google/go/x/crypto/+/v0.53.0:LICENSE
+
+- golang.org/x/net (BSD-3-Clause)
+  https://cs.opensource.google/go/x/net/+/v0.55.0:LICENSE
+
+- golang.org/x/oauth2 (BSD-3-Clause)
+  https://cs.opensource.google/go/x/oauth2/+/v0.30.0:LICENSE
+
+- golang.org/x/sys/unix (BSD-3-Clause)
+  https://cs.opensource.google/go/x/sys/+/v0.46.0:LICENSE
+
+- golang.org/x/term (BSD-3-Clause)
+  https://cs.opensource.google/go/x/term/+/v0.44.0:LICENSE
+
+- golang.org/x/text (BSD-3-Clause)
+  https://cs.opensource.google/go/x/text/+/v0.38.0:LICENSE
+
+- golang.org/x/time/rate (BSD-3-Clause)
+  https://cs.opensource.google/go/x/time/+/v0.6.0:LICENSE
+
+- google.golang.org/protobuf (BSD-3-Clause)
+  https://github.com/protocolbuffers/protobuf-go/blob/v1.36.8/LICENSE
+
+- gopkg.in/yaml.v3 (MIT)
+  https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE
+

@@ -1,0 +1,41 @@
+version: 2
+project_name: sdk-ops
+
+builds:
+  - main: ./cmd/sdk-ops
+    binary: sdk-ops
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  use: github-native
+
+release:
+  github:
+    owner: natuleadan
+    name: sdk-ops
+  draft: false
+  prerelease: auto
+  mode: replace

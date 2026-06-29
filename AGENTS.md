@@ -1,0 +1,235 @@
+# sdk-ops — AI Guide
+
+## Overview
+
+**sdk-ops** (`sdk-ops`) is a CLI tool for provisioning and operating VPS servers. It hardens, installs Docker/k3s, deploys services, and wraps kubectl — all via SSH.
+
+**Stack:** Go + Cobra CLI + SSH (`golang.org/x/crypto/ssh`)
+
+## Quick Reference
+
+| Topic | Location |
+|-------|----------|
+| Commands reference | `docs/commands.md` |
+| Architecture | `docs/architecture.md` |
+| Conventional commits | `docs/conventional-commits.md` |
+| CLI source | `cmd/sdk-ops/` |
+| SSH client | `ssh/` |
+| Hardening | `hardening/` |
+| Docker operations | `docker/` |
+| k3s operations | `k3s/` |
+| Deploy engine | `deploy/` |
+| TLS certs | `deploy/tls.go` |
+| Log shipping | `deploy/logging.go` |
+| Alerting | `deploy/alerting.go` |
+| Monitoring | `monitor/` |
+| Cloud-init | `cloudinit/` |
+| Terraform export | `terraform/` |
+| sops secrets | `secrets/` |
+| High-level API | `server.go` |
+| YAML config | `config.go` |
+| Provider API | `providers/provider.go` + `providers/types.go` + `providers/credentials.go` |
+| CubePath provider | `providers/cubepath/` |
+| Hetzner | `providers/hetzner/` |
+| DigitalOcean | `providers/digitalocean/` |
+| Vultr | `providers/vultr/` |
+| AWS EC2 | `providers/aws/` |
+| License & third-party notices | `LICENSE` / `ThirdPartyNotices.txt` |
+
+## Entrypoints
+
+- `cmd/sdk-ops/` — CLI entrypoint (Cobra command tree)
+- `server.go` / `config.go` — High-level `ops.Server` API + YAML config
+- `ssh/` — SSH client abstraction (public SDK)
+- `hardening/` — VPS hardening (packages → user → kernel → fail2ban → SSH → nftables → node_exporter)
+- `docker/` — Docker install + compose generation
+- `k3s/` — k3s install + 16 kubectl wrappers
+- `deploy/` — Build → push → upload → compose → health check → auto-rollback
+- `monitor/` — Real-time node dashboard (CPU, RAM, disk, k3s)
+- `providers/` — Multi-provider interface (21 methods)
+
+## Architecture
+
+```
+[Local Machine]          [VPS]
+CLI (Cobra) ───SSH──→   1. Hardening (nftables, fail2ban, kernel)
+                         2. Docker + k3s install
+                         3. /opt/sdk-ops/services/<name>/v{N}/
+                         4. docker compose up
+                         5. Health check → rollback on failure
+```
+
+Alternatively, cloud-init can provision without SSH push:
+
+```
+[Local Machine]          [Provider API]         [VPS]
+CLI ──API──→ Create VPS ──user-data──→          Boot → cloud-init runs
+                                                  (hardening + Docker + k3s)
+```
+
+## Commands
+
+Full reference: `docs/commands.md`. Categories:
+
+| Category | Key commands |
+|----------|-------------|
+| **Provision** | `infra init/join/status/remove` |
+| **Backup** | `infra backup/restore`, `backup create/restore` |
+| **Firewall** | `infra firewall open/close/list` |
+| **TLS** | `infra cert install/info` |
+| **Logs** | `infra logs install/remove` |
+| **Alerts** | `infra alerts install/remove/rule add` |
+| **Operations** | `node list/info/top/exec` |
+| **Deploy** | `deploy push`, `deploy encrypt/decrypt`, `service status/logs/rollback` |
+| **Cluster** | `cluster nodes/pods/top/logs/scale` (16 kubectl commands) |
+| **Config** | `config init/add-node/list-nodes/remove-node/set-credentials` |
+| **Provider** | `provider vps/k8s/lb/dns/ssh-key` |
+
+## Modes
+
+- `--k3s` (default) — Hardening + Docker + k3s + Traefik
+- `--docker` — Hardening + Docker only
+- `--bare` — Hardening only
+
+## Init Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--ssh-port` | 0 | Migrate SSH to custom port (0 = keep 22) |
+| `--monitor` | false | Install node_exporter (port 9100) |
+| `--crowdsec` | false | Install CrowdSec WAF/IPS |
+| `--lock-root` | false | Lock root password |
+| `--logs` | "" | Install Promtail to Loki URL |
+| `--alerts` | "" | Install Alertmanager (Slack webhook) |
+| `--cloud-init` | false | Use cloud-init instead of SSH |
+| `--provider` | "" | Create VPS via provider API |
+
+## Workflows (for AI assistants)
+
+### Provision a new VPS via SSH
+```
+1. sdk-ops config add-node <ip> --user root --key ~/.ssh/id_ed25519
+2. sdk-ops infra init <ip>          # hardening + Docker + k3s (or --docker / --bare)
+3. Verify: sdk-ops infra status <ip>
+   → SSH port stays on 22, user stays root (unless --ssh-port / --lock-root)
+```
+
+### Provision a new VPS via provider API + cloud-init
+```
+1. sdk-ops infra init --provider cubepath --plan gp.nano --location us-mia-1 --cloud-init
+   → Creates VPS via API, passes cloud-init user-data, waits for boot
+   → Hardening + Docker + k3s already applied via cloud-init
+```
+
+### Deploy a service
+```
+1. Create a Go service with main.go + service.yaml
+2. sdk-ops deploy push ./my-service --node <ip>
+   → Auto-installs Docker if missing on node
+   → Builds binary for linux/amd64 → Docker buildx + push → tar + SSH pipe
+   → docker compose up -d → Health check → Auto-rollback on failure
+```
+
+### Multi-node deploy
+```
+sdk-ops deploy push ./my-service --all
+   → Deploys to all registered nodes in parallel (sync.WaitGroup)
+```
+
+### Manage firewall rules
+```
+sdk-ops infra firewall open 9090 --node <ip>
+sdk-ops infra firewall close 9090 --node <ip>
+sdk-ops infra firewall list --node <ip>
+```
+
+### TLS certificate (Let's Encrypt + Caddy)
+```
+sdk-ops infra cert install --domain example.com --email admin@x.com --node <ip>
+```
+
+### Log shipping (Promtail + Loki)
+```
+sdk-ops infra logs install --node <ip> --loki http://loki:3100
+```
+
+### Alerting (Alertmanager)
+```
+# Slack
+sdk-ops infra alerts install --node <ip> --slack https://hooks.slack.com/...
+# Telegram
+sdk-ops infra alerts install --node <ip> --bot-token 123:abc --chat-id -100123
+# Custom rules
+sdk-ops infra alerts rule add ./rules.yml --node <ip>
+```
+
+### SSH key management on providers
+```
+sdk-ops provider ssh-key upload my-key --pub-key ~/.ssh/id_ed25519.pub
+sdk-ops provider ssh-key list
+sdk-ops provider ssh-key delete <id>
+```
+
+### Managed Kubernetes
+```
+sdk-ops provider k8s create --provider cubepath --name cluster --nodes 2 --node-plan gp.micro
+sdk-ops provider k8s kubeconfig <id> > kc.yaml
+sdk-ops provider k8s delete <id>
+```
+
+### Operate k3s cluster
+```
+sdk-ops cluster nodes          kubectl get nodes
+sdk-ops cluster pods           kubectl get pods --all-namespaces
+sdk-ops cluster top            kubectl top nodes + pods
+sdk-ops cluster logs <pod> -f  kubectl logs -f
+sdk-ops cluster scale deploy/my-svc --replicas 5
+```
+
+### Encrypt secrets with sops
+```
+# Encrypt service.yaml with age public key
+sdk-ops deploy encrypt service.yaml --age-key age1...
+
+# Deploy with auto-decrypt
+sdk-ops deploy push ./my-service --sops-key age1...
+```
+
+### Backup and restore
+```
+sdk-ops infra backup <ip>
+sdk-ops infra restore <ip> ./backup.tar.gz
+```
+
+## Deploy Flow
+
+```
+Local (Mac ARM)                        VPS (x86_64)
+─────                                   ─────
+1. go build (linux/amd64)               docker login (auto)
+2. docker buildx + push ──registry──→   docker pull
+3. tar files + SSH pipe ────────→   /opt/sdk-ops/services/<name>/v{N}/
+4.                                      symlink: current → v{N}
+5.                                      docker compose up -d
+6.                                      Health check → OK or rollback
+```
+
+## Testing
+
+```bash
+make test    # go test -race -count=1 ./...
+make build   # go build -o sdk-ops ./cmd/sdk-ops/
+```
+
+## Gotchas
+
+- **SSH port stays on 22** by default after hardening. Only changes if `--ssh-port N` is explicitly set.
+- **nftables is used** (not UFW). Port 22 is always kept open.
+- **Root is NOT locked** by default. Use `--lock-root` to disable root password.
+- **Auto-healing**: `deploy push` auto-installs Docker if missing, `cluster` commands auto-install k3s, `node top` auto-installs htop.
+- **Registry credentials**: set `NLA_REGISTRY_USER` and `NLA_REGISTRY_PASS` env vars. Auto-login on VPS during deploy.
+- **Credentials fallback**: `~/.sdk-ops/credentials.yaml` is loaded when env vars are not set (`config set-credentials` saves it).
+- **Cloud-init**: `--cloud-init` generates user-data with hardening + Docker + k3s baked in. Faster than SSH push.
+- **CubePath API rate limit**: 5 requests per 5 minutes. Add sleep between batch operations.
+- **`kubectl top` requires metrics-server** to be fully ready (may take 1-2 min after k3s install).
+- **Load Balancer cannot be deleted** while in "deploying" state. Wait for it to become active.

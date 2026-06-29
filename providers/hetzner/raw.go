@@ -1,0 +1,69 @@
+package hetzner
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+)
+
+type rawClient struct {
+	token   string
+	baseURL string
+	http    *http.Client
+}
+
+func newRawClient(token string) *rawClient {
+	return &rawClient{
+		token:   token,
+		baseURL: "https://api.hetzner.cloud/v1",
+		http:    &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+func (c *rawClient) do(method, path string, body any) ([]byte, error) {
+	var buf io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("marshal: %w", err)
+		}
+		buf = bytes.NewReader(data)
+	}
+
+	req, err := http.NewRequest(method, c.baseURL+path, buf)
+	if err != nil {
+		return nil, fmt.Errorf("request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("api error %d: %s", resp.StatusCode, string(respBody))
+	}
+	return respBody, nil
+}
+
+func val(m map[string]any, k string) string {
+	v, ok := m[k]
+	if !ok || v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+func id(v any) string {
+	return fmt.Sprintf("%v", v)
+}
