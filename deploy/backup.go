@@ -31,7 +31,7 @@ const (
 
 // S3Config holds S3-compatible storage settings.
 type S3Config struct {
-	Endpoint  string // e.g., https://s3.amazonaws.com or https://ewr.vultrcr.com
+	Endpoint  string // e.g., https://s3.amazonaws.com
 	Region    string
 	Bucket    string
 	AccessKey string

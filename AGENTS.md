@@ -265,7 +265,7 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
 - **nftables is used** (not UFW). Port 22 is always kept open.
 - **Root is NOT locked** by default. Use `--lock-root` to disable root password.
 - **Auto-healing**: `deploy push` auto-installs Docker if missing, `cluster` commands auto-install k3s, `node top` auto-installs htop.
-- **Registry credentials**: set `NLA_REGISTRY_USER` and `NLA_REGISTRY_PASS` env vars. Auto-login on VPS during deploy.
+- **Registry credentials**: set `REGISTRY_USER` and `REGISTRY_PASS` env vars. Auto-login on VPS during deploy.
 - **Credentials fallback**: `~/.sdk-ops/credentials.yaml` is loaded when env vars are not set (`config set-credentials` saves it).
 - **Cloud-init**: `--cloud-init` generates user-data with hardening + Docker + k3s baked in. Faster than SSH push.
 - **CubePath API rate limit**: 5 requests per 5 minutes. Add sleep between batch operations.

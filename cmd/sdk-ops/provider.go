@@ -51,9 +51,9 @@ func newProviderCmd() *cobra.Command {
 	cmd.AddCommand(newProviderSSHKeyCmd())
 
 	// Global flags
-	cmd.PersistentFlags().StringVar(&pf.provider, "provider", "cubepath", "Provider name (cubepath, hetzner, digitalocean, vultr, aws)")
+	cmd.PersistentFlags().StringVar(&pf.provider, "provider", "", "Provider name (cubepath, hetzner, digitalocean, vultr, aws)")
 	cmd.PersistentFlags().StringVar(&pf.apiKey, "api-key", "", "API key (or provider-specific env var)")
-	cmd.PersistentFlags().IntVar(&pf.projectID, "project-id", 4601, "Project ID (CubePath)")
+	cmd.PersistentFlags().IntVar(&pf.projectID, "project-id", 0, "Project ID for provider")
 
 	return cmd
 }
@@ -205,9 +205,9 @@ func newProviderVPSCmd() *cobra.Command {
 		},
 	}
 
-	createCmd.Flags().StringVar(&pf.plan, "plan", "gp.nano", "VPS plan")
-	createCmd.Flags().StringVar(&pf.location, "location", "us-mia-1", "Location")
-	createCmd.Flags().StringVar(&pf.template, "template", "ubuntu-24", "OS template")
+	createCmd.Flags().StringVar(&pf.plan, "plan", "", "VPS plan")
+	createCmd.Flags().StringVar(&pf.location, "location", "", "Location")
+	createCmd.Flags().StringVar(&pf.template, "template", "", "OS template")
 	createCmd.Flags().StringVar(&pf.hostname, "hostname", "", "Hostname")
 	createCmd.Flags().StringVar(&pf.sshKeyIDs, "ssh-key-ids", "", "SSH key IDs (comma-separated)")
 	createCmd.Flags().Bool("ipv4", true, "Enable public IPv4")
@@ -490,7 +490,7 @@ func newProviderK8sCmd() *cobra.Command {
 	nodePoolCmd.AddCommand(npDeleteCmd)
 
 	createCmd.Flags().StringVar(&pf.name, "name", "", "Cluster name")
-	createCmd.Flags().StringVar(&pf.location, "location", "us-mia-1", "Location")
+	createCmd.Flags().StringVar(&pf.location, "location", "", "Location")
 	createCmd.Flags().StringVar(&pf.version, "version", "", "K8s version")
 	createCmd.Flags().StringVar(&pf.nodePlan, "node-plan", "", "Node plan")
 	createCmd.Flags().IntVar(&pf.nodeCount, "nodes", 3, "Number of nodes")
@@ -764,7 +764,7 @@ func newProviderLBCmd() *cobra.Command {
 	}
 
 	createCmd.Flags().StringVar(&pf.name, "name", "", "LB name")
-	createCmd.Flags().StringVar(&pf.location, "location", "us-mia-1", "Location")
+	createCmd.Flags().StringVar(&pf.location, "location", "", "Location")
 	createCmd.Flags().StringVar(&pf.plan, "plan", "", "LB plan")
 
 	cmd.AddCommand(createCmd)

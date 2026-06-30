@@ -52,13 +52,11 @@ sdk-ops provider lb delete <id>
 
 ## Deploy: Docker Registry Auth
 
-When deploying to a VPS with a private registry, the node needs to authenticate. sdk-ops auto-runs `docker login` on the node during `deploy push` using credentials from `NLA_REGISTRY_USER` / `NLA_REGISTRY_PASS` env vars. If login fails:
+When deploying to a VPS with a private registry, the node needs to authenticate. sdk-ops auto-runs `docker login` on the node during `deploy push` using credentials from `REGISTRY_USER` / `REGISTRY_PASS` env vars. If login fails:
 
 ```bash
 # Verify credentials
-echo "$NLA_REGISTRY_PASS" | docker login -u "$NLA_REGISTRY_USER" --password-stdin $NLA_REGISTRY_SERVER
-
-# Default registry server: ewr.vultrcr.com/nlaregistry
+echo "$REGISTRY_PASS" | docker login -u "$REGISTRY_USER" --password-stdin $REGISTRY_SERVER
 ```
 
 ## Cloud-init Limitations

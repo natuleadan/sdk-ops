@@ -22,7 +22,7 @@ type NodeConfig struct {
 	Hostname string `yaml:"hostname,omitempty"`
 }
 
-type NLARootConfig struct {
+type RootConfig struct {
 	Nodes []NodeConfig `yaml:"nodes"`
 }
 
@@ -36,8 +36,8 @@ func configPath() string {
 	return filepath.Join(configDir(), "config.yaml")
 }
 
-func loadConfig() (*NLARootConfig, error) {
-	var cfg NLARootConfig
+func loadConfig() (*RootConfig, error) {
+	var cfg RootConfig
 	data, err := os.ReadFile(configPath())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -64,7 +64,7 @@ func lookupNode(ip string) *NodeConfig {
 	return nil
 }
 
-func saveConfig(cfg *NLARootConfig) error {
+func saveConfig(cfg *RootConfig) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err

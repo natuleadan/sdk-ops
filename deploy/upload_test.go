@@ -42,9 +42,9 @@ func TestGenerateCompose_DefaultPort(t *testing.T) {
 }
 
 func TestDefaultRegistry_EnvVars(t *testing.T) {
-	os.Setenv("NLA_REGISTRY_SERVER", "")
-	os.Setenv("NLA_REGISTRY_USER", "testuser")
-	os.Setenv("NLA_REGISTRY_PASS", "testpass")
+	os.Setenv("REGISTRY_SERVER", "myreg.example.com")
+	os.Setenv("REGISTRY_USER", "testuser")
+	os.Setenv("REGISTRY_PASS", "testpass")
 
 	reg := DefaultRegistry()
 	if reg.Username != "testuser" {
@@ -53,18 +53,18 @@ func TestDefaultRegistry_EnvVars(t *testing.T) {
 	if reg.Password != "testpass" {
 		t.Errorf("Password = %q, want %q", reg.Password, "testpass")
 	}
-	if reg.Server != "ewr.vultrcr.com/nlaregistry" {
-		t.Errorf("Server(default) = %q, want %q", reg.Server, "ewr.vultrcr.com/nlaregistry")
+	if reg.Server != "myreg.example.com" {
+		t.Errorf("Server = %q, want %q", reg.Server, "myreg.example.com")
 	}
 }
 
 func TestDefaultRegistry_CustomServer(t *testing.T) {
-	os.Setenv("NLA_REGISTRY_SERVER", "myreg.example.com")
-	defer os.Unsetenv("NLA_REGISTRY_SERVER")
+	os.Setenv("REGISTRY_SERVER", "custom.example.com")
+	defer os.Unsetenv("REGISTRY_SERVER")
 
 	reg := DefaultRegistry()
-	if reg.Server != "myreg.example.com" {
-		t.Errorf("Server = %q, want %q", reg.Server, "myreg.example.com")
+	if reg.Server != "custom.example.com" {
+		t.Errorf("Server = %q, want %q", reg.Server, "custom.example.com")
 	}
 }
 

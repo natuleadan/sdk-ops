@@ -97,12 +97,12 @@ With --provider: create a VPS via API, then provision via SSH.
 
 Provider options:
   --provider      Provider name (cubepath, hetzner, digitalocean, vultr, aws)
-  --plan          VPS plan (e.g. gp.nano)
-  --location      Location (e.g. us-mia-1)
-  --template      OS template (e.g. ubuntu-24)
+  --plan          VPS plan
+  --location      Location
+  --template      OS template
   --ssh-key-ids   Comma-separated SSH key IDs
   --api-key       API key for the provider
-  --project-id    Project ID for the provider (default: 4601)
+  --project-id    Project ID for the provider
 
 Examples:
   sdk-ops infra init 188.xxx.xxx.xxx
@@ -373,13 +373,13 @@ Examples:
 
 	// Provider flags
 	initCmd.Flags().StringVar(&f.provider, "provider", "", "Create VPS via provider (cubepath, hetzner, digitalocean, vultr, aws)")
-	initCmd.Flags().StringVar(&f.plan, "plan", "gp.nano", "VPS plan")
-	initCmd.Flags().StringVar(&f.location, "location", "us-mia-1", "VPS location")
-	initCmd.Flags().StringVar(&f.template, "template", "ubuntu-24", "OS template")
+	initCmd.Flags().StringVar(&f.plan, "plan", "", "VPS plan")
+	initCmd.Flags().StringVar(&f.location, "location", "", "VPS location")
+	initCmd.Flags().StringVar(&f.template, "template", "", "OS template")
 	initCmd.Flags().StringVar(&f.hostname, "hostname", "", "VPS hostname")
 	initCmd.Flags().StringVar(&f.sshKeyIDs, "ssh-key-ids", "", "SSH key IDs (comma-separated)")
 	initCmd.Flags().StringVar(&f.apiKey, "api-key", "", "Provider API key (or provider-specific env var)")
-	initCmd.Flags().IntVar(&f.projectID, "project-id", 4601, "Provider project ID")
+	initCmd.Flags().IntVar(&f.projectID, "project-id", 0, "Provider project ID")
 	initCmd.Flags().BoolVar(&f.cloudInit, "cloud-init", false, "Use cloud-init instead of SSH-based provisioning")
 	initCmd.Flags().BoolVar(&f.cloudInitOnly, "cloud-init-only", false, "Generate and print cloud-init user-data only")
 	initCmd.Flags().BoolVar(&f.airgap, "airgap", false, "Pre-download k3s binary and copy via SSH (no internet on target)")

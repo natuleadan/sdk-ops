@@ -140,7 +140,7 @@ func InitServiceYAML(dir, appName string) error {
 	}
 
 	content := fmt.Sprintf(`name: %s
-registry: ewr.vultrcr.com/nlaregistry
+# registry: your-registry.example.com
 ports:
   - "80:80"
 health:

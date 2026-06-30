@@ -110,7 +110,7 @@ volumes:
 `
 
 var wpServiceYAML = `name: my-wordpress
-registry: ewr.vultrcr.com/nlaregistry
+# registry: your-registry.example.com
 ports:
   - "80:80"
 health:

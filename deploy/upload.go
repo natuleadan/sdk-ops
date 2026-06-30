@@ -242,14 +242,10 @@ type RegistryConfig struct {
 }
 
 func DefaultRegistry() RegistryConfig {
-	server := os.Getenv("NLA_REGISTRY_SERVER")
-	if server == "" {
-		server = "ewr.vultrcr.com/nlaregistry"
-	}
 	return RegistryConfig{
-		Server:   server,
-		Username: os.Getenv("NLA_REGISTRY_USER"),
-		Password: os.Getenv("NLA_REGISTRY_PASS"),
+		Server:   os.Getenv("REGISTRY_SERVER"),
+		Username: os.Getenv("REGISTRY_USER"),
+		Password: os.Getenv("REGISTRY_PASS"),
 	}
 }
 
