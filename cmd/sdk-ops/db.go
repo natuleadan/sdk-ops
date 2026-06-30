@@ -88,6 +88,13 @@ Examples:
 			} else {
 				fmt.Printf("     Port:      internal only (Docker networking)\n")
 			}
+			// Record in state
+			stateRecord("database", result.ContainerName, nodeIP, result.Image, "docker", "ok", map[string]string{
+				"type":    string(dbType),
+				"port":    fmt.Sprintf("%d", result.ExposedPort),
+				"connstr": result.ConnString,
+			})
+
 			fmt.Println()
 			fmt.Printf("  To connect from another container on the same node:\n")
 			fmt.Printf("    docker run --rm --link %s alpine env\n", result.ContainerName)

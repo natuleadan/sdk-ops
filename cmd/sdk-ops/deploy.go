@@ -147,11 +147,13 @@ Examples:
 
 			if builderType != "" {
 				bt := deploy.BuilderType(builderType)
+				startSpinner("Building (" + builderType + ")...")
 				imageRef, buildErr = deploy.BuildImage(sourceDir, name, reg, bt)
 				if buildErr != nil {
-					fmt.Printf("  ⚠️  Build failed: %v\n", buildErr)
+					stopSpinner("")
+					fmt.Printf("  %s⚠ Build failed: %v%s\n", colorYellow, buildErr, colorReset)
 				} else {
-					fmt.Printf("  → Image pushed to registry via %s\n", builderType)
+					stopSpinner("Image pushed to registry via " + builderType)
 				}
 			} else {
 				detected := deploy.DetectBuilder(sourceDir)
@@ -159,11 +161,13 @@ Examples:
 					fmt.Println("  → docker-compose detected, skipping build")
 				} else {
 					fmt.Printf("  → Detected builder: %s\n", detected)
+					startSpinner("Building...")
 					imageRef, buildErr = deploy.BuildImage(sourceDir, name, reg, detected)
 					if buildErr != nil {
-						fmt.Printf("  ⚠️  Build failed: %v\n", buildErr)
+						stopSpinner("")
+						fmt.Printf("  %s⚠ Build failed: %v%s\n", colorYellow, buildErr, colorReset)
 					} else {
-						fmt.Printf("  → Image pushed to registry via %s\n", detected)
+					stopSpinner("Image pushed to registry via " + string(detected))
 					}
 				}
 			}
@@ -262,7 +266,7 @@ Examples:
 				client := newSSHClient(nip, nuser, nport, nkey)
 				conn, err := client.Connect()
 				if err != nil {
-					return fmt.Errorf("ssh connect: %w", err)
+					return fmt.Errorf("cannot connect to %s: %w\n  %sSuggestion: check that the server is reachable and port %d is open%s", nip, err, colorYellow, nport, colorReset)
 				}
 				defer conn.Close()
 
@@ -278,10 +282,13 @@ Examples:
 					Exclude:     []string{".git", "node_modules", ".env", ".DS_Store", ".dockerignore"},
 				}
 
+				startSpinner("Uploading " + name + "...")
 				result, err := deploy.UploadAndDeploy(conn, uploadCfg)
 				if err != nil {
+					stopSpinner("")
 					return fmt.Errorf("upload: %w", err)
 				}
+				stopSpinner("Deployed v" + result.Version)
 
 				if runtimeMode == "k3s" {
 					domain := deployDomain
@@ -337,7 +344,19 @@ Examples:
 					"VERSION": result.Version,
 				})
 
-				fmt.Printf("\n✅ %s deployed on %s (v%s)\n", name, nip, result.Version)
+				// Detect actual runtime for state
+				detectedRT := runtimeMode
+				if detectedRT == "" {
+					if out, _, _ := ssh.Run(conn, "command -v k3s && echo k3s || (command -v docker && echo docker) || echo systemd"); out != "" {
+						detectedRT = strings.TrimSpace(out)
+					}
+				}
+				// Record in state
+				stateRecord("service", name, nip, result.Version, detectedRT, "ok", map[string]string{
+					"port": fmt.Sprintf("%d", appPort),
+				})
+
+				fmt.Printf("\n%s✅ %s deployed on %s (v%s)%s\n", colorGreen, name, nip, result.Version, colorReset)
 				return nil
 			}
 

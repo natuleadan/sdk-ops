@@ -151,6 +151,172 @@ Examples:
 		},
 	}
 
+	var adoptCmd = &cobra.Command{
+		Use:   "adopt <ip>",
+		Short: "Scan an existing server and register it without reprovisioning",
+		Long: `Connect to a server, detect what's already installed (Docker, k3s,
+services, databases), and register it in the sdk-ops config.
+
+Does NOT install anything — just scans and registers.
+
+Examples:
+  sdk-ops infra adopt 188.xxx.xxx.xxx
+  sdk-ops infra adopt 188.xxx.xxx.xxx --mode docker
+  sdk-ops infra adopt 188.xxx.xxx.xxx --force`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ip := args[0]
+			forced, _ := cmd.Flags().GetBool("force")
+			adoptMode, _ := cmd.Flags().GetString("mode")
+
+			client := infraSSHClient(ip, f.user, f.port, f)
+			conn, err := client.Connect()
+			if err != nil {
+				return fmt.Errorf("ssh %s: %w", ip, err)
+			}
+			defer conn.Close()
+
+			fmt.Printf("\n  Scanning %s...\n", ip)
+
+			// Hostname
+			hostname, _, _ := ssh.Run(conn, "hostname 2>/dev/null | tr -d '\n'")
+			hostname = strings.TrimSpace(hostname)
+			fmt.Printf("  Hostname: %s\n", hostname)
+
+			// OS
+			osInfo, _, _ := ssh.Run(conn, `(. /etc/os-release 2>/dev/null && echo "$ID $VERSION_ID") || echo "unknown"`)
+			fmt.Printf("  OS:       %s", strings.TrimSpace(osInfo))
+			arch, _, _ := ssh.Run(conn, "uname -m 2>/dev/null | tr -d '\n'")
+			fmt.Printf("  (%s)\n", strings.TrimSpace(arch))
+
+			// Docker
+			dockerVer, _, _ := ssh.Run(conn, `docker --version 2>/dev/null || echo "not-installed"`)
+			dockerVer = strings.TrimSpace(dockerVer)
+			hasDocker := !strings.Contains(dockerVer, "not-installed") && dockerVer != ""
+			if hasDocker {
+				fmt.Printf("  Docker:   %s\n", dockerVer)
+			} else {
+				fmt.Printf("  Docker:   %snot installed%s\n", colorYellow, colorReset)
+			}
+
+			// k3s
+			k3sVer, _, _ := ssh.Run(conn, `k3s --version 2>/dev/null | head -1 || echo "not-installed"`)
+			k3sVer = strings.TrimSpace(k3sVer)
+			hasK3s := !strings.Contains(k3sVer, "not-installed") && k3sVer != ""
+			if hasK3s {
+				fmt.Printf("  k3s:      %s\n", k3sVer)
+			} else {
+				fmt.Printf("  k3s:      %snot installed%s\n", colorYellow, colorReset)
+			}
+
+			// Docker containers (running)
+			containers, _, _ := ssh.Run(conn, "docker ps --format '{{.Names}}' 2>/dev/null | head -20 || true")
+			containerCount := 0
+			for _, l := range strings.Split(strings.TrimSpace(containers), "\n") {
+				if strings.TrimSpace(l) != "" {
+					containerCount++
+				}
+			}
+			fmt.Printf("  Containers: %d running\n", containerCount)
+
+			// sdk-ops services
+			services, _ := deploy.ListServices(conn)
+			if len(services) > 0 {
+				fmt.Printf("  sdk-ops services: %d\n", len(services))
+				for _, svc := range services {
+					fmt.Printf("    - %s\n", svc)
+				}
+			} else {
+				fmt.Printf("  sdk-ops services: %snone%s\n", colorYellow, colorReset)
+			}
+
+			// Hardening check
+			hardenOut, _ := hardening.Check(conn)
+			fmt.Printf("  Hardening:\n")
+			for _, line := range strings.Split(strings.TrimSpace(hardenOut), "\n") {
+				if strings.TrimSpace(line) != "" {
+					fmt.Printf("    %s\n", line)
+				}
+			}
+
+			// Detect mode
+			mode := adoptMode
+			if mode == "" {
+				if hasK3s {
+					mode = "k3s"
+				} else if hasDocker {
+					mode = "docker"
+				} else {
+					mode = "bare"
+				}
+			}
+
+			fmt.Printf("\n  Detected mode: %s\n", mode)
+
+			if !forced {
+				fmt.Printf("  Register this node as --%s? [Y/n]: ", mode)
+				var resp string
+				fmt.Scanln(&resp)
+				if resp == "n" || resp == "N" || resp == "no" {
+					fmt.Println("  Aborted.")
+					return nil
+				}
+			}
+
+			// Register node
+			cfg, err := loadConfig()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			found := false
+			for i, n := range cfg.Nodes {
+				if n.IP == ip {
+					cfg.Nodes[i].Mode = mode
+					cfg.Nodes[i].Hostname = hostname
+					cfg.Nodes[i].Arch = strings.TrimSpace(arch)
+					if cfg.Nodes[i].User == "" {
+						cfg.Nodes[i].User = f.user
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				cfg.Nodes = append(cfg.Nodes, NodeConfig{
+					IP:       ip,
+					User:     f.user,
+					Key:      f.key,
+					Port:     f.port,
+					Mode:     mode,
+					Role:     "server",
+					Arch:     strings.TrimSpace(arch),
+					Hostname: hostname,
+				})
+			}
+			if err := saveConfig(cfg); err != nil {
+				return fmt.Errorf("save config: %w", err)
+			}
+			fmt.Printf("  %s✓ Node %s registered (mode: %s)%s\n", colorGreen, ip, mode, colorReset)
+
+			// Sync state
+			fmt.Println("  Syncing state...")
+			if hasDocker {
+				for _, svc := range services {
+					svcStatus := "ok"
+					if s, _ := deploy.ServiceStatus(conn, svc); s != "" && !strings.Contains(s, "running") && !strings.Contains(s, "type:") {
+						svcStatus = "unknown"
+					}
+					stateRecord("service", svc, ip, "adopted", mode, svcStatus, nil)
+				}
+			}
+
+			return nil
+		},
+	}
+	adoptCmd.Flags().Bool("force", false, "Skip confirmation prompt")
+	adoptCmd.Flags().String("mode", "", "Override detected mode (k3s, docker, bare)")
+
 	var removeCmd = &cobra.Command{
 		Use:   "remove <ip>",
 		Short: "Remove sdk-ops from a server (uninstall k3s/Docker)",
@@ -645,6 +811,7 @@ Examples:
 	cmd.AddCommand(initCmd)
 	cmd.AddCommand(joinCmd)
 	cmd.AddCommand(readyCmd)
+	cmd.AddCommand(adoptCmd)
 	cmd.AddCommand(planCmd())
 	cmd.AddCommand(applyCmd())
 	cmd.AddCommand(statusCmd)

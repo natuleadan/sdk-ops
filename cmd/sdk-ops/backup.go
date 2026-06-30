@@ -148,6 +148,11 @@ Examples:
 			if err := deploy.ScheduleBackup(conn, backupType, dbName, containerName, cronExpr, s3Cfg); err != nil {
 				return err
 			}
+			stateRecord("backup_schedule", string(backupType), nodeIP, cronExpr, "", "active", map[string]string{
+				"db_name":    dbName,
+				"container":  containerName,
+				"s3_bucket":  func() string { if s3Cfg != nil { return s3Cfg.Bucket }; return "" }(),
+			})
 			fmt.Printf("✅ Backup scheduled\n")
 			return nil
 		},

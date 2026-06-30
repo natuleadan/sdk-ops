@@ -49,6 +49,7 @@ Examples:
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newStatusCmd())
 	rootCmd.AddCommand(newCompletionCmd(rootCmd))
+	rootCmd.AddCommand(newStateCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
