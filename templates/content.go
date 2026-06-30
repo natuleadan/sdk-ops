@@ -172,3 +172,135 @@ var goGoMod = `module app
 
 go 1.26
 `
+
+var nextjsDockerfile = `FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --only=production
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+EXPOSE 3000
+CMD ["node", "server.js"]`
+
+var nextjsPackageJSON = `{
+  "name": "app",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "^15",
+    "react": "^19",
+    "react-dom": "^19"
+  }
+}`
+
+var fastapiDockerfile = `FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]`
+
+var fastapiRequirements = `fastapi>=0.115.0
+uvicorn[standard]>=0.32.0`
+
+var fastapiMain = `from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+
+app = FastAPI(title="sdk-ops app")
+
+
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "app"}
+
+
+@app.get("/health")
+async def health():
+    return JSONResponse({"status": "healthy"})
+`
+
+var djangoDockerfile = `FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "project.wsgi"]`
+
+var djangoRequirements = `django>=5.1.0
+gunicorn>=23.0.0`
+
+var djangoManagePy = `#!/usr/bin/env python
+"""Django's command-line utility for administrative tasks."""
+import os
+import sys
+
+
+def main():
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "project.settings")
+    try:
+        from django.core.management import execute_from_command_line
+    except ImportError as exc:
+        raise ImportError("Couldn't import Django.") from exc
+    execute_from_command_line(sys.argv)
+
+
+if __name__ == "__main__":
+    main()
+`
+
+var djangoSettings = `import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "change-me")
+DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() == "true"
+ALLOWED_HOSTS = ["*"]
+INSTALLED_APPS = ["django.contrib.contenttypes", "django.contrib.staticfiles"]
+ROOT_URLCONF = "project.urls"
+WSGI_APPLICATION = "project.wsgi.application"
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "UTC"
+USE_TZ = True
+STATIC_URL = "static/"
+`
+
+var djangoUrls = `from django.urls import path
+from django.http import JsonResponse
+
+
+def health(request):
+    return JsonResponse({"status": "healthy"})
+
+
+def root(request):
+    return JsonResponse({"status": "ok", "service": "app"})
+
+
+urlpatterns = [
+    path("", root),
+    path("health", health),
+]
+`
+
+var djangoWsgi = `import os
+from django.core.wsgi import get_wsgi_application
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "project.settings")
+application = get_wsgi_application()
+`

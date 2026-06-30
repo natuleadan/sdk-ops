@@ -49,6 +49,39 @@ var Templates = map[string]Template{
 			"go.mod":     goGoMod,
 		},
 	},
+	"nextjs": {
+		Name:        "nextjs",
+		Description: "Next.js app (standalone output)",
+		Files: map[string]string{
+			"Dockerfile":       nextjsDockerfile,
+			"package.json":     nextjsPackageJSON,
+			"next.config.js":   `module.exports = { output: "standalone" }`,
+			"pages/index.jsx":  `export default function Home() { return <div><h1>Deployed with SDK Ops</h1></div> }`,
+			"pages/api/health.js": `export default function handler(req, res) { res.status(200).json({ status: "healthy" }) }`,
+		},
+	},
+	"python-fastapi": {
+		Name:        "python-fastapi",
+		Description: "FastAPI async Python app (uvicorn)",
+		Files: map[string]string{
+			"Dockerfile":      fastapiDockerfile,
+			"requirements.txt": fastapiRequirements,
+			"main.py":         fastapiMain,
+		},
+	},
+	"django": {
+		Name:        "django",
+		Description: "Django project (gunicorn + settings)",
+		Files: map[string]string{
+			"Dockerfile":          djangoDockerfile,
+			"requirements.txt":    djangoRequirements,
+			"manage.py":           djangoManagePy,
+			"project/__init__.py": "",
+			"project/settings.py": djangoSettings,
+			"project/urls.py":     djangoUrls,
+			"project/wsgi.py":     djangoWsgi,
+		},
+	},
 }
 
 func List() {
@@ -79,6 +112,19 @@ func Scaffold(name, dir string) error {
 
 	for filename, content := range t.Files {
 		path := filepath.Join(absDir, filename)
+		dir := filepath.Dir(path)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create dir %s: %w", dir, err)
+		}
+		if content == "" {
+			// Create empty file (e.g., __init__.py)
+			f, err := os.Create(path)
+			if err != nil {
+				return fmt.Errorf("create %s: %w", filename, err)
+			}
+			f.Close()
+			continue
+		}
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 			return fmt.Errorf("write %s: %w", filename, err)
 		}
