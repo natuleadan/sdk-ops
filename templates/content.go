@@ -123,6 +123,48 @@ env:
   MYSQL_PASSWORD: wppass
 `
 
+var ghDeployYAML = `name: Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install sdk-ops
+        run: |
+          curl -sSL https://github.com/natuleadan/sdk-ops/releases/latest/download/sdk-ops-linux-amd64 -o /usr/local/bin/sdk-ops
+          chmod +x /usr/local/bin/sdk-ops
+      - name: Deploy to VPS
+        run: |
+          echo "${{ secrets.SDK_OPS_SSH_KEY }}" > /tmp/deploy-key
+          chmod 600 /tmp/deploy-key
+          sdk-ops deploy push . \
+            --node ${{ secrets.SDK_OPS_NODE }} \
+            --user ${{ secrets.SDK_OPS_USER }} \
+            --key /tmp/deploy-key
+`
+
+var glDeployYAML = `stages:
+  - deploy
+deploy:
+  stage: deploy
+  image: alpine:latest
+  only:
+    - main
+  before_script:
+    - apk add --no-cache curl openssh-client
+    - curl -sSL https://github.com/natuleadan/sdk-ops/releases/latest/download/sdk-ops-linux-amd64 -o /usr/local/bin/sdk-ops
+    - chmod +x /usr/local/bin/sdk-ops
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - echo "$SDK_OPS_SSH_KEY" > ~/.ssh/deploy-key
+    - chmod 600 ~/.ssh/deploy-key
+  script:
+    - sdk-ops deploy push . --node "$SDK_OPS_NODE" --user "$SDK_OPS_USER" --key ~/.ssh/deploy-key
+`
+
 var goDockerfile = `FROM golang:1.26-alpine AS builder
 WORKDIR /src
 COPY go.mod ./

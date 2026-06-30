@@ -25,23 +25,26 @@ func newDbCmd() *cobra.Command {
 
 Supported types: postgres, mysql, redis, mongodb
 
-If --port is omitted, the database is only accessible inside Docker
-networking (internal only). Use --port to expose externally.
+If --db-port is omitted, the database is only accessible inside Docker
+networking (internal only). Use --db-port to expose externally.
 
 Examples:
   sdk-ops db create postgres --name mydb
-  sdk-ops db create postgres --name mydb --port 5432
-  sdk-ops db create redis --port 6379
-  sdk-ops db create mysql --version 8.0 --port 3306
-  sdk-ops db create mongodb --port 27017`,
+  sdk-ops db create postgres --name mydb --db-port 5432
+  sdk-ops db create redis --db-port 6379
+  sdk-ops db create mysql --version 8.0 --db-port 3306
+  sdk-ops db create mongodb --db-port 27017`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dbType := deploy.DBType(args[0])
 			name, _ := cmd.Flags().GetString("name")
 			version, _ := cmd.Flags().GetString("version")
-			exposePort, _ := cmd.Flags().GetInt("port")
+			exposePort, _ := cmd.Flags().GetInt("db-port")
 			nodeIP, _ := cmd.Flags().GetString("node")
 			dbUser, _ := cmd.Flags().GetString("db-user")
 			dbPass, _ := cmd.Flags().GetString("db-pass")
+			user, _ = cmd.Flags().GetString("user")
+			key, _ = cmd.Flags().GetString("key")
+			port, _ = cmd.Flags().GetInt("port")
 
 			if nodeIP == "" {
 				cfg, err := loadConfig()
@@ -52,9 +55,15 @@ Examples:
 					return fmt.Errorf("no nodes registered. Use --node <ip>")
 				}
 				nodeIP = cfg.Nodes[0].IP
-				user = cfg.Nodes[0].User
-				key = cfg.Nodes[0].Key
-				port = cfg.Nodes[0].Port
+				if user == "" {
+					user = cfg.Nodes[0].User
+				}
+				if key == "" {
+					key = cfg.Nodes[0].Key
+				}
+				if port == 0 {
+					port = cfg.Nodes[0].Port
+				}
 				fmt.Printf("  Using first registered node: %s\n", nodeIP)
 			}
 
@@ -111,6 +120,9 @@ Examples:
 		Short: "List databases on a node",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nodeIP, _ := cmd.Flags().GetString("node")
+			user, _ = cmd.Flags().GetString("user")
+			key, _ = cmd.Flags().GetString("key")
+			port, _ = cmd.Flags().GetInt("port")
 			if nodeIP == "" {
 				cfg, err := loadConfig()
 				if err != nil {
@@ -120,9 +132,18 @@ Examples:
 					return fmt.Errorf("no nodes registered")
 				}
 				nodeIP = cfg.Nodes[0].IP
-				user = cfg.Nodes[0].User
-				key = cfg.Nodes[0].Key
-				port = cfg.Nodes[0].Port
+				if user == "" {
+					user = cfg.Nodes[0].User
+				}
+				if key == "" {
+					key = cfg.Nodes[0].Key
+				}
+				if port == 0 {
+					port = cfg.Nodes[0].Port
+				}
+			}
+			if port == 0 {
+				port = 22
 			}
 
 			client := newSSHClient(nodeIP, user, port, key)
@@ -155,6 +176,9 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			nodeIP, _ := cmd.Flags().GetString("node")
+			user, _ = cmd.Flags().GetString("user")
+			key, _ = cmd.Flags().GetString("key")
+			port, _ = cmd.Flags().GetInt("port")
 			if nodeIP == "" {
 				cfg, err := loadConfig()
 				if err != nil {
@@ -164,9 +188,18 @@ Examples:
 					return fmt.Errorf("no nodes registered")
 				}
 				nodeIP = cfg.Nodes[0].IP
-				user = cfg.Nodes[0].User
-				key = cfg.Nodes[0].Key
-				port = cfg.Nodes[0].Port
+				if user == "" {
+					user = cfg.Nodes[0].User
+				}
+				if key == "" {
+					key = cfg.Nodes[0].Key
+				}
+				if port == 0 {
+					port = cfg.Nodes[0].Port
+				}
+			}
+			if port == 0 {
+				port = 22
 			}
 
 			client := newSSHClient(nodeIP, user, port, key)
@@ -186,10 +219,13 @@ Examples:
 
 	createCmd.Flags().String("name", "", "Database name (default: type name)")
 	createCmd.Flags().String("version", "", "Database version (e.g., 17-alpine, 8.0)")
-	createCmd.Flags().Int("port", 0, "Expose on external port (0 = internal only)")
+	createCmd.Flags().Int("db-port", 0, "Expose on external port (0 = internal only)")
 	createCmd.Flags().String("db-user", "", "Database user (generated if empty)")
 	createCmd.Flags().String("db-pass", "", "Database password (generated if empty)")
 	createCmd.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
+	createCmd.Flags().StringP("user", "u", "root", "SSH user")
+	createCmd.Flags().StringP("key", "k", "", "SSH private key path")
+	createCmd.Flags().IntP("port", "p", 22, "SSH port")
 
 	for _, sc := range []*cobra.Command{listCmd, removeCmd} {
 		sc.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")

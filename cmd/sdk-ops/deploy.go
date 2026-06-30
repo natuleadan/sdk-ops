@@ -461,6 +461,7 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tmpl, _ := cmd.Flags().GetString("template")
 			appName, _ := cmd.Flags().GetString("name")
+			ciType, _ := cmd.Flags().GetString("ci")
 
 			if tmpl == "" {
 				templates.List()
@@ -477,6 +478,12 @@ Examples:
 			}
 
 			templates.InitServiceYAML(dir, appName)
+			if ciType != "" {
+				if err := templates.InitCICD(dir, ciType); err != nil {
+					return fmt.Errorf("ci init: %w", err)
+				}
+				fmt.Printf("  → CI/CD: %s\n", ciType)
+			}
 			fmt.Printf("\n✅ %s scaffolded in %s\n", tmpl, dir)
 			fmt.Printf("   Edit service.yaml, then:\n")
 			fmt.Printf("   sdk-ops deploy push %s --node <ip>\n", dir)
@@ -485,6 +492,7 @@ Examples:
 	}
 	initCmd.Flags().String("template", "", "Template name (html, node, wordpress, go)")
 	initCmd.Flags().String("name", "app", "Service name")
+	initCmd.Flags().String("ci", "", "Generate CI/CD config (github, gitlab)")
 
 	cmd.AddCommand(initCmd)
 	cmd.AddCommand(deployCmd)
@@ -564,11 +572,118 @@ func newServiceCmd() *cobra.Command {
 		sc.Flags().IntP("port", "p", 22, "SSH port")
 	}
 
+	rotateCmd := &cobra.Command{
+		Use:   "rotate",
+		Short: "Rotate secrets (DB passwords, env vars)",
+	}
+
+	rotateDBCmd := &cobra.Command{
+		Use:   "db <container-name>",
+		Short: "Rotate database password (postgres, mysql, redis, mongodb)",
+		Args:  cobra.ExactArgs(1),
+		Long: `Generate a new random password for a database and update it.
+Optionally specify --type and --new-pass.
+
+Examples:
+  sdk-ops service rotate db my-postgres --type postgres --node X
+  sdk-ops service rotate db my-mysql --type mysql --new-pass supersecret --node X`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, user, key, port := getNodeFlags(cmd)
+			dbType, _ := cmd.Flags().GetString("type")
+			newPass, _ := cmd.Flags().GetString("new-pass")
+			containerName := args[0]
+
+			conn, err := connectNode(nodeIP, user, key, port)
+			if err != nil {
+				return err
+			}
+			defer conn.Close()
+
+			var dt deploy.DBType
+			switch dbType {
+			case "postgres":
+				dt = deploy.DBPostgres
+			case "mysql":
+				dt = deploy.DBMySQL
+			case "redis":
+				dt = deploy.DBRedis
+			case "mongodb":
+				dt = deploy.DBMongoDB
+			default:
+				return fmt.Errorf("unsupported db type: %s (use: postgres, mysql, redis, mongodb)", dbType)
+			}
+
+			startSpinner("Rotating " + dbType + " password...")
+			result, err := deploy.RotateDBPassword(conn, dt, containerName, newPass)
+			if err != nil {
+				stopSpinner("")
+				return fmt.Errorf("rotate db: %w", err)
+			}
+			stopSpinner("Password rotated")
+
+			stateRecord("database", containerName, nodeIP, dbType, "docker", "ok", map[string]string{
+				"password": result,
+			})
+			fmt.Printf("  Password: %s\n", result)
+			return nil
+		},
+	}
+	rotateDBCmd.Flags().String("type", "", "Database type (postgres, mysql, redis, mongodb)")
+	rotateDBCmd.Flags().String("new-pass", "", "Explicit new password (auto-generated if empty)")
+
+	rotateEnvCmd := &cobra.Command{
+		Use:   "env <service-name>",
+		Short: "Rotate an environment variable in a service",
+		Args:  cobra.ExactArgs(1),
+		Long: `Generate a new random value for an environment variable and restart.
+
+Examples:
+  sdk-ops service rotate env myservice --name API_KEY --node X
+  sdk-ops service rotate env myservice --name DB_PASS --value secret456 --node X`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, user, key, port := getNodeFlags(cmd)
+			envKey, _ := cmd.Flags().GetString("name")
+			envValue, _ := cmd.Flags().GetString("value")
+			serviceName := args[0]
+
+			if envKey == "" {
+				return fmt.Errorf("--name is required (env var name)")
+			}
+
+			conn, err := connectNode(nodeIP, user, key, port)
+			if err != nil {
+				return err
+			}
+			defer conn.Close()
+
+			startSpinner("Rotating " + envKey + "...")
+			if err := deploy.RotateServiceEnv(conn, serviceName, envKey, envValue); err != nil {
+				stopSpinner("")
+				return fmt.Errorf("rotate env: %w", err)
+			}
+			stopSpinner(envKey + " rotated")
+			return nil
+		},
+	}
+	rotateEnvCmd.Flags().String("name", "", "Environment variable name")
+	rotateEnvCmd.Flags().String("value", "", "Explicit new value (auto-generated if empty)")
+
+	for _, sc := range []*cobra.Command{rotateDBCmd, rotateEnvCmd} {
+		sc.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
+		sc.Flags().StringP("user", "u", "root", "SSH user")
+		sc.Flags().StringP("key", "k", "", "SSH private key path")
+		sc.Flags().IntP("port", "p", 22, "SSH port")
+	}
+
+	rotateCmd.AddCommand(rotateDBCmd)
+	rotateCmd.AddCommand(rotateEnvCmd)
+
 	cmd.AddCommand(statusCmd)
 	cmd.AddCommand(logsCmd)
 	cmd.AddCommand(restartCmd)
 	cmd.AddCommand(rollbackCmd)
 	cmd.AddCommand(versionsCmd)
+	cmd.AddCommand(rotateCmd)
 
 	return cmd
 }

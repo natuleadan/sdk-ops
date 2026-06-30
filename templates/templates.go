@@ -150,6 +150,25 @@ health:
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
+func InitCICD(dir, ciType string) error {
+	var content string
+	var path string
+	switch ciType {
+	case "github":
+		content = ghDeployYAML
+		path = filepath.Join(dir, ".github", "workflows", "deploy.yml")
+	case "gitlab":
+		content = glDeployYAML
+		path = filepath.Join(dir, ".gitlab-ci.yml")
+	default:
+		return fmt.Errorf("unsupported CI: %s (use: github, gitlab)", ciType)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
 func ValidateName(name string) error {
 	if strings.Contains(name, " ") {
 		return fmt.Errorf("name must not contain spaces")
