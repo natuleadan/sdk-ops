@@ -630,6 +630,7 @@ Examples:
 	cmd.AddCommand(removeCmd)
 	cmd.AddCommand(firewallCmd)
 	cmd.AddCommand(certCmd)
+	cmd.AddCommand(proxyCmd)
 	cmd.AddCommand(logsCmd)
 	cmd.AddCommand(alertsCmd)
 	cmd.AddCommand(backupCmd)
@@ -637,6 +638,108 @@ Examples:
 
 	return cmd
 }
+
+func newProxyCmd() *cobra.Command {
+	var cmd = &cobra.Command{
+		Use:   "proxy",
+		Short: "Manage reverse proxy (caddy, traefik, nginx)",
+	}
+
+	var setCmd = &cobra.Command{
+		Use:   "set --backend <type> [--node ip]",
+		Short: "Set or change the reverse proxy backend",
+		Long: `Install or switch the reverse proxy on a node.
+
+Backends: caddy (default), traefik, nginx
+
+Examples:
+  sdk-ops infra proxy set --backend caddy --node 188.xxx.xxx.xxx
+  sdk-ops infra proxy set --backend traefik --node 188.xxx.xxx.xxx`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			backend, _ := cmd.Flags().GetString("backend")
+			nodeIP, _ := cmd.Flags().GetString("node")
+			user, _ := cmd.Flags().GetString("user")
+			key, _ := cmd.Flags().GetString("key")
+			port, _ := cmd.Flags().GetInt("port")
+			domain, _ := cmd.Flags().GetString("domain")
+			email, _ := cmd.Flags().GetString("email")
+
+			if backend == "" {
+				return fmt.Errorf("--backend is required (caddy, traefik, nginx)")
+			}
+			if nodeIP == "" {
+				return fmt.Errorf("--node is required")
+			}
+			if domain == "" {
+				return fmt.Errorf("--domain is required")
+			}
+
+			client := newSSHClient(nodeIP, user, port, key)
+			conn, err := client.Connect()
+			if err != nil {
+				return fmt.Errorf("ssh connect: %w", err)
+			}
+			defer conn.Close()
+
+			proxy := deploy.NewProxy(deploy.ProxyType(backend))
+			cfg := deploy.ProxyConfig{
+				Domain:     domain,
+				Email:      email,
+				TargetPort: 8080,
+			}
+			return proxy.Install(conn, cfg)
+		},
+	}
+	setCmd.Flags().String("backend", "", "Proxy backend: caddy, traefik, nginx")
+	setCmd.Flags().StringP("node", "n", "", "Node IP address")
+	setCmd.Flags().StringP("user", "u", "root", "SSH user")
+	setCmd.Flags().StringP("key", "k", "", "SSH private key path")
+	setCmd.Flags().IntP("port", "p", 22, "SSH port")
+	setCmd.Flags().String("domain", "", "Domain name for the proxy")
+	setCmd.Flags().String("email", "", "Email for Let's Encrypt")
+
+	var statusCmd = &cobra.Command{
+		Use:   "status [--node ip]",
+		Short: "Show current proxy status on a node",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, _ := cmd.Flags().GetString("node")
+			user, _ := cmd.Flags().GetString("user")
+			key, _ := cmd.Flags().GetString("key")
+			port, _ := cmd.Flags().GetInt("port")
+			if nodeIP == "" {
+				return fmt.Errorf("--node is required")
+			}
+
+			client := newSSHClient(nodeIP, user, port, key)
+			conn, err := client.Connect()
+			if err != nil {
+				return fmt.Errorf("ssh connect: %w", err)
+			}
+			defer conn.Close()
+
+			detected := deploy.DetectProxy(conn)
+			if detected == "" {
+				fmt.Printf("  No proxy detected on %s\n", nodeIP)
+				return nil
+			}
+			fmt.Printf("  Detected proxy: %s\n", detected)
+			proxy := deploy.NewProxy(detected)
+			status, _ := proxy.Status(conn)
+			fmt.Print(status)
+			return nil
+		},
+	}
+	statusCmd.Flags().StringP("node", "n", "", "Node IP address")
+	statusCmd.Flags().StringP("user", "u", "root", "SSH user")
+	statusCmd.Flags().StringP("key", "k", "", "SSH private key path")
+	statusCmd.Flags().IntP("port", "p", 22, "SSH port")
+
+	cmd.AddCommand(setCmd)
+	cmd.AddCommand(statusCmd)
+	return cmd
+}
+
+var proxyCmd = newProxyCmd()
 
 func planCmd() *cobra.Command {
 	return &cobra.Command{

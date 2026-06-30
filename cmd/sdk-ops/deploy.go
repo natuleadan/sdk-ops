@@ -89,6 +89,8 @@ Examples:
 			port, _ := cmd.Flags().GetInt("port")
 			sopsKey, _ := cmd.Flags().GetString("sops-key")
 			runAll, _ := cmd.Flags().GetBool("all")
+			builderType, _ := cmd.Flags().GetString("builder")
+			zeroDowntime, _ := cmd.Flags().GetBool("zero-downtime")
 
 			if nodeIP != "" {
 				if n := lookupNode(nodeIP); n != nil {
@@ -136,15 +138,31 @@ Examples:
 				}
 			}
 
-			// Build and push Docker image (once, regardless of node count)
+			// Build and push image using selected builder
 			reg := deploy.DefaultRegistry()
-			imageRef, buildErr := deploy.BuildAndPushImage(sourceDir, name, reg)
-			if buildErr != nil {
-				fmt.Printf("  ⚠️  Docker build+push failed: %v\n", buildErr)
-				fmt.Printf("  → Deploying source files only\n")
+			var imageRef string
+			var buildErr error
+
+			if builderType != "" {
+				bt := deploy.BuilderType(builderType)
+				imageRef, buildErr = deploy.BuildImage(sourceDir, name, reg, bt)
+				if buildErr != nil {
+					fmt.Printf("  ⚠️  Build failed: %v\n", buildErr)
+				} else {
+					fmt.Printf("  → Image pushed to registry via %s\n", builderType)
+				}
 			} else {
-				fmt.Printf("  → Image pushed to registry\n")
-				// Auto-install Docker on the node if not present
+				detected := deploy.DetectBuilder(sourceDir)
+				fmt.Printf("  → Detected builder: %s\n", detected)
+				imageRef, buildErr = deploy.BuildImage(sourceDir, name, reg, detected)
+				if buildErr != nil {
+					fmt.Printf("  ⚠️  Build failed: %v\n", buildErr)
+				} else {
+					fmt.Printf("  → Image pushed to registry via %s\n", detected)
+				}
+			}
+
+			if imageRef != "" {
 				checkClient := newSSHClient(nodeIP, user, port, key)
 				if checkConn, err := checkClient.Connect(); err == nil {
 					dockerOut, _, _ := ssh.Run(checkConn, "command -v docker || echo 'no-docker'")
@@ -152,7 +170,6 @@ Examples:
 						fmt.Println("  → Docker not found on node, installing...")
 						docker.Install(checkConn)
 					}
-					// Login to container registry on the node
 					if reg.Username != "" && reg.Password != "" {
 						ssh.Run(checkConn, fmt.Sprintf("sudo docker login %s -u %s -p %s 2>/dev/null || true", reg.Server, reg.Username, reg.Password))
 					}
@@ -223,18 +240,25 @@ Examples:
 					return fmt.Errorf("upload: %w", err)
 				}
 
-				svcCfg := deploy.ServiceConfig{Name: name}
-				if err := deploy.RunService(conn, svcCfg); err != nil {
-					return fmt.Errorf("deploy failed: %w", err)
-				}
-
-				if err := deploy.HealthCheck(conn, name, 30); err != nil {
-					fmt.Printf("\n  ⚠️  Health check failed on %s, rolling back...\n", nip)
-					if rbErr := deploy.Rollback(conn, name); rbErr != nil {
-						return fmt.Errorf("health: %v\nrollback also failed: %v", err, rbErr)
+				if zeroDowntime {
+					serviceDir := fmt.Sprintf("/opt/sdk-ops/services/%s", name)
+					if err := deploy.DeployBlueGreen(conn, name, serviceDir, result.Version); err != nil {
+						return fmt.Errorf("blue/green: %w", err)
 					}
-					deploy.RunService(conn, svcCfg)
-					return fmt.Errorf("health check failed on %s, rolled back", nip)
+				} else {
+					svcCfg := deploy.ServiceConfig{Name: name}
+					if err := deploy.RunService(conn, svcCfg); err != nil {
+						return fmt.Errorf("deploy failed: %w", err)
+					}
+
+					if err := deploy.HealthCheck(conn, name, 30); err != nil {
+						fmt.Printf("\n  ⚠️  Health check failed on %s, rolling back...\n", nip)
+						if rbErr := deploy.Rollback(conn, name); rbErr != nil {
+							return fmt.Errorf("health: %v\nrollback also failed: %v", err, rbErr)
+						}
+						deploy.RunService(conn, svcCfg)
+						return fmt.Errorf("health check failed on %s, rolled back", nip)
+					}
 				}
 
 				// Run post-deploy hooks
@@ -289,6 +313,8 @@ Examples:
 	deployCmd.Flags().String("git", "", "Git repository URL (clones and deploys)")
 	deployCmd.Flags().String("sops-key", "", "Auto-decrypt service.yaml with sops (age key)")
 	deployCmd.Flags().Bool("all", false, "Deploy to all registered nodes in parallel")
+	deployCmd.Flags().String("builder", "", "Build method: dockerfile, nixpacks, pack (default: auto-detect)")
+	deployCmd.Flags().Bool("zero-downtime", false, "Blue/green deploy with zero downtime")
 
 	encryptCmd := &cobra.Command{
 		Use:   "encrypt <file>",
