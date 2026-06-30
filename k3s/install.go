@@ -12,14 +12,15 @@ import (
 )
 
 type InstallConfig struct {
-	PublicIP     string // VPS public IP (for TLS SAN)
-	ExtraArgs    string // Extra k3s args: "--disable traefik --docker"
-	K3sVersion   string // Specific version (empty = latest stable)
-	K3sChannel   string // Channel: stable, latest, v1.30 (default: stable)
-	LocalPath    string // Where to save kubeconfig (default: ./kubeconfig)
-	Context      string // Kubeconfig context name (default: default)
-	Merge        bool   // Merge into ~/.kube/config?
+	PublicIP      string // VPS public IP (for TLS SAN)
+	ExtraArgs     string // Extra k3s args: "--disable traefik --docker"
+	K3sVersion    string // Specific version (empty = latest stable)
+	K3sChannel    string // Channel: stable, latest, v1.30 (default: stable)
+	LocalPath     string // Where to save kubeconfig (default: ./kubeconfig)
+	Context       string // Kubeconfig context name (default: default)
+	Merge         bool   // Merge into ~/.kube/config?
 	DisableTraefik bool
+	SkipDownload  bool   // Skip downloading binary (for airgap installs)
 }
 
 func DefaultInstallConfig(publicIP string) InstallConfig {
@@ -47,6 +48,9 @@ func Install(client *goss.Client, cfg InstallConfig) error {
 	}
 	if cfg.K3sVersion != "" {
 		envVars += fmt.Sprintf("INSTALL_K3S_VERSION=%s ", cfg.K3sVersion)
+	}
+	if cfg.SkipDownload {
+		envVars += "INSTALL_K3S_SKIP_DOWNLOAD=true "
 	}
 
 	serverFlags := fmt.Sprintf("--tls-san %s", cfg.PublicIP)

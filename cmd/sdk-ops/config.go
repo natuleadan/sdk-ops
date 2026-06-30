@@ -12,11 +12,13 @@ import (
 )
 
 type NodeConfig struct {
-	IP      string `yaml:"ip"`
-	User    string `yaml:"user"`
-	Key     string `yaml:"key,omitempty"`
-	Port    int    `yaml:"port"`
-	Mode    string `yaml:"mode,omitempty"` // k3s, docker, bare
+	IP       string `yaml:"ip"`
+	User     string `yaml:"user"`
+	Key      string `yaml:"key,omitempty"`
+	Port     int    `yaml:"port"`
+	Mode     string `yaml:"mode,omitempty"` // k3s, docker, bare
+	Role     string `yaml:"role,omitempty"` // server, agent
+	Arch     string `yaml:"arch,omitempty"` // aarch64, x86_64
 	Hostname string `yaml:"hostname,omitempty"`
 }
 

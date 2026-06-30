@@ -126,16 +126,20 @@ Examples:
 		Long: `Run any command on a remote node and see the output.
 
 Use --all to run on all registered nodes in parallel.
+Use --servers to run only on server nodes.
+Use --agents to run only on agent nodes.
 
 Examples:
   sdk-ops node exec 188.xxx.xxx.xxx -- free -h
   sdk-ops node exec --all -- uptime
-  sdk-ops node exec --all -- df -h`,
+  sdk-ops node exec --servers -- sudo journalctl -u k3s -n 100
+  sdk-ops node exec --agents -- df -h`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runAll, _ := cmd.Flags().GetBool("all")
+			runServers, _ := cmd.Flags().GetBool("servers")
+			runAgents, _ := cmd.Flags().GetBool("agents")
 
-			if runAll {
-				// --all mode: args[0]+ = command (no IP needed)
+			if runAll || runServers || runAgents {
 				command := strings.Join(args, " ")
 				cfg, err := loadConfig()
 				if err != nil {
@@ -145,9 +149,25 @@ Examples:
 					return fmt.Errorf("no nodes registered")
 				}
 
-				var wg sync.WaitGroup
-				errs := make(chan error, len(cfg.Nodes))
+				var nodes []NodeConfig
 				for _, n := range cfg.Nodes {
+					if runAll {
+						nodes = append(nodes, n)
+					} else if runServers && runAgents {
+						nodes = append(nodes, n)
+					} else if runServers && n.Role == "server" {
+						nodes = append(nodes, n)
+					} else if runAgents && n.Role == "agent" {
+						nodes = append(nodes, n)
+					}
+				}
+				if len(nodes) == 0 {
+					return fmt.Errorf("no matching nodes found")
+				}
+
+				var wg sync.WaitGroup
+				errs := make(chan error, len(nodes))
+				for _, n := range nodes {
 					wg.Add(1)
 					go func(node NodeConfig) {
 						defer wg.Done()
@@ -203,6 +223,8 @@ Examples:
 	execCmd.Flags().StringP("key", "k", "", "SSH private key path")
 	execCmd.Flags().IntP("port", "p", 22, "SSH port")
 	execCmd.Flags().Bool("all", false, "Run on all registered nodes in parallel")
+	execCmd.Flags().Bool("servers", false, "Run only on server nodes")
+	execCmd.Flags().Bool("agents", false, "Run only on agent nodes")
 
 	cmd.AddCommand(infoCmd)
 	cmd.AddCommand(topCmd)
@@ -228,6 +250,12 @@ func newNodeListCmd() *cobra.Command {
 			fmt.Println("  Registered nodes:")
 			for _, n := range cfg.Nodes {
 				fmt.Printf("    %s  user=%s  port=%d", n.IP, n.User, n.Port)
+				if n.Role != "" {
+					fmt.Printf("  role=%s", n.Role)
+				}
+				if n.Arch != "" {
+					fmt.Printf("  arch=%s", n.Arch)
+				}
 				if n.Mode != "" {
 					fmt.Printf("  mode=%s", n.Mode)
 				}

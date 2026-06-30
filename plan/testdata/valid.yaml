@@ -1,0 +1,16 @@
+mode: k3s
+parallel: 3
+server_options:
+  user: root
+  ssh_key: ~/.ssh/id_ed25519
+  k3s_extra_args: "--disable traefik"
+  disable_traefik: true
+agent_options:
+  user: root
+hosts:
+  - name: server-1
+    role: server
+    host: 192.168.1.10
+  - name: agent-1
+    role: agent
+    host: 192.168.1.11

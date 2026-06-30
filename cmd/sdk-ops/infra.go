@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/natuleadan/sdk-ops/docker"
 	"github.com/natuleadan/sdk-ops/hardening"
 	"github.com/natuleadan/sdk-ops/k3s"
+	"github.com/natuleadan/sdk-ops/plan"
 	"github.com/natuleadan/sdk-ops/providers"
 	"github.com/natuleadan/sdk-ops/providers/aws"
 	"github.com/natuleadan/sdk-ops/providers/cubepath"
@@ -34,6 +37,8 @@ type infraFlags struct {
 	mode        string // k3s, docker, bare
 	crowdsec    bool
 	cloudInit   bool
+	cloudInitOnly bool
+	airgap      bool
 	monitor     bool
 	lockRoot    bool
 	hardSSHPort int
@@ -130,6 +135,21 @@ Examples:
 		},
 	}
 
+	var readyCmd = &cobra.Command{
+		Use:   "ready <ip>",
+		Short: "Check if a node's cluster is fully operational",
+		Long: `Check if k3s is installed, running, and all nodes are Ready.
+Exits with code 0 if ready, 1 otherwise.
+
+Examples:
+  sdk-ops infra ready 188.xxx.xxx.xxx
+  sdk-ops infra ready 188.xxx.xxx.xxx --context my-cluster`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runInfraReady(args[0], f)
+		},
+	}
+
 	var removeCmd = &cobra.Command{
 		Use:   "remove <ip>",
 		Short: "Remove sdk-ops from a server (uninstall k3s/Docker)",
@@ -172,6 +192,8 @@ Examples:
 	initCmd.Flags().StringVar(&f.apiKey, "api-key", "", "Provider API key (or provider-specific env var)")
 	initCmd.Flags().IntVar(&f.projectID, "project-id", 4601, "Provider project ID")
 	initCmd.Flags().BoolVar(&f.cloudInit, "cloud-init", false, "Use cloud-init instead of SSH-based provisioning")
+	initCmd.Flags().BoolVar(&f.cloudInitOnly, "cloud-init-only", false, "Generate and print cloud-init user-data only")
+	initCmd.Flags().BoolVar(&f.airgap, "airgap", false, "Pre-download k3s binary and copy via SSH (no internet on target)")
 
 	initCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		useK3s, _ := cmd.Flags().GetBool("k3s")
@@ -600,6 +622,9 @@ Examples:
 
 	cmd.AddCommand(initCmd)
 	cmd.AddCommand(joinCmd)
+	cmd.AddCommand(readyCmd)
+	cmd.AddCommand(planCmd())
+	cmd.AddCommand(applyCmd())
 	cmd.AddCommand(statusCmd)
 	cmd.AddCommand(removeCmd)
 	cmd.AddCommand(firewallCmd)
@@ -610,6 +635,82 @@ Examples:
 	cmd.AddCommand(restoreCmd)
 
 	return cmd
+}
+
+func planCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "plan <file.yaml>",
+		Short: "Validate and preview an infrastructure plan",
+		Long: `Parse a YAML plan file and show what will be provisioned.
+The plan file defines servers, agents, and SSH options.
+
+Example plan.yaml:
+  mode: k3s
+  parallel: 5
+  server_options:
+    user: root
+    ssh_key: ~/.ssh/id_ed25519
+    k3s_extra_args: "--disable traefik"
+  agent_options:
+    user: root
+  hosts:
+    - name: server-1
+      role: server
+      host: 192.168.1.10
+    - name: agent-1
+      role: agent
+      host: 192.168.1.11`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := plan.ParseFile(args[0])
+			if err != nil {
+				return fmt.Errorf("invalid plan: %w", err)
+			}
+			fmt.Print(p.Summary())
+			return nil
+		},
+	}
+}
+
+func applyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "apply <plan.yaml>",
+		Short: "Execute an infrastructure plan",
+		Long: `Provision all hosts defined in a plan file.
+Installs servers first, then joins agents — all in parallel.
+
+Examples:
+  sdk-ops infra apply plan.yaml
+  sdk-ops infra apply plan.yaml --parallel 10`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := plan.ParseFile(args[0])
+			if err != nil {
+				return fmt.Errorf("invalid plan: %w", err)
+			}
+
+			fmt.Println("📋 Plan:")
+			fmt.Print(p.Summary())
+
+			results := plan.Apply(p, gInsecure)
+
+			errs := 0
+			for _, r := range results {
+				if r.Error != nil {
+					fmt.Printf("  ✗ %s [%s]: %v\n", r.Host, r.Step, r.Error)
+					errs++
+				} else {
+					fmt.Printf("  ✓ %s [%s]: OK\n", r.Host, r.Step)
+				}
+			}
+
+			if errs > 0 {
+				return fmt.Errorf("%d errors during apply", errs)
+			}
+			fmt.Println("\n✅ Plan applied successfully!")
+			return nil
+		},
+	}
 }
 
 func getInfraProvider(name, apiKey string, projectID int) (providers.Provider, error) {
@@ -687,7 +788,36 @@ func infraSSHClient(ip, user string, port int, f infraFlags) *ssh.Client {
 	return newSSHClient(ip, user, port, f.key)
 }
 
+func sshPublicKeys() []string {
+	home, _ := os.UserHomeDir()
+	pubPath := filepath.Join(home, ".ssh", "id_ed25519.pub")
+	data, err := os.ReadFile(pubPath)
+	if err != nil {
+		return nil
+	}
+	return []string{strings.TrimSpace(string(data))}
+}
+
 func runInfraInit(ip string, f infraFlags) error {
+	// Cloud-init-only: generate and print, then exit
+	if f.cloudInitOnly {
+		ciCfg := cloudinit.DefaultConfig()
+		ciCfg.SSHKeys = sshPublicKeys()
+		if f.mode == "docker" {
+			ciCfg.Mode = "docker"
+		} else if f.mode == "bare" {
+			ciCfg.Mode = "bare"
+		}
+		if f.hardSSHPort > 0 {
+			ciCfg.SSHPort = f.hardSSHPort
+		}
+		ciCfg.CrowdSec = f.crowdsec
+		ciCfg.EnableMonitor = f.monitor
+		ciCfg.DisableTraefik = f.disableTraefik
+		fmt.Println(cloudinit.Generate(ciCfg))
+		return nil
+	}
+
 	// Phase 0: Create VPS via provider (if --provider is set)
 	if f.provider != "" {
 		p, err := getInfraProvider(f.provider, f.apiKey, f.projectID)
@@ -875,11 +1005,79 @@ func runInfraInit(ip string, f infraFlags) error {
 
 	// Phase 3: k3s
 	if f.mode == "k3s" {
+		// Airgap: pre-download k3s binary and copy via SSH
+		if f.airgap {
+			fmt.Println("  → Airgap mode: downloading k3s binary locally...")
+			archOut, _, _ := ssh.Run(conn, "uname -m")
+			arch := strings.TrimSpace(archOut)
+
+			// Determine the download URL
+			version := ""
+			k3sVerOut, _, _ := ssh.Run(conn, "k3s --version 2>/dev/null || true")
+			if strings.Contains(k3sVerOut, "k3s") {
+				fmt.Println("  → k3s already installed, skipping airgap download")
+			}
+
+			localFile := "/tmp/k3s-" + ip
+			if version == "" {
+				version = "latest"
+			}
+			suffix := "linux-amd64"
+			if strings.Contains(arch, "aarch64") || strings.Contains(arch, "arm64") {
+				suffix = "linux-arm64"
+			}
+
+			dlURL := fmt.Sprintf("https://github.com/k3s-io/k3s/releases/%s/download/k3s-%s", version, suffix)
+			if version == "latest" {
+				dlURL = fmt.Sprintf("https://github.com/k3s-io/k3s/releases/latest/download/k3s-%s", suffix)
+			}
+
+			// Download locally
+			fmt.Printf("  → Downloading %s...\n", dlURL)
+			dlCmd := exec.Command("curl", "-sfLo", localFile, dlURL)
+			if out, err := dlCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("download k3s binary: %w\n%s", err, string(out))
+			}
+			if err := os.Chmod(localFile, 0755); err != nil {
+				return fmt.Errorf("chmod binary: %w", err)
+			}
+			defer os.Remove(localFile)
+
+		// Upload via SSH pipe with cat
+		fmt.Println("  → Copying binary to remote server...")
+		data, err := os.ReadFile(localFile)
+		if err != nil {
+			return fmt.Errorf("read k3s binary: %w", err)
+		}
+
+		uploadCmd := "sudo sh -c 'cat > /usr/local/bin/k3s' && sudo chmod +x /usr/local/bin/k3s"
+		sess, err := conn.NewSession()
+		if err != nil {
+			return fmt.Errorf("ssh session: %w", err)
+		}
+		stdin, err := sess.StdinPipe()
+		if err != nil {
+			sess.Close()
+			return fmt.Errorf("stdin pipe: %w", err)
+		}
+		go func() {
+			defer stdin.Close()
+			stdin.Write(data)
+		}()
+		if out, err := sess.CombinedOutput(uploadCmd); err != nil {
+			sess.Close()
+			return fmt.Errorf("upload binary: %w\n%s", err, string(out))
+		}
+		sess.Close()
+		fmt.Println("  ✓ Binary copied to remote server")
+		}
+
 		installCfg := k3s.DefaultInstallConfig(ip)
 		installCfg.LocalPath = f.kubeconfig
 		installCfg.Context = f.contextName
 		installCfg.Merge = f.mergeConfig
 		installCfg.DisableTraefik = f.disableTraefik
+		installCfg.SkipDownload = f.airgap
 
 		if err := k3s.Install(conn, installCfg); err != nil {
 			return err
@@ -909,11 +1107,17 @@ func runInfraInit(ip string, f infraFlags) error {
 	fmt.Println("  → Creating /opt/sdk-ops/ structure...")
 	ssh.Run(conn, `mkdir -p /opt/sdk-ops/services /opt/sdk-ops/backups /opt/sdk-ops/logs && echo "sdk-ops-init" > /opt/sdk-ops/.version`)
 
+	// Detect architecture
+	archOut, _, _ := ssh.Run(conn, "uname -m")
+	arch := strings.TrimSpace(archOut)
+
 	// Auto-register node in ~/.sdk-ops/config.yaml
 	cfg, _ := loadConfig()
 	found := false
-	for _, n := range cfg.Nodes {
+	for i, n := range cfg.Nodes {
 		if n.IP == ip {
+			cfg.Nodes[i].Role = "server"
+			cfg.Nodes[i].Arch = arch
 			found = true
 			break
 		}
@@ -925,9 +1129,13 @@ func runInfraInit(ip string, f infraFlags) error {
 			Key:  f.key,
 			Port: hardCfg.SSHPort,
 			Mode: f.mode,
+			Role: "server",
+			Arch: arch,
 		})
 		saveConfig(cfg)
 		fmt.Printf("  → Registered node in %s\n", configPath())
+	} else {
+		saveConfig(cfg)
 	}
 
 	fmt.Println("\n✅ infra init complete!")
@@ -974,6 +1182,34 @@ func runInfraJoin(serverIP, agentIP, serverUser, token string, f infraFlags) err
 	if err := k3s.Join(agentConn, serverConn, joinCfg); err != nil {
 		return err
 	}
+
+	// Detect architecture on agent
+	archOut, _, _ := ssh.Run(agentConn, "uname -m")
+	arch := strings.TrimSpace(archOut)
+
+	// Register agent node
+	cfg, _ := loadConfig()
+	found := false
+	for i, n := range cfg.Nodes {
+		if n.IP == agentIP {
+			cfg.Nodes[i].Role = "agent"
+			cfg.Nodes[i].Arch = arch
+			found = true
+			break
+		}
+	}
+	if !found {
+		cfg.Nodes = append(cfg.Nodes, NodeConfig{
+			IP:   agentIP,
+			User: f.user,
+			Key:  f.key,
+			Port: f.port,
+			Mode: f.mode,
+			Role: "agent",
+			Arch: arch,
+		})
+	}
+	saveConfig(cfg)
 
 	fmt.Printf("\n✅ Node %s joined to %s\n", agentIP, serverIP)
 	fmt.Printf("   Run: export KUBECONFIG=%s\n", f.kubeconfig)
@@ -1051,6 +1287,69 @@ echo "Disk:     $(df -h / | awk 'NR==2 {print $3 "/" $2}')"`
 	}
 
 	fmt.Println(strings.Repeat("─", 50))
+	return nil
+}
+
+func runInfraReady(ip string, f infraFlags) error {
+	client := infraSSHClient(ip, f.user, f.port, f)
+
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh connect: %w", err)
+	}
+	defer conn.Close()
+
+	fmt.Printf("\n🔍 Checking node %s...\n", ip)
+
+	// Run k3s diagnostics
+	k3sOut, err := k3s.Check(conn)
+	if err != nil {
+		fmt.Print(k3sOut)
+		return fmt.Errorf("k3s check failed: %w", err)
+	}
+	fmt.Print(k3sOut)
+
+	// Check all nodes are Ready
+	nodesOut, _, _ := ssh.Run(conn, `sudo kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes --no-headers 2>/dev/null | awk '{print $2}'`)
+	nodesOut = strings.TrimSpace(nodesOut)
+	if nodesOut == "" {
+		fmt.Println("  ✗ No nodes found (k3s may still be starting)")
+		return fmt.Errorf("no nodes found")
+	}
+
+	allReady := true
+	for _, status := range strings.Split(nodesOut, "\n") {
+		if status != "Ready" {
+			fmt.Printf("  ✗ Node not Ready: %s\n", status)
+			allReady = false
+		}
+	}
+	if allReady {
+		fmt.Println("  ✓ All nodes Ready")
+	}
+
+	// Check core system pods
+	podsOut, _, _ := ssh.Run(conn, `sudo kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get pods -n kube-system --no-headers 2>/dev/null | awk '{print $1, $3}'`)
+	podsOut = strings.TrimSpace(podsOut)
+	if podsOut != "" {
+		allRunning := true
+		for _, line := range strings.Split(podsOut, "\n") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 && parts[1] != "Running" {
+				fmt.Printf("  ⚠ Pod %s is %s\n", parts[0], parts[1])
+				allRunning = false
+			}
+		}
+		if allRunning {
+			fmt.Println("  ✓ All system pods Running")
+		}
+	}
+
+	if !allReady {
+		return fmt.Errorf("cluster not ready: some nodes are not Ready")
+	}
+
+	fmt.Println("\n✅ Cluster is ready!")
 	return nil
 }
 

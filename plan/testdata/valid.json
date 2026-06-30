@@ -1,0 +1,11 @@
+{
+  "mode": "k3s",
+  "parallel": 5,
+  "hosts": [
+    {
+      "name": "server-1",
+      "role": "server",
+      "host": "10.0.0.1"
+    }
+  ]
+}
