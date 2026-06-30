@@ -1,6 +1,15 @@
 - github.com/aws/aws-sdk-go-v2 (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/v1.42.0/LICENSE.txt
 
+- github.com/aws/aws-sdk-go-v2/config (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/config/v1.32.25/config/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/credentials (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/credentials/v1.19.24/credentials/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/feature/ec2/imds (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/feature/ec2/imds/v1.18.29/feature/ec2/imds/LICENSE.txt
+
 - github.com/aws/aws-sdk-go-v2/internal/configsources (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/internal/configsources/v1.4.29/internal/configsources/LICENSE.txt
 
@@ -9,6 +18,9 @@
 
 - github.com/aws/aws-sdk-go-v2/internal/sync/singleflight (BSD-3-Clause)
   https://github.com/aws/aws-sdk-go-v2/blob/v1.42.0/internal/sync/singleflight/LICENSE
+
+- github.com/aws/aws-sdk-go-v2/internal/v4a (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/internal/v4a/v1.4.30/internal/v4a/LICENSE.txt
 
 - github.com/aws/aws-sdk-go-v2/service/ec2 (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/service/ec2/v1.308.0/service/ec2/LICENSE.txt
@@ -27,6 +39,18 @@
 
 - github.com/aws/aws-sdk-go-v2/service/route53 (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/service/route53/v1.63.3/service/route53/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/service/signin (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/signin/v1.2.0/service/signin/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/service/sso (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/sso/v1.31.3/service/sso/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/service/ssooidc (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/ssooidc/v1.36.6/service/ssooidc/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/service/sts (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/sts/v1.43.3/service/sts/LICENSE.txt
 
 - github.com/aws/smithy-go (Apache-2.0)
   https://github.com/aws/smithy-go/blob/v1.27.1/LICENSE
@@ -69,9 +93,6 @@
 
 - github.com/prometheus/common (Apache-2.0)
   https://github.com/prometheus/common/blob/v0.66.1/LICENSE
-
-- github.com/prometheus/procfs (Apache-2.0)
-  https://github.com/prometheus/procfs/blob/v0.16.1/LICENSE
 
 - github.com/spf13/cobra (Apache-2.0)
   https://github.com/spf13/cobra/blob/v1.10.2/LICENSE.txt

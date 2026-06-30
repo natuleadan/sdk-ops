@@ -43,3 +43,4 @@ kubeconfig.yaml
 .vscode/
 *.swp
 *.swo
+.DS_Store
