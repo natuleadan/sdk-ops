@@ -52,6 +52,11 @@ type infraFlags struct {
 	secretsEncryption    bool
 	protectKernelDefaults bool
 	admissionPlugins     string
+	cisPSA               bool
+	cisAuditLog          bool
+	cisNetPol            bool
+	cisSvcAcc            bool
+	cisTLSCiphers        bool
 	kubeconfig           string
 	mergeConfig          bool
 	contextName          string
@@ -351,6 +356,11 @@ Examples:
 	initCmd.Flags().BoolVar(&f.secretsEncryption, "secrets-encryption", false, "Enable secrets encryption at rest in etcd (CIS)")
 	initCmd.Flags().BoolVar(&f.protectKernelDefaults, "protect-kernel-defaults", false, "Protect kubelet kernel defaults (CIS)")
 	initCmd.Flags().StringVar(&f.admissionPlugins, "admission-plugins", "NodeRestriction,EventRateLimit", "Kube-apiserver admission plugins (CIS)")
+	initCmd.Flags().BoolVar(&f.cisPSA, "cis-psa", false, "Enforce Pod Security Admission restricted (CIS)")
+	initCmd.Flags().BoolVar(&f.cisAuditLog, "cis-audit-log", false, "Enable kube-apiserver audit logging (CIS)")
+	initCmd.Flags().BoolVar(&f.cisNetPol, "cis-netpol", false, "Apply default-deny NetworkPolicy (CIS)")
+	initCmd.Flags().BoolVar(&f.cisSvcAcc, "cis-svcacc", false, "Patch default ServiceAccount automount=false (CIS)")
+	initCmd.Flags().BoolVar(&f.cisTLSCiphers, "cis-tls-ciphers", false, "Restrict TLS cipher suites (CIS)")
 	initCmd.Flags().StringVar(&f.kubeconfig, "kubeconfig", "./kubeconfig", "Path to save kubeconfig")
 	initCmd.Flags().BoolVar(&f.mergeConfig, "merge", false, "Merge kubeconfig into ~/.kube/config")
 	initCmd.Flags().StringVar(&f.contextName, "context", "sdk-ops-cluster", "Kubeconfig context name")
@@ -1384,6 +1394,11 @@ func runInfraInit(ip string, f infraFlags) error {
 		installCfg.SecretsEncryption = f.secretsEncryption
 		installCfg.ProtectKernelDefaults = f.protectKernelDefaults
 		installCfg.AdmissionPlugins = f.admissionPlugins
+		installCfg.CISPSA = f.cisPSA
+		installCfg.CISAuditLog = f.cisAuditLog
+		installCfg.CISNetPol = f.cisNetPol
+		installCfg.CISSvcAcc = f.cisSvcAcc
+		installCfg.CISTLSCiphers = f.cisTLSCiphers
 		installCfg.SkipDownload = f.airgap
 
 		if err := k3s.Install(conn, installCfg); err != nil {

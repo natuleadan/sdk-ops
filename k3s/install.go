@@ -12,18 +12,23 @@ import (
 )
 
 type InstallConfig struct {
-	PublicIP            string // VPS public IP (for TLS SAN)
-	ExtraArgs           string // Extra k3s args: "--disable traefik --docker"
-	K3sVersion          string // Specific version (empty = latest stable)
-	K3sChannel          string // Channel: stable, latest, v1.30 (default: stable)
-	LocalPath           string // Where to save kubeconfig (default: ./kubeconfig)
-	Context             string // Kubeconfig context name (default: default)
-	Merge               bool   // Merge into ~/.kube/config?
-	DisableTraefik      bool
-	SecretsEncryption   bool   // --secrets-encryption (CIS)
-	ProtectKernelDefaults bool // --protect-kernel-defaults (CIS)
-	AdmissionPlugins    string // --kube-apiserver-arg enable-admission-plugins=...
-	SkipDownload        bool   // Skip downloading binary (for airgap installs)
+	PublicIP              string // VPS public IP (for TLS SAN)
+	ExtraArgs             string // Extra k3s args: "--disable traefik --docker"
+	K3sVersion            string // Specific version (empty = latest stable)
+	K3sChannel            string // Channel: stable, latest, v1.30 (default: stable)
+	LocalPath             string // Where to save kubeconfig (default: ./kubeconfig)
+	Context               string // Kubeconfig context name (default: default)
+	Merge                 bool   // Merge into ~/.kube/config?
+	DisableTraefik        bool
+	SecretsEncryption     bool   // --secrets-encryption (CIS)
+	ProtectKernelDefaults bool   // --protect-kernel-defaults (CIS)
+	AdmissionPlugins      string // --kube-apiserver-arg enable-admission-plugins=...
+	CISPSA                bool   // Enforce Pod Security Admission restricted
+	CISAuditLog           bool   // Enable kube-apiserver audit logging
+	CISNetPol             bool   // Apply default-deny NetworkPolicy
+	CISSvcAcc             bool   // Patch default ServiceAccount (automount=false)
+	CISTLSCiphers         bool   // Restrict TLS cipher suites
+	SkipDownload          bool   // Skip downloading binary (for airgap installs)
 }
 
 func DefaultInstallConfig(publicIP string) InstallConfig {
@@ -51,6 +56,10 @@ func Install(client *goss.Client, cfg InstallConfig) error {
 	}
 	if cfg.AdmissionPlugins != "" {
 		extraArgs = strings.TrimSpace(extraArgs + fmt.Sprintf(" --kube-apiserver-arg enable-admission-plugins=%s", cfg.AdmissionPlugins))
+	}
+	if cfg.CISTLSCiphers {
+		tlsCiphers := "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+		extraArgs = strings.TrimSpace(extraArgs + fmt.Sprintf(" --kubelet-arg tls-cipher-suites=%s", tlsCiphers))
 	}
 
 	// Build the install command: curl | env K3S_XXX... sh -
@@ -134,7 +143,117 @@ exit 1`
 	}
 
 	fmt.Printf("  → Token: %s", token)
+
+	// Post-install CIS hardening
+	if err := postInstallCIS(client, cfg); err != nil {
+		return fmt.Errorf("post-install CIS: %w", err)
+	}
+
 	fmt.Println("  → k3s installed successfully!")
+	return nil
+}
+
+func postInstallCIS(client *goss.Client, cfg InstallConfig) error {
+	kcmd := `sudo kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml`
+
+	// 10. PSA restricted enforcement
+	if cfg.CISPSA {
+		fmt.Println("  → CIS: enforcing Pod Security Admission (restricted)...")
+		script := fmt.Sprintf(`
+# Label default namespace with PSA restricted
+%s label --overwrite namespace default pod-security.kubernetes.io/enforce=restricted 2>/dev/null || true
+%s label --overwrite namespace default pod-security.kubernetes.io/audit=restricted 2>/dev/null || true
+%s label --overwrite namespace default pod-security.kubernetes.io/warn=restricted 2>/dev/null || true
+echo "psa: OK"
+`, kcmd, kcmd, kcmd)
+		out, _, err := ssh.Run(client, script)
+		if err != nil {
+			fmt.Printf("  ⚠️  PSA label failed: %v\n", err)
+		} else {
+			fmt.Print(out)
+		}
+	}
+
+	// 11. Audit logs
+	if cfg.CISAuditLog {
+		fmt.Println("  → CIS: enabling kube-apiserver audit logs...")
+		auditPolicy := `apiVersion: audit.k8s.io/v1
+kind: Policy
+metadata:
+  creationTimestamp: null
+rules:
+- level: Metadata
+  resources:
+  - resources: ["secrets"]
+- level: RequestResponse
+  resources:
+  - resources: ["configmaps"]
+- level: Metadata
+  omitStages:
+  - RequestReceived
+`
+		script := fmt.Sprintf(`
+sudo mkdir -p /var/lib/rancher/k3s/server/logs
+cat > /tmp/audit-policy.yaml << 'POLICY'
+%s
+POLICY
+sudo mv /tmp/audit-policy.yaml /var/lib/rancher/k3s/server/logs/audit-policy.yaml
+sudo chmod 600 /var/lib/rancher/k3s/server/logs/audit-policy.yaml
+# Add audit args to k3s service
+sudo sed -i 's|^ExecStart=.*|& --audit-log-path=/var/lib/rancher/k3s/server/logs/audit.log --audit-policy-file=/var/lib/rancher/k3s/server/logs/audit-policy.yaml --audit-log-maxage=30 --audit-log-maxbackup=10 --audit-log-maxsize=100|' /etc/systemd/system/k3s.service 2>/dev/null || true
+sudo systemctl daemon-reload
+sudo systemctl restart k3s
+echo "audit-log: OK"
+`, auditPolicy)
+		out, _, err := ssh.Run(client, script)
+		if err != nil {
+			fmt.Printf("  ⚠️  Audit log setup failed: %v\n", err)
+		} else {
+			fmt.Print(out)
+		}
+	}
+
+	// 12. Default-deny NetworkPolicy
+	if cfg.CISNetPol {
+		fmt.Println("  → CIS: applying default-deny NetworkPolicy...")
+		script := fmt.Sprintf(`
+%s apply -f - << 'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: default
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+EOF
+echo "netpol: OK"
+`, kcmd)
+		out, _, err := ssh.Run(client, script)
+		if err != nil {
+			fmt.Printf("  ⚠️  NetworkPolicy apply failed: %v\n", err)
+		} else {
+			fmt.Print(out)
+		}
+	}
+
+	// 13. Patch default ServiceAccount
+	if cfg.CISSvcAcc {
+		fmt.Println("  → CIS: patching default ServiceAccount...")
+		script := fmt.Sprintf(`
+%s patch serviceaccount default -n default -p '{"automountServiceAccountToken": false}' 2>/dev/null || true
+echo "svcacc: OK"
+`, kcmd)
+		out, _, err := ssh.Run(client, script)
+		if err != nil {
+			fmt.Printf("  ⚠️  ServiceAccount patch failed: %v\n", err)
+		} else {
+			fmt.Print(out)
+		}
+	}
+
 	return nil
 }
 
