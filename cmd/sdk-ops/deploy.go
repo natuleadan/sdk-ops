@@ -183,15 +183,53 @@ Examples:
 				}
 			}
 
-			// Detect hasDB and appPort from service.yaml
+			// Detect hasDB, appPort, and health config from service.yaml
 			hasDB := false
 			appPort := 8080
+			healthURL := ""
+			healthTimeout := 30
 			if data, err := os.ReadFile(svcYamlPath); err == nil {
 				hasDB = strings.Contains(string(data), "database:") && strings.Contains(string(data), "url:")
+				inHealth := false
 				for _, line := range strings.Split(string(data), "\n") {
-					line = strings.TrimSpace(line)
-					if strings.HasPrefix(line, "port:") {
-						fmt.Sscanf(line, "port: %d", &appPort)
+					trimmed := strings.TrimSpace(line)
+					if strings.HasPrefix(trimmed, "port:") {
+						fmt.Sscanf(trimmed, "port: %d", &appPort)
+					}
+					if trimmed == "health:" {
+						inHealth = true
+						continue
+					}
+					if inHealth && (trimmed == "" || !strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "#") && strings.Contains(trimmed, ":")) {
+						if strings.HasPrefix(trimmed, "path:") || strings.HasPrefix(trimmed, "url:") {
+							var val string
+							fmt.Sscanf(trimmed, "%s %s", &val, &val)
+							if val != "" && !strings.HasPrefix(val, "#") && val != "path:" && val != "url:" {
+								port := appPort
+								if port == 0 {
+									port = 8080
+								}
+								if strings.HasPrefix(val, "/") {
+									healthURL = fmt.Sprintf("http://localhost:%d%s", port, val)
+								} else {
+									healthURL = val
+								}
+							}
+						}
+						if strings.HasPrefix(trimmed, "interval:") {
+							fmt.Sscanf(trimmed, "interval: %d", &healthTimeout)
+						}
+					} else if inHealth && !strings.HasPrefix(trimmed, " ") && !strings.HasPrefix(trimmed, "\t") && trimmed != "" {
+						inHealth = false
+					}
+					// Also support flat health_url:/health_timeout: top-level keys
+					if !inHealth {
+						if strings.HasPrefix(trimmed, "health_url:") {
+							fmt.Sscanf(trimmed, "health_url: %s", &healthURL)
+						}
+						if strings.HasPrefix(trimmed, "health_timeout:") {
+							fmt.Sscanf(trimmed, "health_timeout: %d", &healthTimeout)
+						}
 					}
 				}
 			}
@@ -273,12 +311,16 @@ Examples:
 						return fmt.Errorf("blue/green: %w", err)
 					}
 				} else {
-					svcCfg := deploy.ServiceConfig{Name: name}
+					svcCfg := deploy.ServiceConfig{
+						Name:          name,
+						HealthURL:     healthURL,
+						HealthTimeout: healthTimeout,
+					}
 					if err := deploy.RunService(conn, svcCfg); err != nil {
 						return fmt.Errorf("deploy failed: %w", err)
 					}
 
-					if err := deploy.HealthCheck(conn, name, 30); err != nil {
+					if err := deploy.HealthCheck(conn, name, healthTimeout, healthURL); err != nil {
 						fmt.Printf("\n  ⚠️  Health check failed on %s, rolling back...\n", nip)
 						if rbErr := deploy.Rollback(conn, name); rbErr != nil {
 							return fmt.Errorf("health: %v\nrollback also failed: %v", err, rbErr)

@@ -11,13 +11,14 @@ import (
 )
 
 type ServiceConfig struct {
-	Name      string
-	Type      string // docker, k3s, systemd
-	Image     string // Docker image (for docker type)
-	Port      int
-	Replicas  int
-	EnvFile   string
-	HealthURL string
+	Name          string
+	Type          string // docker, k3s, systemd
+	Image         string // Docker image (for docker type)
+	Port          int
+	Replicas      int
+	EnvFile       string
+	HealthURL     string
+	HealthTimeout int
 }
 
 func RunService(client *goss.Client, cfg ServiceConfig) error {
@@ -210,19 +211,37 @@ fi`, name, tail))
 	return nil
 }
 
-func HealthCheck(client *goss.Client, name string, timeout int) error {
+func HealthCheck(client *goss.Client, name string, timeout int, healthURL string) error {
 	fmt.Printf("  → Health check (%ds timeout)...\n", timeout)
-	script := fmt.Sprintf(`
+
+	var script string
+	if healthURL != "" {
+		// Custom health URL
+		script = fmt.Sprintf(`
 TIMEOUT=%d
 INTERVAL=3
 ELAPSED=0
-
+while [ $ELAPSED -lt $TIMEOUT ]; do
+	code=$(timeout 5 curl -s -o /dev/null -w '%%{http_code}' '%s' 2>/dev/null)
+	if [ "$code" = "200" ]; then
+		echo "healthy (%s)"
+		exit 0
+	fi
+	sleep $INTERVAL
+	ELAPSED=$((ELAPSED + INTERVAL))
+done
+echo "unhealthy after ${TIMEOUT}s"
+exit 1
+`, timeout, healthURL, healthURL)
+	} else {
+		script = fmt.Sprintf(`
+TIMEOUT=%d
+INTERVAL=3
+ELAPSED=0
 for PORT in 18081 8080 3000; do
 	timeout 2 bash -c "curl -s -o /dev/null -w '%%{http_code}' http://localhost:\$PORT/healthz 2>/dev/null | grep -q 200" 2>/dev/null && echo "healthy (port \$PORT/healthz)" && exit 0
 	timeout 2 bash -c "curl -s -o /dev/null -w '%%{http_code}' http://localhost:\$PORT/health 2>/dev/null | grep -q 200" 2>/dev/null && echo "healthy (port \$PORT/health)" && exit 0
 done
-
-# Fallback: check containers
 while [ $ELAPSED -lt $TIMEOUT ]; do
 	CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep '%s' | head -1)
 	if [ -n "$CONTAINER" ]; then
@@ -236,10 +255,10 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
 	sleep $INTERVAL
 	ELAPSED=$((ELAPSED + INTERVAL))
 done
-
 echo "unhealthy after ${TIMEOUT}s"
 exit 1
 `, timeout, name, name)
+	}
 
 	out, _, err := ssh.Run(client, script)
 	if err != nil {

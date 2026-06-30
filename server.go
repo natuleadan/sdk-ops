@@ -356,12 +356,12 @@ func (s *Server) DeployPush(sourceDir, name string) (*deploy.DeployResult, error
 		return nil, err
 	}
 
-	svcCfg := deploy.ServiceConfig{Name: name}
+	svcCfg := deploy.ServiceConfig{Name: name, HealthTimeout: 30}
 	if err := deploy.RunService(s.conn, svcCfg); err != nil {
 		return nil, err
 	}
 
-	if err := deploy.HealthCheck(s.conn, name, 30); err != nil {
+	if err := deploy.HealthCheck(s.conn, name, 30, ""); err != nil {
 		fmt.Printf("\n  ⚠️  Health check failed, rolling back...\n")
 		if rbErr := deploy.Rollback(s.conn, name); rbErr != nil {
 			return nil, fmt.Errorf("health: %v\nrollback also failed: %v", err, rbErr)

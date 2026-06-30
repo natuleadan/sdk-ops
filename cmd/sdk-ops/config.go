@@ -109,6 +109,21 @@ func newConfigCmd() *cobra.Command {
 				return err
 			}
 
+			// Check for duplicate
+			for i, n := range cfg.Nodes {
+				if n.IP == args[0] {
+					cfg.Nodes[i].User = user
+					cfg.Nodes[i].Key = key
+					cfg.Nodes[i].Port = port
+					cfg.Nodes[i].Mode = mode
+					if err := saveConfig(cfg); err != nil {
+						return err
+					}
+					fmt.Printf("  Updated node %s\n", args[0])
+					return nil
+				}
+			}
+
 			cfg.Nodes = append(cfg.Nodes, NodeConfig{
 				IP:   args[0],
 				User: user,
