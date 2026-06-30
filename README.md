@@ -165,7 +165,7 @@ sdk-ops deploy init ./app --template go --ci github
 | | `deploy init` | Scaffold from template (html, node, wordpress, go, nextjs, python-fastapi, django) |
 | | `deploy init --ci` | Generate GitHub Actions / GitLab CI pipeline |
 | | `service status/logs/restart` | Manage deployed services |
-| | `service rollback` | Rollback to previous version |
+| | `service rollback` | Rollback to previous version (--version N, --diff) |
 | | `service versions` | List deployed versions |
 | | `service rotate db` | Rotate database password |
 | | `service rotate env` | Rotate environment variable |

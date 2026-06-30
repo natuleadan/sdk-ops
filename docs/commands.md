@@ -325,6 +325,8 @@ sdk-ops deploy init <dir> --template <name> [flags]
 sdk-ops deploy push <dir> --node <ip> [flags]
   --name             Service name (default: directory name)
   --git              Git repository URL (clones and deploys)
+  --branch string    Git branch to clone (requires --git)
+  --ssh-key string   SSH key for git clone (requires --git)
   --sops-key         Auto-decrypt service.yaml with sops (age key)
   --builder string   Build method: dockerfile, nixpacks, pack (default: auto-detect)
   --runtime string   Runtime: docker (default), k3s, bare
@@ -415,7 +417,9 @@ sdk-ops deploy push ./my-app --zero-downtime         # Blue/green: start new, he
 sdk-ops service status [name]                  # Status of all or one service
 sdk-ops service logs <name> [-f]               # Tail logs
 sdk-ops service restart <name>                 # Restart service
-sdk-ops service rollback <name>                # Rollback to previous version
+sdk-ops service rollback <name> [--version v3] [--diff]  # Rollback or show diff
+  --version string   Target version to rollback to (e.g. v3)
+  --diff             Show changes between versions without rolling back
 sdk-ops service versions <name>                # List deployed versions
 sdk-ops service rotate db <container> [flags]  # Rotate DB password
   --type string      Database type: postgres, mysql, redis, mongodb (required)
