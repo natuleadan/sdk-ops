@@ -51,6 +51,8 @@ Examples:
   sdk-ops deploy push ./my-service --sops-key age1...`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gitURL, _ := cmd.Flags().GetString("git")
+			gitBranch, _ := cmd.Flags().GetString("branch")
+			gitSSHKey, _ := cmd.Flags().GetString("ssh-key")
 
 			sourceDir := ""
 			if len(args) > 0 {
@@ -64,8 +66,23 @@ Examples:
 				}
 				defer os.RemoveAll(tmpDir)
 
-				fmt.Printf("  → Cloning %s...\n", gitURL)
-				cloneCmd := RunCommand("git", "clone", "--depth=1", gitURL, tmpDir)
+				cloneArgs := []string{"clone", "--depth=1"}
+				if gitBranch != "" {
+					cloneArgs = append(cloneArgs, "--branch", gitBranch)
+				}
+				cloneArgs = append(cloneArgs, gitURL, tmpDir)
+
+				cloneCmd := RunCommand("git", cloneArgs...)
+				if gitSSHKey != "" {
+					cloneCmd.Env = append(os.Environ(),
+						fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=no", gitSSHKey))
+				}
+
+				fmt.Printf("  → Cloning %s", gitURL)
+				if gitBranch != "" {
+					fmt.Printf(" (branch: %s)", gitBranch)
+				}
+				fmt.Println("...")
 				if err := cloneCmd.Run(); err != nil {
 					return fmt.Errorf("git clone: %w", err)
 				}
@@ -329,7 +346,7 @@ Examples:
 
 					if err := deploy.HealthCheck(conn, name, healthTimeout, healthURL); err != nil {
 						fmt.Printf("\n  ⚠️  Health check failed on %s, rolling back...\n", nip)
-						if rbErr := deploy.Rollback(conn, name); rbErr != nil {
+						if rbErr := deploy.Rollback(conn, name, ""); rbErr != nil {
 							return fmt.Errorf("health: %v\nrollback also failed: %v", err, rbErr)
 						}
 						deploy.RunService(conn, svcCfg)
@@ -399,6 +416,8 @@ Examples:
 	deployCmd.Flags().StringP("key", "k", "", "SSH private key path")
 	deployCmd.Flags().IntP("port", "p", 22, "SSH port")
 	deployCmd.Flags().String("git", "", "Git repository URL (clones and deploys)")
+	deployCmd.Flags().String("branch", "", "Git branch to clone (requires --git)")
+	deployCmd.Flags().String("ssh-key", "", "SSH key for git clone (requires --git)")
 	deployCmd.Flags().String("sops-key", "", "Auto-decrypt service.yaml with sops (age key)")
 	deployCmd.Flags().Bool("all", false, "Deploy to all registered nodes in parallel")
 	deployCmd.Flags().String("builder", "", "Build method: dockerfile, nixpacks, pack (default: auto-detect)")
@@ -547,13 +566,28 @@ func newServiceCmd() *cobra.Command {
 
 	rollbackCmd := &cobra.Command{
 		Use:   "rollback <name>",
-		Short: "Rollback to previous version",
+		Short: "Rollback to previous (or --version N)",
 		Args:  cobra.ExactArgs(1),
+		Long: `Rollback a service to a previous version.
+
+Without flags: rollback to the previous deployed version (symlink swap).
+With --version: rollback to a specific version number.
+With --diff: show changes between versions without rolling back.
+
+Examples:
+  sdk-ops service rollback myservice
+  sdk-ops service rollback myservice --version v3
+  sdk-ops service rollback myservice --diff
+  sdk-ops service rollback myservice --version v3 --diff`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nodeIP, user, key, port := getNodeFlags(cmd)
-			return runServiceRollback(nodeIP, args[0], user, key, port)
+			version, _ := cmd.Flags().GetString("version")
+			showDiff, _ := cmd.Flags().GetBool("diff")
+			return runServiceRollback(nodeIP, args[0], user, key, port, version, showDiff)
 		},
 	}
+	rollbackCmd.Flags().String("version", "", "Target version to rollback to (e.g. v3)")
+	rollbackCmd.Flags().Bool("diff", false, "Show diff between versions without rolling back")
 
 	versionsCmd := &cobra.Command{
 		Use:   "versions <name>",
@@ -788,14 +822,52 @@ func runServiceRestart(ip, name, user, key string, port int) error {
 	return deploy.RunService(conn, deploy.ServiceConfig{Name: name})
 }
 
-func runServiceRollback(ip, name, user, key string, port int) error {
+func runServiceRollback(ip, name, user, key string, port int, version string, showDiff bool) error {
 	conn, err := connectNode(ip, user, key, port)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	return deploy.Rollback(conn, name)
+	if showDiff {
+		// Show diff between current and target version
+		versions, err := deploy.ListVersions(conn, name)
+		if err != nil {
+			return fmt.Errorf("list versions: %w", err)
+		}
+		if len(versions) < 2 {
+			fmt.Printf("  No previous versions to compare for %s\n", name)
+			return nil
+		}
+
+		current := versions[len(versions)-1]
+		target := version
+		if target == "" {
+			if len(versions) < 2 {
+				return fmt.Errorf("no previous version")
+			}
+			target = versions[len(versions)-2]
+		}
+
+		diff, err := deploy.DiffVersions(conn, name, current, target)
+		if err != nil {
+			return fmt.Errorf("diff: %w", err)
+		}
+		if diff == "" {
+			fmt.Printf("  No differences between %s and %s\n", current, target)
+			return nil
+		}
+		fmt.Printf("  Changes (%s → %s):\n", current, target)
+		for _, line := range strings.Split(strings.TrimSpace(diff), "\n") {
+			fmt.Printf("    %s\n", line)
+		}
+		return nil
+	}
+
+	if version != "" {
+		return deploy.Rollback(conn, name, version)
+	}
+	return deploy.Rollback(conn, name, "")
 }
 
 func runServiceVersions(ip, name, user, key string, port int) error {

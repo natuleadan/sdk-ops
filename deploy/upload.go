@@ -162,19 +162,40 @@ func UploadAndDeploy(client *goss.Client, cfg UploadConfig) (*DeployResult, erro
 	return &DeployResult{Version: nextVer, ServicePath: versionDir}, nil
 }
 
-func Rollback(client *goss.Client, serviceName string) error {
+func Rollback(client *goss.Client, serviceName, targetVersion string) error {
 	serviceDir := fmt.Sprintf("/opt/sdk-ops/services/%s", serviceName)
-	out, _, err := ssh.Run(client, fmt.Sprintf(`
-		CURRENT=$(sudo readlink -f %s/current 2>/dev/null || echo "")
-		PREVIOUS=$(sudo readlink -f %s/previous 2>/dev/null || echo "")
-		if [ -z "$PREVIOUS" ] || [ ! -d "$PREVIOUS" ]; then
-			echo "no-previous"
-			exit 0
-		fi
-		sudo ln -sfn "$PREVIOUS" %s/current
-		sudo ln -sfn "$CURRENT" %s/previous
-		echo "rolled-back to $(basename $PREVIOUS)"
-	`, serviceDir, serviceDir, serviceDir, serviceDir))
+
+	var script string
+	if targetVersion != "" {
+		// Rollback to a specific version
+		targetDir := fmt.Sprintf("%s/%s", serviceDir, targetVersion)
+		script = fmt.Sprintf(`
+TARGET="%s"
+CURRENT=$(sudo readlink -f %s/current 2>/dev/null || echo "")
+if [ ! -d "$TARGET" ]; then
+	echo "version-not-found"
+	exit 0
+fi
+sudo ln -sfn "$TARGET" %s/current
+sudo ln -sfn "$CURRENT" %s/previous
+echo "rolled-back to $(basename $TARGET)"
+`, targetDir, serviceDir, serviceDir, serviceDir)
+	} else {
+		// Rollback to previous (default behavior)
+		script = fmt.Sprintf(`
+CURRENT=$(sudo readlink -f %s/current 2>/dev/null || echo "")
+PREVIOUS=$(sudo readlink -f %s/previous 2>/dev/null || echo "")
+if [ -z "$PREVIOUS" ] || [ ! -d "$PREVIOUS" ]; then
+	echo "no-previous"
+	exit 0
+fi
+sudo ln -sfn "$PREVIOUS" %s/current
+sudo ln -sfn "$CURRENT" %s/previous
+echo "rolled-back to $(basename $PREVIOUS)"
+`, serviceDir, serviceDir, serviceDir, serviceDir)
+	}
+
+	out, _, err := ssh.Run(client, script)
 	if err != nil {
 		return fmt.Errorf("rollback exec: %w\n%s", err, out)
 	}
@@ -182,8 +203,23 @@ func Rollback(client *goss.Client, serviceName string) error {
 	if out == "no-previous" {
 		return fmt.Errorf("no previous version to rollback to for %s", serviceName)
 	}
+	if out == "version-not-found" {
+		return fmt.Errorf("version %s not found for %s", targetVersion, serviceName)
+	}
 	fmt.Printf("  → %s: %s\n", serviceName, out)
 	return nil
+}
+
+func DiffVersions(client *goss.Client, serviceName, verA, verB string) (string, error) {
+	dirA := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", serviceName, verA)
+	dirB := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", serviceName, verB)
+
+	out, _, err := ssh.Run(client, fmt.Sprintf(
+		`diff -rq "%s" "%s" 2>/dev/null || true`, dirA, dirB))
+	if err != nil {
+		return "", fmt.Errorf("diff versions: %w", err)
+	}
+	return out, nil
 }
 
 func ListVersions(client *goss.Client, serviceName string) ([]string, error) {
