@@ -15,8 +15,10 @@ import (
 
 	"github.com/natuleadan/sdk-ops/deploy"
 	"github.com/natuleadan/sdk-ops/docker"
+	"github.com/natuleadan/sdk-ops/hooks"
 	"github.com/natuleadan/sdk-ops/secrets"
 	"github.com/natuleadan/sdk-ops/ssh"
+	"github.com/natuleadan/sdk-ops/templates"
 )
 
 func RunCommand(name string, arg ...string) *exec.Cmd {
@@ -203,6 +205,12 @@ Examples:
 				}
 				defer conn.Close()
 
+				// Run pre-deploy hooks
+				hooks.Run(conn, "pre-deploy", map[string]string{
+					"APP":  name,
+					"NODE": nip,
+				})
+
 				uploadCfg := deploy.UploadConfig{
 					ServiceName: name,
 					SourceDir:   sourceDir,
@@ -228,6 +236,13 @@ Examples:
 					deploy.RunService(conn, svcCfg)
 					return fmt.Errorf("health check failed on %s, rolled back", nip)
 				}
+
+				// Run post-deploy hooks
+				hooks.Run(conn, "post-deploy", map[string]string{
+					"APP":     name,
+					"NODE":    nip,
+					"VERSION": result.Version,
+				})
 
 				fmt.Printf("\n✅ %s deployed on %s (v%s)\n", name, nip, result.Version)
 				return nil
@@ -303,6 +318,51 @@ Examples:
 		},
 	}
 
+	var initCmd = &cobra.Command{
+		Use:   "init <dir> --template <name>",
+		Short: "Scaffold a new service from a template",
+		Long: `Generate project structure from a template.
+
+Templates:
+  html       Static HTML site with Nginx
+  node       Node.js Express app
+  wordpress  WordPress with MySQL
+  go         Go HTTP server (multi-stage build)
+
+Examples:
+  sdk-ops deploy init ./my-site --template html
+  sdk-ops deploy init ./my-blog --template wordpress
+  sdk-ops deploy init ./my-api --template go --name products-svc`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tmpl, _ := cmd.Flags().GetString("template")
+			appName, _ := cmd.Flags().GetString("name")
+
+			if tmpl == "" {
+				templates.List()
+				return nil
+			}
+
+			if err := templates.ValidateName(appName); err != nil {
+				return err
+			}
+
+			dir := args[0]
+			if err := templates.Scaffold(tmpl, dir); err != nil {
+				return fmt.Errorf("scaffold: %w", err)
+			}
+
+			templates.InitServiceYAML(dir, appName)
+			fmt.Printf("\n✅ %s scaffolded in %s\n", tmpl, dir)
+			fmt.Printf("   Edit service.yaml, then:\n")
+			fmt.Printf("   sdk-ops deploy push %s --node <ip>\n", dir)
+			return nil
+		},
+	}
+	initCmd.Flags().String("template", "", "Template name (html, node, wordpress, go)")
+	initCmd.Flags().String("name", "app", "Service name")
+
+	cmd.AddCommand(initCmd)
 	cmd.AddCommand(deployCmd)
 	cmd.AddCommand(encryptCmd)
 	cmd.AddCommand(decryptCmd)

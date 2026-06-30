@@ -16,6 +16,7 @@ import (
 
 	"github.com/natuleadan/sdk-ops/docker"
 	"github.com/natuleadan/sdk-ops/hardening"
+	"github.com/natuleadan/sdk-ops/hooks"
 	"github.com/natuleadan/sdk-ops/k3s"
 	"github.com/natuleadan/sdk-ops/plan"
 	"github.com/natuleadan/sdk-ops/providers"
@@ -1138,6 +1139,14 @@ func runInfraInit(ip string, f infraFlags) error {
 		saveConfig(cfg)
 	}
 
+	// Run post-init hooks
+	hooks.Run(conn, "post-init", map[string]string{
+		"IP":   ip,
+		"USER": hardCfg.User,
+		"MODE": f.mode,
+		"PORT": fmt.Sprintf("%d", hardCfg.SSHPort),
+	})
+
 	fmt.Println("\n✅ infra init complete!")
 	fmt.Printf("   SSH: ssh %s@%s -p %d\n", hardCfg.User, ip, hardCfg.SSHPort)
 	if f.mode == "k3s" {
@@ -1210,6 +1219,15 @@ func runInfraJoin(serverIP, agentIP, serverUser, token string, f infraFlags) err
 		})
 	}
 	saveConfig(cfg)
+
+	// Run post-join hooks on agent
+	hooks.Run(agentConn, "post-join", map[string]string{
+		"IP":        agentIP,
+		"SERVER_IP": serverIP,
+		"USER":      f.user,
+		"MODE":      f.mode,
+		"ROLE":      "agent",
+	})
 
 	fmt.Printf("\n✅ Node %s joined to %s\n", agentIP, serverIP)
 	fmt.Printf("   Run: export KUBECONFIG=%s\n", f.kubeconfig)
@@ -1383,6 +1401,12 @@ func runInfraRemove(ip string, f infraFlags) error {
 		return nil
 	}
 
+	// Run pre-remove hooks
+	hooks.Run(conn, "pre-remove", map[string]string{
+		"IP":   ip,
+		"USER": f.user,
+	})
+
 	scripts := []string{
 		"k3s-uninstall.sh",
 		"/usr/local/bin/k3s-killall.sh",
@@ -1394,6 +1418,12 @@ func runInfraRemove(ip string, f infraFlags) error {
 	ssh.Run(conn, `apt-get remove -y docker-ce docker-ce-cli containerd.io docker-compose-plugin 2>/dev/null || true`)
 	ssh.Run(conn, `rm -rf /opt/sdk-ops`)
 	ssh.Run(conn, `rm -f /etc/sudoers.d/sdk-ops`)
+
+	// Run post-remove hooks (before closing conn)
+	hooks.Run(conn, "post-remove", map[string]string{
+		"IP":   ip,
+		"USER": f.user,
+	})
 
 	fmt.Println("✅ sdk-ops removed from", ip)
 	return nil

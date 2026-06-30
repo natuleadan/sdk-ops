@@ -1,0 +1,12 @@
+name: my-wordpress
+registry: ewr.vultrcr.com/nlaregistry
+ports:
+  - "80:80"
+health:
+  path: /wp-admin/install.php
+  interval: 60
+env:
+  MYSQL_ROOT_PASSWORD: rootpass
+  MYSQL_DATABASE: wordpress
+  MYSQL_USER: wpuser
+  MYSQL_PASSWORD: wppass

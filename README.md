@@ -86,6 +86,9 @@ sdk-ops infra restore 192.168.1.100 ./backup.tar.gz
 |----------|---------|-------------|
 | **Provision** | `infra init` | Harden + install Docker/k3s from zero |
 | | `infra join` | Join a worker to k3s cluster |
+| | `infra ready` | Check if cluster is fully operational (exit 0/1) |
+| | `infra plan` | Validate and preview a multi-node plan |
+| | `infra apply` | Execute a multi-node plan (parallel servers + agents) |
 | | `infra status` | Show server health and installed components |
 | | `infra remove` | Uninstall sdk-ops from a server |
 | | `infra backup` | Backup all services from a node |
@@ -97,7 +100,7 @@ sdk-ops infra restore 192.168.1.100 ./backup.tar.gz
 | **Operations** | `node list` | List registered nodes |
 | | `node info` | Real-time dashboard (CPU, RAM, disk, k3s) |
 | | `node top` | Interactive htop via SSH |
-| | `node exec` | Run a command remotely (single or --all) |
+| | `node exec` | Run a command remotely (single, --all, --servers, --agents) |
 | **Deploy** | `deploy push` | Build + upload + deploy a service with auto-rollback |
 | | `deploy push --all` | Deploy to all registered nodes in parallel |
 | | `deploy push --sops-key` | Auto-decrypt service.yaml with sops |
