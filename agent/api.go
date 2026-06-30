@@ -161,6 +161,18 @@ func startAPI(addr string, db *sql.DB, agent *Agent) *http.Server {
 	})
 
 	// Support delete via GET with ?id=N (for busybox wget which lacks DELETE)
+	mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
+		info, err := checkForUpdate()
+		if err != nil {
+			jsonResp(w, http.StatusOK, map[string]interface{}{
+				"current": version,
+				"error":   err.Error(),
+			})
+			return
+		}
+		jsonResp(w, http.StatusOK, info)
+	})
+
 	mux.HandleFunc("/schedules/remove", func(w http.ResponseWriter, r *http.Request) {
 		if idStr := r.URL.Query().Get("id"); idStr != "" {
 			h.agent.scheduler.removeSchedule(toInt(idStr))

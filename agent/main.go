@@ -88,6 +88,13 @@ func main() {
 	reloadTicker := time.NewTicker(5 * time.Minute)
 	defer reloadTicker.Stop()
 
+	// Update check ticker (every 24h, only if enabled)
+	updateTicker := time.NewTicker(24 * time.Hour)
+	defer updateTicker.Stop()
+
+	// Run update check once at startup if enabled
+	autoUpdateCheck(cfg)
+
 	// Signal handling
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -113,6 +120,9 @@ func main() {
 
 		case <-reloadTicker.C:
 			sched.loadSchedules()
+
+		case <-updateTicker.C:
+			autoUpdateCheck(cfg)
 
 		case sig := <-sigCh:
 			log.Printf("signal: %v, shutting down", sig)
