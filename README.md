@@ -195,6 +195,7 @@ sdk-ops deploy init ./app --template go --ci github
 | | `provider k8s update/protection` | Upgrade K8s version + toggle deletion protection |
 | | `provider k8s addons list/available/install/uninstall` | K8s addon management |
 | | `provider k8s node-pool list/add/scale/delete` | Node pool management |
+| | `provider k8s lb-list <id>` | List LBs attached to a cluster |
 | | `provider lb listener add/update/delete` | LB listener management |
 | | `provider lb health-check set` | LB health check configuration |
 | | `provider lb target add/list/drain` | LB target management |
@@ -259,6 +260,7 @@ s.Cluster().Scale("deploy/my-app", 5)
 | `--monitor` | `false` | Install Prometheus node_exporter |
 | `--auditd` | `false` | Install auditd for system auditing (CIS) |
 | `--lynis` | `false` | Install Lynis security auditor |
+| `--usg` | `false` | Install Ubuntu Security Guide (CIS) |
 | `--crowdsec` | `false` | Install CrowdSec WAF/IPS |
 | `--lock-root` | `false` | Lock root password after creating sdkops user |
 | `--logs` | `""` | Install Promtail, ship logs to Loki URL |

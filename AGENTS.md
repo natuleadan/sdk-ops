@@ -114,6 +114,7 @@ Full reference: `docs/commands.md`. Categories:
 | `--monitor` | false | Install node_exporter (port 9100) |
 | `--auditd` | false | Install auditd (CIS) |
 | `--lynis` | false | Install Lynis security auditor |
+| `--usg` | false | Install Ubuntu Security Guide (CIS) |
 | `--crowdsec` | false | Install CrowdSec WAF/IPS |
 | `--lock-root` | false | Lock root password |
 | `--logs` | "" | Install Promtail to Loki URL |

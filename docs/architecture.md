@@ -221,7 +221,8 @@ Hooks are executable scripts placed in `/opt/sdk-ops/hooks/<phase>/` on the VPS.
 | 7. nftables | Drop by default, allow 22/80/443/6443 | no |
 | 8. auditd | System auditing daemon | `--auditd` |
 | 9. lynis | Security auditor | `--lynis` |
-| 10. node_exporter | Prometheus node_exporter on port 9100 | `--monitor` |
+| 10. usg | Ubuntu Security Guide (CIS Level 1/2) | `--usg` |
+| 11. node_exporter | Prometheus node_exporter on port 9100 | `--monitor` |
 | 11. SSH port migration | Add new port + keep port 22 | `--ssh-port N` |
 | 12. Lock root | Lock root password after user creation | `--lock-root` |
 

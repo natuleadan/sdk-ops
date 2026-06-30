@@ -541,6 +541,7 @@ sdk-ops provider k8s node-pool list <id>       # List node pools
 sdk-ops provider k8s node-pool add <id> --plan X --nodes N  # Add a node pool
 sdk-ops provider k8s node-pool scale <id> <pool-id> --nodes N  # Scale a node pool
 sdk-ops provider k8s node-pool delete <id> <pool-id>  # Delete a node pool
+sdk-ops provider k8s lb-list <id>                      # List LBs attached to cluster
 ```
 
 ### lb
