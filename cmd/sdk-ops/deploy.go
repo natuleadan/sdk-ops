@@ -237,7 +237,7 @@ Examples:
 				uploadCfg := deploy.UploadConfig{
 					ServiceName: name,
 					SourceDir:   sourceDir,
-					Exclude:     []string{".git", "node_modules", ".env", ".DS_Store", "Dockerfile", ".dockerignore"},
+					Exclude:     []string{".git", "node_modules", ".env", ".DS_Store", ".dockerignore"},
 				}
 
 				result, err := deploy.UploadAndDeploy(conn, uploadCfg)
