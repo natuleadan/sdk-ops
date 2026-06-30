@@ -57,83 +57,12 @@ Examples:
 				return fmt.Errorf("--node is required")
 			}
 
-			client := newSSHClient(nodeIP, user, port, key)
-			conn, err := client.Connect()
+			conn, err := sshConnect(nodeIP, user, key, port)
 			if err != nil {
-				return fmt.Errorf("ssh: %w", err)
+				return err
 			}
 			defer conn.Close()
-
-			// Step 1: Cross-compile agent binary for linux/amd64
-			fmt.Println("  → Building agent binary (linux/amd64)...")
-			buildCmd := exec.Command("go", "build",
-				"-ldflags=-s -w -X main.version="+version,
-				"-o", "/tmp/sdk-ops-agent-linux",
-				"./agent/")
-			buildCmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
-			if out, err := buildCmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("build agent: %w\n%s", err, string(out))
-			}
-			defer os.Remove("/tmp/sdk-ops-agent-linux")
-
-			// Step 2: Create Dockerfile locally
-			dockerfile := `FROM alpine:3.19
-RUN apk add --no-cache ca-certificates tzdata docker-cli
-COPY sdk-ops-agent /usr/local/bin/
-EXPOSE 9000
-VOLUME /data
-ENTRYPOINT ["sdk-ops-agent"]`
-
-			// Step 3: Upload via tar.gz with binary + Dockerfile
-			fmt.Println("  → Uploading agent...")
-			if err := uploadAgentFiles(conn, "/tmp/sdk-ops-agent-linux", dockerfile); err != nil {
-				return fmt.Errorf("upload: %w", err)
-			}
-			fmt.Println("  → Files uploaded")
-
-			// Step 4: Build Docker image on VPS
-			fmt.Println("  → Building Docker image (this may take a minute)...")
-			buildImgCmd := "cd /opt/sdk-ops/agent && docker build -t sdk-ops-agent:latest . 2>&1"
-			if out, _, err := runSSH(conn, buildImgCmd); err != nil {
-				return fmt.Errorf("docker build: %w\n%s", err, out)
-			}
-			fmt.Println("  → Docker image built")
-
-			// Step 5: Stop existing agent if running
-			runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true")
-
-			// Step 6: Run agent container with notification env vars
-			fmt.Println("  → Starting agent container...")
-			volumes := "-v /var/run/docker.sock:/var/run/docker.sock -v /opt/sdk-ops:/opt/sdk-ops:ro"
-			notifyEnvs := collectNotifyEnvVars()
-			envFlags := ""
-			for _, e := range notifyEnvs {
-				envFlags += fmt.Sprintf(" -e '%s'", e)
-			}
-
-			runCmd := fmt.Sprintf(
-				"docker run -d --name sdk-ops-agent --restart unless-stopped %s %s -v sdk-ops-agent-data:/data sdk-ops-agent:latest",
-				volumes, envFlags)
-			if out, _, err := runSSH(conn, runCmd); err != nil {
-				return fmt.Errorf("docker run: %w\n%s", err, out)
-			}
-
-			// Wait a moment and verify
-			time.Sleep(3 * time.Second)
-			checkCmd := "docker inspect sdk-ops-agent --format='{{.State.Status}}'"
-			status, _, _ := runSSH(conn, checkCmd)
-			status = strings.TrimSpace(status)
-
-			if status == "running" {
-				logsOut, _, _ := runSSH(conn, "docker logs --tail 5 sdk-ops-agent 2>&1")
-				fmt.Printf("\n✅ Agent deployed on %s (status: running)\n", nodeIP)
-				fmt.Printf("   API: http://localhost:9000/health (internal)\n")
-				fmt.Printf("   Logs:\n%s\n", strings.TrimSpace(logsOut))
-			} else {
-				logsOut, _, _ := runSSH(conn, "docker logs --tail 20 sdk-ops-agent 2>&1")
-				return fmt.Errorf("agent status: %s\nlogs:\n%s", status, logsOut)
-			}
-			return nil
+			return runAgentInstall(conn, nodeIP, user, key, port)
 		},
 	}
 
@@ -320,6 +249,55 @@ ENTRYPOINT ["sdk-ops-agent"]`
 	scheduleCmd.AddCommand(scheduleListCmd)
 	scheduleCmd.AddCommand(scheduleRemoveCmd)
 
+	updateCmd := &cobra.Command{
+		Use:   "update --node <ip> [--force]",
+		Short: "Check and apply agent updates",
+		Long: `Check the agent's current version against GitHub releases.
+If a newer version is available, rebuild and redeploy the agent.
+
+Use --force to rebuild even if up to date.
+
+Examples:
+  sdk-ops agent update --node 1.2.3.4
+  sdk-ops agent update --node 1.2.3.4 --force`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, _ := cmd.Flags().GetString("node")
+			force, _ := cmd.Flags().GetBool("force")
+
+			if nodeIP == "" {
+				return fmt.Errorf("--node is required")
+			}
+
+			client := newSSHClient(nodeIP, user, port, key)
+			conn, err := client.Connect()
+			if err != nil {
+				return fmt.Errorf("ssh: %w", err)
+			}
+			defer conn.Close()
+
+			// Check current version
+			out, _, err := runSSH(conn, `docker exec sdk-ops-agent wget -qO- http://localhost:9000/version 2>/dev/null || echo '{"current":"unknown"}'`)
+			if err != nil {
+				return fmt.Errorf("check version: %w", err)
+			}
+			fmt.Printf("  Agent version info: %s\n", strings.TrimSpace(out))
+
+			// Check if update is needed
+			if !force && strings.Contains(out, `"update_available":false`) {
+				fmt.Println("  ✅ Agent is up to date")
+				return nil
+			}
+
+			if force {
+				fmt.Println("  → --force: rebuilding agent...")
+			}
+
+			// Rebuild and redeploy (same logic as install)
+			return runAgentInstall(conn, nodeIP, user, key, port)
+		},
+	}
+
 	uninstallCmd := &cobra.Command{
 		Use:   "uninstall --node <ip>",
 		Short: "Remove the agent from a node",
@@ -344,7 +322,7 @@ ENTRYPOINT ["sdk-ops-agent"]`
 		},
 	}
 
-	for _, sc := range []*cobra.Command{installCmd, statusCmd, logsCmd, uninstallCmd} {
+	for _, sc := range []*cobra.Command{installCmd, statusCmd, logsCmd, uninstallCmd, updateCmd} {
 		sc.Flags().StringP("node", "n", "", "Target node IP")
 		sc.Flags().StringVarP(&user, "user", "u", "root", "SSH user")
 		sc.Flags().StringVarP(&key, "key", "k", "", "SSH private key path")
@@ -352,11 +330,13 @@ ENTRYPOINT ["sdk-ops-agent"]`
 	}
 	logsCmd.Flags().IntP("tail", "t", 100, "Number of lines")
 	logsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
+	updateCmd.Flags().BoolP("force", "f", false, "Force rebuild even if up to date")
 
 	cmd.AddCommand(installCmd)
 	cmd.AddCommand(statusCmd)
 	cmd.AddCommand(logsCmd)
 	cmd.AddCommand(uninstallCmd)
+	cmd.AddCommand(updateCmd)
 	cmd.AddCommand(scheduleCmd)
 	return cmd
 }
@@ -466,4 +446,81 @@ func streamSSH(conn *goss.Client, cmd string) error {
 	sess.Stdout = os.Stdout
 	sess.Stderr = os.Stderr
 	return sess.Run(cmd)
+}
+
+func sshConnect(nodeIP, user, key string, port int) (*goss.Client, error) {
+	client := newSSHClient(nodeIP, user, port, key)
+	return client.Connect()
+}
+
+func runAgentInstall(conn *goss.Client, nodeIP, user, key string, port int) error {
+	// Step 1: Cross-compile agent binary for linux/amd64
+	fmt.Println("  → Building agent binary (linux/amd64)...")
+	buildCmd := exec.Command("go", "build",
+		"-ldflags=-s -w -X main.version="+version,
+		"-o", "/tmp/sdk-ops-agent-linux",
+		"./agent/")
+	buildCmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("build agent: %w\n%s", err, string(out))
+	}
+	defer os.Remove("/tmp/sdk-ops-agent-linux")
+
+	// Step 2: Create Dockerfile locally
+	dockerfile := `FROM alpine:3.19
+RUN apk add --no-cache ca-certificates tzdata docker-cli
+COPY sdk-ops-agent /usr/local/bin/
+EXPOSE 9000
+VOLUME /data
+ENTRYPOINT ["sdk-ops-agent"]`
+
+	// Step 3: Upload via tar.gz with binary + Dockerfile
+	fmt.Println("  → Uploading agent...")
+	if err := uploadAgentFiles(conn, "/tmp/sdk-ops-agent-linux", dockerfile); err != nil {
+		return fmt.Errorf("upload: %w", err)
+	}
+	fmt.Println("  → Files uploaded")
+
+	// Step 4: Build Docker image on VPS
+	fmt.Println("  → Building Docker image (this may take a minute)...")
+	buildImgCmd := "cd /opt/sdk-ops/agent && docker build -t sdk-ops-agent:latest . 2>&1"
+	if out, _, err := runSSH(conn, buildImgCmd); err != nil {
+		return fmt.Errorf("docker build: %w\n%s", err, out)
+	}
+	fmt.Println("  → Docker image built")
+
+	// Step 5: Stop existing agent if running
+	runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true")
+
+	// Step 6: Run agent container with notification env vars
+	fmt.Println("  → Starting agent container...")
+	volumes := "-v /var/run/docker.sock:/var/run/docker.sock -v /opt/sdk-ops:/opt/sdk-ops:ro"
+	notifyEnvs := collectNotifyEnvVars()
+	envFlags := ""
+	for _, e := range notifyEnvs {
+		envFlags += fmt.Sprintf(" -e '%s'", e)
+	}
+
+	runCmd := fmt.Sprintf(
+		"docker run -d --name sdk-ops-agent --restart unless-stopped %s %s -v sdk-ops-agent-data:/data sdk-ops-agent:latest",
+		volumes, envFlags)
+	if out, _, err := runSSH(conn, runCmd); err != nil {
+		return fmt.Errorf("docker run: %w\n%s", err, out)
+	}
+
+	// Wait a moment and verify
+	time.Sleep(3 * time.Second)
+	checkCmd := "docker inspect sdk-ops-agent --format='{{.State.Status}}'"
+	status, _, _ := runSSH(conn, checkCmd)
+	status = strings.TrimSpace(status)
+
+	if status == "running" {
+		logsOut, _, _ := runSSH(conn, "docker logs --tail 5 sdk-ops-agent 2>&1")
+		fmt.Printf("\n✅ Agent deployed on %s (status: running)\n", nodeIP)
+		fmt.Printf("   Logs:\n%s\n", strings.TrimSpace(logsOut))
+	} else {
+		logsOut, _, _ := runSSH(conn, "docker logs --tail 20 sdk-ops-agent 2>&1")
+		return fmt.Errorf("agent status: %s\nlogs:\n%s", status, logsOut)
+	}
+	return nil
 }
