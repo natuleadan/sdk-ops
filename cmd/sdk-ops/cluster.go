@@ -233,11 +233,124 @@ Examples:
 	getCmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace")
 	getCmd.Flags().StringP("output", "o", "yaml", "Output format (yaml, json, wide)")
 
+	// --- Commands 25-29 ---
+
+	helmCmd := &cobra.Command{
+		Use:   "helm",
+		Short: "Manage Helm charts",
+	}
+	helmRepoAddCmd := &cobra.Command{
+		Use:   "repo-add <name> <url>",
+		Short: "Add a Helm repository",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterHelm(fmt.Sprintf("repo add %s %s", args[0], args[1]), cmd)
+		},
+	}
+	helmRepoListCmd := &cobra.Command{
+		Use:   "repo-list",
+		Short: "List Helm repositories",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterHelm("repo list", cmd)
+		},
+	}
+	helmInstallCmd := &cobra.Command{
+		Use:   "install <name> <chart>",
+		Short: "Install a Helm chart",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ns, _ := cmd.Flags().GetString("namespace")
+			kargs := fmt.Sprintf("install %s %s", args[0], args[1])
+			if ns != "" {
+				kargs += fmt.Sprintf(" --namespace=%s", ns)
+			}
+			return runClusterHelm(kargs, cmd)
+		},
+	}
+	helmInstallCmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace")
+	helmUpgradeCmd := &cobra.Command{
+		Use:   "upgrade <name> <chart>",
+		Short: "Upgrade a Helm release",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ns, _ := cmd.Flags().GetString("namespace")
+			kargs := fmt.Sprintf("upgrade %s %s", args[0], args[1])
+			if ns != "" {
+				kargs += fmt.Sprintf(" --namespace=%s", ns)
+			}
+			return runClusterHelm(kargs, cmd)
+		},
+	}
+	helmUpgradeCmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace")
+	helmListCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List Helm releases",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ns, _ := cmd.Flags().GetString("namespace")
+			kargs := "list"
+			if ns != "" {
+				kargs += fmt.Sprintf(" --namespace=%s", ns)
+			}
+			return runClusterHelm(kargs, cmd)
+		},
+	}
+	helmListCmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace")
+	helmCmd.AddCommand(helmRepoAddCmd)
+	helmCmd.AddCommand(helmRepoListCmd)
+	helmCmd.AddCommand(helmInstallCmd)
+	helmCmd.AddCommand(helmUpgradeCmd)
+	helmCmd.AddCommand(helmListCmd)
+
+	nodeSSHCmd := &cobra.Command{
+		Use:   "node-ssh <node-name>",
+		Short: "SSH into a cluster node",
+		Args:  cobra.ExactArgs(1),
+		Long: `Get the internal IP of a cluster node and SSH into it.
+Uses the same SSH key as the k3s server connection.
+
+Example:
+  sdk-ops cluster node-ssh node-1`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterNodeSSH(args[0], cmd)
+		},
+	}
+
+	portForwardCmd := &cobra.Command{
+		Use:   "port-forward <pod> <local:remote>",
+		Short: "Forward a port to a pod",
+		Args:  cobra.ExactArgs(2),
+		Long: `Forward a local port to a port on a pod via SSH tunnel.
+
+Example:
+  sdk-ops cluster port-forward my-pod 8080:3000`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ns, _ := cmd.Flags().GetString("namespace")
+			return runClusterPortForward(args[0], args[1], ns, cmd)
+		},
+	}
+	portForwardCmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace")
+
+	etcdRestoreCmd := &cobra.Command{
+		Use:   "etcd-restore <snapshot-file>",
+		Short: "Restore etcd from a snapshot",
+		Args:  cobra.ExactArgs(1),
+		Long: `Restore etcd from a snapshot file on the server.
+Stops k3s, restores, and starts with --cluster-reset.
+
+Example:
+  sdk-ops cluster etcd-restore /var/lib/rancher/k3s/server/db/snapshots/on-demand/server-xxx`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterEtcdRestore(args[0], cmd)
+		},
+	}
+
 	// Add global flags to all subcommands
 	for _, sc := range []*cobra.Command{
 		topCmd, logsCmd, execCmd, scaleCmd, applyCmd, deleteCmd, describeCmd,
 		tokenCmd, restartCmd, eventsCmd, cordonCmd, uncordonCmd, drainCmd,
 		labelCmd, upgradeCmd, etcdSnapshotCmd, certRotateCmd, getCmd,
+		helmCmd, helmRepoAddCmd, helmRepoListCmd, helmInstallCmd, helmUpgradeCmd, helmListCmd,
+		nodeSSHCmd, portForwardCmd, etcdRestoreCmd,
 	} {
 		sc.Flags().StringP("node", "N", "", "k3s server node IP (default: first registered)")
 		sc.Flags().StringP("user", "u", "root", "SSH user")
@@ -275,6 +388,10 @@ Examples:
 	cmd.AddCommand(etcdSnapshotCmd)
 	cmd.AddCommand(certRotateCmd)
 	cmd.AddCommand(getCmd)
+	cmd.AddCommand(helmCmd)
+	cmd.AddCommand(nodeSSHCmd)
+	cmd.AddCommand(portForwardCmd)
+	cmd.AddCommand(etcdRestoreCmd)
 
 	return cmd
 }
@@ -573,4 +690,115 @@ func runClusterGet(resType, name, namespace, format string, cmd *cobra.Command) 
 		kargs += fmt.Sprintf(" --namespace=%s", namespace)
 	}
 	return k3sExec(ip, user, key, port, kargs)
+}
+
+// 25-26. cluster helm
+func runClusterHelm(kargs string, cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	client := newSSHClient(ip, user, port, key)
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh %s: %w", ip, err)
+	}
+	defer conn.Close()
+
+	// Auto-install helm if not present
+	out, _, _ := ssh.Run(conn, "command -v helm || echo 'no-helm'")
+	if strings.TrimSpace(out) == "no-helm" {
+		fmt.Println("  → Installing helm...")
+		installOut, _, err := ssh.Run(conn, `curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | sudo bash 2>&1 | tail -1`)
+		if err != nil {
+			return fmt.Errorf("helm install: %w\n%s", err, installOut)
+		}
+	}
+
+	fullCmd := fmt.Sprintf("sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm %s 2>&1 || true", kargs)
+	out, _, err = ssh.Run(conn, fullCmd)
+	output := strings.TrimSpace(out)
+	if output != "" {
+		fmt.Println(output)
+	}
+	return nil
+}
+
+// 27. cluster node-ssh
+func runClusterNodeSSH(nodeName string, cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	client := newSSHClient(ip, user, port, key)
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh %s: %w", ip, err)
+	}
+	defer conn.Close()
+
+	// Get node internal IP (first one, prefer IPv4)
+	nodeIP, _, err := ssh.Run(conn, fmt.Sprintf(
+		`sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl get node %s -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "not-found"`,
+		nodeName))
+	nodeIP = strings.TrimSpace(nodeIP)
+	if nodeIP == "" || nodeIP == "not-found" || strings.HasPrefix(nodeIP, "not-found") {
+		return fmt.Errorf("node %s not found or has no InternalIP", nodeName)
+	}
+	// Take first IP if multiple are returned
+	if idx := strings.IndexAny(nodeIP, " \t\n"); idx >= 0 {
+		nodeIP = nodeIP[:idx]
+	}
+	fmt.Printf("  → SSH to %s (%s)...\n", nodeName, nodeIP)
+	fmt.Printf("  ssh %s@%s -p %d -i %s\n", user, nodeIP, port, key)
+
+	// Try SSH into the node directly
+	nodeClient := newSSHClient(nodeIP, user, port, key)
+	nodeConn, err := nodeClient.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh %s: %w", nodeIP, err)
+	}
+	defer nodeConn.Close()
+
+	// Interactive shell via PTY
+	return ssh.RunPTY(nodeConn, "bash -l")
+}
+
+// 28. cluster port-forward
+func runClusterPortForward(pod, portMapping, namespace string, cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	client := newSSHClient(ip, user, port, key)
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh %s: %w", ip, err)
+	}
+	defer conn.Close()
+
+	kargs := fmt.Sprintf("port-forward %s %s", pod, portMapping)
+	if namespace != "" {
+		kargs += fmt.Sprintf(" -n %s", namespace)
+	}
+	fullCmd := fmt.Sprintf("sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl %s", kargs)
+	fmt.Printf("  → Forwarding %s on %s\n", portMapping, ip)
+	fmt.Println("  Press Ctrl+C to stop")
+	return ssh.RunPTY(conn, fullCmd)
+}
+
+// 29. cluster etcd-restore
+func runClusterEtcdRestore(snapshotFile string, cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	client := newSSHClient(ip, user, port, key)
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh %s: %w", ip, err)
+	}
+	defer conn.Close()
+
+	fmt.Printf("  → Restoring etcd from %s...\n", snapshotFile)
+	script := fmt.Sprintf(`
+sudo systemctl stop k3s
+sudo k3s server --cluster-reset --cluster-reset-restore-path=%s 2>&1
+sudo systemctl start k3s
+echo "etcd-restore: OK"
+`, snapshotFile)
+	out, _, err := ssh.Run(conn, script)
+	if err != nil {
+		return fmt.Errorf("etcd-restore: %w\n%s", err, out)
+	}
+	fmt.Print(out)
+	return nil
 }
