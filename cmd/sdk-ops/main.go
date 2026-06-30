@@ -43,6 +43,7 @@ Examples:
 	rootCmd.AddCommand(newProviderCmd())
 	rootCmd.AddCommand(newNotifyCmd())
 	rootCmd.AddCommand(newDbCmd())
+	rootCmd.AddCommand(newAgentCmd())
 	rootCmd.AddCommand(newVersionCmd())
 
 	if err := rootCmd.Execute(); err != nil {

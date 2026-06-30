@@ -39,10 +39,9 @@ Examples:
 			name, _ := cmd.Flags().GetString("name")
 			version, _ := cmd.Flags().GetString("version")
 			exposePort, _ := cmd.Flags().GetInt("port")
-			dbPort, _ := cmd.Flags().GetInt("db-port")
 			nodeIP, _ := cmd.Flags().GetString("node")
-			dbUser, _ := cmd.Flags().GetString("user")
-			dbPass, _ := cmd.Flags().GetString("pass")
+			dbUser, _ := cmd.Flags().GetString("db-user")
+			dbPass, _ := cmd.Flags().GetString("db-pass")
 
 			if nodeIP == "" {
 				cfg, err := loadConfig()
@@ -73,9 +72,6 @@ Examples:
 				Port:    exposePort,
 				User:    dbUser,
 				Pass:    dbPass,
-			}
-			if dbPort > 0 {
-				cfg.Port = dbPort
 			}
 
 			result, err := deploy.ProvisionDatabase(conn, cfg)
@@ -184,10 +180,11 @@ Examples:
 	createCmd.Flags().String("name", "", "Database name (default: type name)")
 	createCmd.Flags().String("version", "", "Database version (e.g., 17-alpine, 8.0)")
 	createCmd.Flags().Int("port", 0, "Expose on external port (0 = internal only)")
-	createCmd.Flags().String("user", "", "Database user (generated if empty)")
-	createCmd.Flags().String("pass", "", "Database password (generated if empty)")
+	createCmd.Flags().String("db-user", "", "Database user (generated if empty)")
+	createCmd.Flags().String("db-pass", "", "Database password (generated if empty)")
+	createCmd.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
 
-	for _, sc := range []*cobra.Command{createCmd, listCmd, removeCmd} {
+	for _, sc := range []*cobra.Command{listCmd, removeCmd} {
 		sc.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
 		sc.Flags().StringP("user", "u", "root", "SSH user")
 		sc.Flags().StringP("key", "k", "", "SSH private key path")
