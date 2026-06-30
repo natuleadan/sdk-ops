@@ -41,15 +41,20 @@ type infraFlags struct {
 	cloudInitOnly bool
 	airgap      bool
 	monitor     bool
+	auditd      bool
+	lynis       bool
 	lockRoot    bool
 	hardSSHPort int
 	logsURL     string
 	alertsURL   string
 	// k3s-specific
-	disableTraefik bool
-	kubeconfig     string
-	mergeConfig    bool
-	contextName    string
+	disableTraefik       bool
+	secretsEncryption    bool
+	protectKernelDefaults bool
+	admissionPlugins     string
+	kubeconfig           string
+	mergeConfig          bool
+	contextName          string
 	// provider-specific
 	provider   string
 	plan       string
@@ -336,11 +341,16 @@ Examples:
 	initCmd.Flags().StringVar(&f.mode, "mode", "k3s", "Installation mode: k3s, docker, bare")
 	initCmd.Flags().BoolVar(&f.crowdsec, "crowdsec", false, "Install CrowdSec (WAF/IPS)")
 	initCmd.Flags().BoolVar(&f.monitor, "monitor", false, "Install Prometheus node_exporter (port 9100)")
+	initCmd.Flags().BoolVar(&f.auditd, "auditd", false, "Install auditd for system auditing (CIS)")
+	initCmd.Flags().BoolVar(&f.lynis, "lynis", false, "Install Lynis security auditor")
 	initCmd.Flags().BoolVar(&f.lockRoot, "lock-root", false, "Lock root password after creating sdkops user")
 	initCmd.Flags().IntVar(&f.hardSSHPort, "ssh-port", 0, "Migrate SSH to custom port (0=keep port 22)")
 	initCmd.Flags().StringVar(&f.logsURL, "logs", "", "Install Promtail and ship logs to this Loki URL")
 	initCmd.Flags().StringVar(&f.alertsURL, "alerts", "", "Install Alertmanager with this Slack webhook URL")
 	initCmd.Flags().BoolVar(&f.disableTraefik, "disable-traefik", false, "Disable Traefik ingress in k3s")
+	initCmd.Flags().BoolVar(&f.secretsEncryption, "secrets-encryption", false, "Enable secrets encryption at rest in etcd (CIS)")
+	initCmd.Flags().BoolVar(&f.protectKernelDefaults, "protect-kernel-defaults", false, "Protect kubelet kernel defaults (CIS)")
+	initCmd.Flags().StringVar(&f.admissionPlugins, "admission-plugins", "NodeRestriction,EventRateLimit", "Kube-apiserver admission plugins (CIS)")
 	initCmd.Flags().StringVar(&f.kubeconfig, "kubeconfig", "./kubeconfig", "Path to save kubeconfig")
 	initCmd.Flags().BoolVar(&f.mergeConfig, "merge", false, "Merge kubeconfig into ~/.kube/config")
 	initCmd.Flags().StringVar(&f.contextName, "context", "sdk-ops-cluster", "Kubeconfig context name")
@@ -1238,6 +1248,8 @@ func runInfraInit(ip string, f infraFlags) error {
 		hardCfg.User = f.user
 	}
 	hardCfg.EnableMonitor = f.monitor
+	hardCfg.EnableAuditd = f.auditd
+	hardCfg.EnableLynis = f.lynis
 	hardCfg.LockRoot = f.lockRoot
 	if f.hardSSHPort > 0 {
 		hardCfg.SSHPort = f.hardSSHPort
@@ -1369,6 +1381,9 @@ func runInfraInit(ip string, f infraFlags) error {
 		installCfg.Context = f.contextName
 		installCfg.Merge = f.mergeConfig
 		installCfg.DisableTraefik = f.disableTraefik
+		installCfg.SecretsEncryption = f.secretsEncryption
+		installCfg.ProtectKernelDefaults = f.protectKernelDefaults
+		installCfg.AdmissionPlugins = f.admissionPlugins
 		installCfg.SkipDownload = f.airgap
 
 		if err := k3s.Install(conn, installCfg); err != nil {

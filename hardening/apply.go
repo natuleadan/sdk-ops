@@ -12,15 +12,19 @@ type Config struct {
 	User          string
 	SSHPort       int    // 0 = don't migrate, >0 = migrate SSH to this port (e.g. 2222)
 	EnableMonitor bool
-	LockRoot      bool // lock root password after creating sdkops user
+	LockRoot      bool   // lock root password after creating sdkops user
+	EnableAuditd  bool   // install auditd
+	EnableLynis   bool   // install Lynis security auditor
 }
 
 func DefaultConfig() Config {
 	return Config{
 		User:          "sdkops",
-		SSHPort:       0, // 0 = don't migrate SSH port
+		SSHPort:       0,
 		EnableMonitor: false,
 		LockRoot:      false,
+		EnableAuditd:  false,
+		EnableLynis:   false,
 	}
 }
 
@@ -36,9 +40,12 @@ func Apply(client *goss.Client, cfg Config) error {
 		{"install_packages", installPackages},
 		{"create_user", createUser},
 		{"kernel_tuning", kernelTuning},
+		{"remove_unused_services", removeUnusedServices},
 		{"fail2ban", fail2banAndUpgrades},
 		{"ssh_hardening", sshHardening},
 		{"nftables", nftablesFirewall},
+		{"auditd", installAuditd},
+		{"lynis", installLynis},
 		{"node_exporter", installNodeExporter},
 	}
 
@@ -63,6 +70,10 @@ func Check(client *goss.Client) (string, error) {
 		"sudo systemctl is-active fail2ban --quiet && echo 'fail2ban: OK' || echo 'fail2ban: MISSING'",
 		"sudo systemctl is-active ssh 2>/dev/null || sudo systemctl is-active sshd --quiet && echo 'sshd: OK' || echo 'sshd: MISSING'",
 		"sudo grep -q '^PasswordAuthentication no' /etc/ssh/sshd_config && echo 'pw-auth: OK' || echo 'pw-auth: FAIL'",
+		"sudo grep -q '^PermitRootLogin no' /etc/ssh/sshd_config && echo 'root-login: OK' || echo 'root-login: FAIL'",
+		"sudo grep -q '^MaxAuthTries 3' /etc/ssh/sshd_config && echo 'max-auth-tries: OK' || echo 'max-auth-tries: FAIL'",
+		"sudo systemctl is-active auditd --quiet 2>/dev/null && echo 'auditd: OK' || echo 'auditd: MISSING'",
+		"command -v lynis &>/dev/null && echo 'lynis: OK' || echo 'lynis: MISSING'",
 	}
 	cmd := ""
 	for _, c := range checks {

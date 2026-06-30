@@ -56,6 +56,8 @@ net.ipv4.conf.all.accept_source_route=0
 net.ipv6.conf.all.accept_source_route=0
 net.ipv4.conf.all.accept_redirects=0
 net.ipv6.conf.all.accept_redirects=0
+net.ipv4.conf.all.send_redirects=0
+net.ipv4.conf.default.send_redirects=0
 kernel.yama.ptrace_scope=1
 SYSCTL
 sysctl -p
@@ -111,11 +113,14 @@ func sshHardening(client *goss.Client, cfg Config) error {
 	script := fmt.Sprintf(`
 cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null
 
-# Harden SSH (keep port 22)
-sed -i 's/^#PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
-sed -i 's/^PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+# Harden SSH (CIS Level 1)
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sed -i 's/^#MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
+grep -q '^MaxAuthTries' /etc/ssh/sshd_config || echo 'MaxAuthTries 3' >> /etc/ssh/sshd_config
+sed -i 's/^#PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config
+grep -q '^PermitEmptyPasswords' /etc/ssh/sshd_config || echo 'PermitEmptyPasswords no' >> /etc/ssh/sshd_config
 
 # Copy SSH key to new user
 mkdir -p /home/%s/.ssh
@@ -153,6 +158,20 @@ fi
 	return nil
 }
 
+func removeUnusedServices(client *goss.Client, cfg Config) error {
+	fmt.Println("  → Removing unused services (telnet, ftp, rsh, rpcbind, avahi, cups)...")
+	script := `
+for svc in telnet ftp rsh rpcbind avahi-daemon cups; do
+    systemctl disable --now "$svc" 2>/dev/null || true
+done
+for pkg in telnet ftp rsh-client rpcbind avahi-daemon cups; do
+    apt-get remove -y -qq "$pkg" 2>/dev/null || true
+done
+echo "unused-services: OK"
+`
+	return ssh.RunStream(client, script)
+}
+
 func nftablesFirewall(client *goss.Client, cfg Config) error {
 	openPorts := "22, 80, 443, 6443"
 	if cfg.MigrateSSH() {
@@ -186,6 +205,38 @@ systemctl enable nftables && systemctl restart nftables && echo "nftables: OK (p
 	}
 	fmt.Print(out)
 	return nil
+}
+
+func installAuditd(client *goss.Client, cfg Config) error {
+	if !cfg.EnableAuditd {
+		fmt.Println("  → Skipping auditd (not enabled)")
+		return nil
+	}
+	fmt.Println("  → Installing auditd...")
+	script := `
+if ! command -v auditd &>/dev/null; then
+    apt-get install -y -qq auditd audispd-plugins 2>&1 | tail -1
+fi
+systemctl enable auditd 2>/dev/null || true
+systemctl start auditd 2>/dev/null || true
+echo "auditd: OK"
+`
+	return ssh.RunStream(client, script)
+}
+
+func installLynis(client *goss.Client, cfg Config) error {
+	if !cfg.EnableLynis {
+		fmt.Println("  → Skipping Lynis (not enabled)")
+		return nil
+	}
+	fmt.Println("  → Installing Lynis security auditor...")
+	script := `
+if ! command -v lynis &>/dev/null; then
+    apt-get install -y -qq lynis 2>&1 | tail -1
+fi
+echo "lynis: OK"
+`
+	return ssh.RunStream(client, script)
 }
 
 func installNodeExporter(client *goss.Client, cfg Config) error {

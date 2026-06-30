@@ -12,15 +12,18 @@ import (
 )
 
 type InstallConfig struct {
-	PublicIP      string // VPS public IP (for TLS SAN)
-	ExtraArgs     string // Extra k3s args: "--disable traefik --docker"
-	K3sVersion    string // Specific version (empty = latest stable)
-	K3sChannel    string // Channel: stable, latest, v1.30 (default: stable)
-	LocalPath     string // Where to save kubeconfig (default: ./kubeconfig)
-	Context       string // Kubeconfig context name (default: default)
-	Merge         bool   // Merge into ~/.kube/config?
-	DisableTraefik bool
-	SkipDownload  bool   // Skip downloading binary (for airgap installs)
+	PublicIP            string // VPS public IP (for TLS SAN)
+	ExtraArgs           string // Extra k3s args: "--disable traefik --docker"
+	K3sVersion          string // Specific version (empty = latest stable)
+	K3sChannel          string // Channel: stable, latest, v1.30 (default: stable)
+	LocalPath           string // Where to save kubeconfig (default: ./kubeconfig)
+	Context             string // Kubeconfig context name (default: default)
+	Merge               bool   // Merge into ~/.kube/config?
+	DisableTraefik      bool
+	SecretsEncryption   bool   // --secrets-encryption (CIS)
+	ProtectKernelDefaults bool // --protect-kernel-defaults (CIS)
+	AdmissionPlugins    string // --kube-apiserver-arg enable-admission-plugins=...
+	SkipDownload        bool   // Skip downloading binary (for airgap installs)
 }
 
 func DefaultInstallConfig(publicIP string) InstallConfig {
@@ -39,6 +42,15 @@ func Install(client *goss.Client, cfg InstallConfig) error {
 	extraArgs := cfg.ExtraArgs
 	if cfg.DisableTraefik {
 		extraArgs = strings.TrimSpace(extraArgs + " --disable traefik")
+	}
+	if cfg.SecretsEncryption {
+		extraArgs = strings.TrimSpace(extraArgs + " --secrets-encryption")
+	}
+	if cfg.ProtectKernelDefaults {
+		extraArgs = strings.TrimSpace(extraArgs + " --protect-kernel-defaults")
+	}
+	if cfg.AdmissionPlugins != "" {
+		extraArgs = strings.TrimSpace(extraArgs + fmt.Sprintf(" --kube-apiserver-arg enable-admission-plugins=%s", cfg.AdmissionPlugins))
 	}
 
 	// Build the install command: curl | env K3S_XXX... sh -
