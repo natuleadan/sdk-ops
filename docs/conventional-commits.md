@@ -47,25 +47,34 @@ feat(cli)!: change command output format
 BREAKING CHANGE: new format drops legacy flags
 ```
 
-## Release Flow
+## Release Flow (auto-detect, no manual workflow)
 
 ```
-1. Push commits to PR
+1. Push commits to PR on `main`
    → CI validates conventional commits format + scope presence
    → CI runs lint + tests + build
 
-2. Merge to main
+2. Merge squash to `main` with a conventional commit message
 
-3. Go to GitHub → Actions → Release → "Run workflow"
-   → Select bump: patch / minor / major
-   → CI creates tag vX.Y.Z + runs GoReleaser
-   → Binaries published to GitHub Releases with checksums
+3. Push to `main` triggers CI:
+   → reads the squash commit message
+   → auto-detects version bump (see table below)
+   → creates git tag vX.Y.Z
+   → GoReleaser builds binaries + publishes GitHub Release
 ```
+
+No manual "Run workflow" step needed. The CI reads the commit message on push to `main`.
 
 ## Version Calculation
 
-| Scenario | Example commit | Pre-1.0 bump | Post-1.0 bump |
-|----------|---------------|--------------|---------------|
-| Bug fix only | `fix(ssh): handle timeout` | 0.1.0 → 0.1.1 | 1.0.0 → 1.0.1 |
-| New feature | `feat(cli): add backup` | 0.1.0 → 0.2.0 | 1.0.0 → 1.1.0 |
-| Breaking change | `feat!: change output` | 0.1.0 → 0.2.0 | 1.0.0 → 2.0.0 |
+| Condition | Example commit | Bump |
+|-----------|---------------|------|
+| `BREAKING` or `!` in subject | `fix(api)!: change response` | MAJOR |
+| `release(major):` | `release(major): rewrite` | MAJOR |
+| `release(minor):` | `release(minor): add pagination` | MINOR |
+| `release(patch):` | `release(patch): hotfix` | PATCH |
+| `feat:` | `feat(cli): add backup` | MINOR |
+| `fix:` or `perf:` | `fix(ssh): handle timeout` | PATCH |
+| `docs:`, `chore:`, `ci:`, etc. | `docs(readme): update` | SKIP (no release) |
+
+**First release:** when no tags exist, CI forces v0.0.1 regardless of commit type.

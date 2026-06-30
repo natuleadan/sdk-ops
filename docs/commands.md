@@ -62,6 +62,16 @@ sdk-ops infra join <server-ip> <agent-ip> [flags]
   --token          Cluster token (auto-fetched if SSH access to server)
 ```
 
+### ready
+
+Check if a node's cluster is fully operational. Exits 0 if healthy, 1 otherwise.
+
+```bash
+sdk-ops infra ready <ip> [flags]
+```
+
+Runs k3s diagnostics, verifies all nodes are Ready, and checks that core system pods are Running.
+
 ### status
 
 ```bash
@@ -69,6 +79,44 @@ sdk-ops infra status <ip> [flags]
 ```
 
 Shows: hostname, kernel, uptime, CPU, memory, disk, nftables, fail2ban, Docker, k3s, pods.
+
+### plan
+
+Validate and preview a multi-node infrastructure plan before applying it.
+
+```bash
+sdk-ops infra plan <file.yaml> [flags]
+```
+
+Parses a YAML plan defining servers and agents, validates all hosts are reachable, and prints a summary of what will be provisioned.
+
+Example `plan.yaml`:
+
+```yaml
+mode: k3s
+parallel: 5
+server_options:
+  user: root
+  ssh_key: ~/.ssh/id_ed25519
+  k3s_extra_args: "--disable traefik"
+agent_options:
+  user: root
+hosts:
+  - name: server-1
+    role: server
+    host: 192.168.1.10
+  - name: agent-1
+    role: agent
+    host: 192.168.1.11
+```
+
+### apply
+
+Execute a multi-node infrastructure plan. Installs servers first, then joins agents — all in parallel.
+
+```bash
+sdk-ops infra apply <plan.yaml> [flags]
+```
 
 ### remove
 
@@ -115,18 +163,70 @@ Add, remove, or list nftables firewall rules on a remote node.
 
 ```bash
 sdk-ops infra cert install [flags]
-  --domain string   Domain to provision TLS for (required)
-  --email string    Email for Let's Encrypt (required)
-  --port int        Local port to proxy (default 8080)
-  --staging         Use Let's Encrypt staging environment
-  -n, --node        Target node IP
+  --domain string     Domain to provision TLS for (required)
+  --email string      Email for Let's Encrypt
+  --port int          Local port to proxy (default 8080)
+  --provider string   Cert provider: letsencrypt, cloudflare, manual (default "letsencrypt")
+  --cert-file string  Path to cert file (for --provider manual)
+  --key-file string   Path to key file (for --provider manual)
+  --runtime string    Runtime: docker or k3s (default "docker")
+  --staging           Use Let's Encrypt staging environment
+  -n, --node          Target node IP
 
 sdk-ops infra cert info [flags]
   --domain string   Domain to check
   -n, --node        Target node IP
 ```
 
-Install Caddy and provision TLS certificates via Let's Encrypt.
+Examples:
+
+```bash
+# Let's Encrypt via Caddy (docker runtime)
+sdk-ops infra cert install --domain example.com --email admin@x.com --node <ip>
+
+# Let's Encrypt via Traefik (k3s runtime)
+sdk-ops infra cert install --domain example.com --email admin@x.com --runtime k3s --node <ip>
+
+# Upload existing cert
+sdk-ops infra cert install --cert-file ./server.crt --key-file ./server.key --node <ip>
+```
+
+Install TLS certificates and configure the reverse proxy.
+
+Providers:
+- `letsencrypt` (default) — auto cert via Let's Encrypt
+- `cloudflare` — Cloudflare Origin CA (detects if domain is proxied by CF)
+- `manual` — upload existing cert and key files
+
+Runtime affects how the cert is installed:
+- `docker` — installs Caddy with the cert (default)
+- `k3s` — configures Traefik Ingress with Let's Encrypt
+
+### proxy
+
+Manage reverse proxy backends on a node. Supports Caddy, Traefik, and Nginx.
+
+```bash
+sdk-ops infra proxy set --backend <type> [flags]
+  --backend string    Proxy backend: caddy, traefik, nginx (required)
+  --domain string     Domain name (required)
+  --email string      Email for Let's Encrypt
+  -n, --node          Target node IP
+  -u, --user          SSH user
+  -k, --key           SSH key path
+  -p, --port          SSH port
+
+sdk-ops infra proxy status [flags]
+  -n, --node          Target node IP
+```
+
+Examples:
+
+```bash
+sdk-ops infra proxy set --backend caddy --domain example.com --node <ip>
+sdk-ops infra proxy set --backend traefik --domain example.com --node <ip>
+sdk-ops infra proxy status --node <ip>
+```
 
 ### logs
 
@@ -169,16 +269,26 @@ sdk-ops node list                              # List registered nodes
 sdk-ops node info <ip>                         # Dashboard: CPU, RAM, DISK, k3s, pods
 sdk-ops node top <ip>                          # Interactive htop via SSH
 sdk-ops node exec [ip] -- <command>            # Run command remotely
-sdk-ops node exec --all -- <command>            # Run on all registered nodes
+sdk-ops node exec --all -- <command>           # Run on all registered nodes
+sdk-ops node exec --servers -- <command>       # Run only on server nodes
+sdk-ops node exec --agents -- <command>        # Run only on agent nodes
 ```
 
 ## sdk-ops deploy — Service deployment
 
 ```bash
+sdk-ops deploy init <dir> --template <name> [flags]
+  --template string   Template name: html, node, wordpress, go
+  --name string       Service name (default "app")
+
 sdk-ops deploy push <dir> --node <ip> [flags]
   --name             Service name (default: directory name)
   --git              Git repository URL (clones and deploys)
   --sops-key         Auto-decrypt service.yaml with sops (age key)
+  --builder string   Build method: dockerfile, nixpacks, pack (default: auto-detect)
+  --runtime string   Runtime: docker (default), k3s, bare
+  --domain string    Domain for k3s Ingress (required with --runtime k3s)
+  --zero-downtime    Blue/green deploy with zero downtime
   --all              Deploy to all registered nodes in parallel
   -u, --user         SSH user
   -k, --key          SSH private key path
@@ -190,18 +300,65 @@ sdk-ops deploy encrypt <file> [flags]
 sdk-ops deploy decrypt <file>
 ```
 
-**Deploy flow:**
+**Templates:**
+
+Generate project scaffolding with a single command:
+
+```bash
+sdk-ops deploy init ./my-site --template html        # Static HTML + Nginx
+sdk-ops deploy init ./my-blog --template wordpress    # WordPress + MySQL
+sdk-ops deploy init ./my-api --template node          # Node.js Express
+sdk-ops deploy init ./my-svc --template go           # Go HTTP server
+```
+
+Each template generates a docker-compose.yml, service.yaml, and any required config files.
+
+**Builder backends:**
+
+When building custom images, sdk-ops auto-detects the best builder. Override with `--builder`:
+
+```bash
+sdk-ops deploy push ./my-app --builder dockerfile    # Docker build (default if Dockerfile exists)
+sdk-ops deploy push ./my-app --builder nixpacks      # Nixpacks (auto-detect language)
+sdk-ops deploy push ./my-app --builder pack          # CNB buildpacks (heroku/builder:24)
+```
+
+For projects with a docker-compose.yml using public images (nginx:alpine, etc.), the builder is skipped automatically.
+
+**Runtimes:**
+
+```bash
+sdk-ops deploy push ./my-app --runtime docker        # docker-compose up -d (default)
+sdk-ops deploy push ./my-app --runtime k3s --domain app.example.com  # k3s Deployment + Service + Ingress
+sdk-ops deploy push ./my-app --runtime bare           # Upload files only, no service start
+```
+
+**Zero-downtime deploy:**
+
+```bash
+sdk-ops deploy push ./my-app --zero-downtime         # Blue/green: start new, health check, switch traffic, stop old
+```
+
+**Deploy flow (docker runtime):**
 
 1. Decrypt service.yaml (if --sops-key)
-2. Build Go binary for linux/amd64 (if Go source found)
-3. Auto-install Docker on node if not present
-4. Docker login to registry on node
-5. Build Docker image, push to registry
+2. Auto-detect builder (dockerfile, nixpacks, pack) or skip for compose
+3. Build image and push to registry (if builder detected)
+4. Auto-install Docker on node if not present
+5. Docker login to registry on node
 6. Generate docker-compose.yml with optional postgres sidecar
 7. Upload files to `/opt/sdk-ops/services/<name>/v{N}/`
 8. `docker compose up -d` or run as systemd service
 9. Health check (HTTP GET /health or /healthz)
 10. Auto-rollback on failure
+
+**Deploy flow (k3s runtime):**
+
+1. Upload files to `/opt/sdk-ops/services/<name>/v{N}/`
+2. Read service.yaml for domain, port, and image
+3. Generate Deployment + Service + Ingress YAML
+4. `kubectl apply -f` on the remote cluster
+5. Service accessible at `http://<domain>/` via Traefik ingress
 
 ## sdk-ops service — Service management
 

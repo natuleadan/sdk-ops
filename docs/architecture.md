@@ -32,16 +32,30 @@ sdk-ops is a single binary CLI (`sdk-ops`) that provisions and operates servers 
 ```
 cmd/sdk-ops/              ← Cobra CLI root + all subcommands
 ├── main.go          ← Root command, global --insecure flag, newSSHClient helper
-├── infra.go         ← infra init/join/status/remove/backup/restore/firewall/cert/logs/alerts
-├── node.go          ← node list/info/top/exec (--all flag)
-├── deploy.go        ← deploy push/encrypt/decrypt, auto Docker install
+├── infra.go         ← infra init/join/ready/plan/apply/status/remove/backup/restore
+│                       firewall/cert/proxy/logs/alerts
+├── node.go          ← node list/info/top/exec (--all, --servers, --agents)
+├── deploy.go        ← deploy init/push/encrypt/decrypt, auto Docker install, blue/green
 ├── cluster.go       ← cluster (16 kubectl wrappers, auto k3s install)
 ├── service.go       ← service status/logs/restart/rollback/versions
 ├── config.go        ← config init/add-node/list-nodes/remove-node/set-credentials
+│                       NodeConfig with Role, Arch
 ├── provider.go      ← provider vps/k8s/lb/dns/ssh-key
 └── backup.go        ← backup create/restore (top-level)
 
 server.go / config.go ← High-level ops.Server API + YAML config
+
+hooks/               ← Pre/post trigger system
+├── hooks.go         ← Run(phase, vars), InitHooksDir, InstallHook
+
+templates/           ← Project scaffolding
+├── templates.go     ← Scaffold, List, InitServiceYAML
+├── content.go       ← 4 templates: html, node, wordpress, go
+
+plan/                ← Multi-node declarative provisioning
+├── types.go         ← Plan, Host, Options structs
+├── parse.go         ← ParseFile, Validate, fillDefaults, Summary
+└── apply.go         ← Apply: SSH verify → install servers → join agents → register
 
 cloudinit/           ← Cloud-init user-data generation (--cloud-init)
 
@@ -63,12 +77,22 @@ docker/              ← Docker install + health check (auto sudo support)
 k3s/                 ← k3s install + join (auto sudo support)
 
 deploy/              ← Service lifecycle
-├── upload.go        ← Tar/SSH upload, version management, BuildAndPushImage
+├── upload.go        ← Tar/SSH upload, version management
 ├── run.go           ← Runtime detection, docker/k3s/systemd, health check
 ├── backup.go        ← BackupServices/RestoreServices
-├── tls.go           ← Caddy install + TLS cert provisioning
+├── tls.go           ← Cert providers: letsencrypt, cloudflare, manual + k3s runtime support
 ├── logging.go       ← Promtail install + Loki config
-└── alerting.go      ← Alertmanager install + Slack/Email/Telegram config
+├── alerting.go      ← Alertmanager install + Slack/Email/Telegram config
+├── builder.go       ← Builder interface + DetectBuilder, BuildImage
+├── builder_dockerfile.go ← Dockerfile builder (default)
+├── builder_nixpacks.go   ← Nixpacks builder (auto-detect language)
+├── builder_pack.go       ← Pack builder (CNB buildpacks)
+├── proxy.go              ← Proxy interface + DetectProxy
+├── proxy_caddy.go        ← Caddy proxy implementation
+├── proxy_traefik.go      ← Traefik proxy implementation (Docker)
+├── proxy_nginx.go        ← Nginx proxy implementation
+├── bluegreen.go          ← Blue/green zero-downtime deploy logic
+└── k8s_runtime.go        ← k3s Deployment + Service + Ingress generation
 
 monitor/             ← Remote stats (CPU, RAM, disk, k3s status, top processes)
 
@@ -111,17 +135,49 @@ providers/           ← Multi-provider interface
     └── sshkey.go    ← SSH key management
 ```
 
-## Deploy Flow
+## Deploy Flows
+
+### Docker runtime (default)
 
 ```
- 1. go build (linux/amd64)       ──local──  Compile for target arch
- 2. docker login on node          ──remote── Register container registry auth
- 3. docker buildx + push          ──registry─ Build & push Docker image
- 4. tar files + SSH pipe          ──network── Upload to /opt/sdk-ops/services/<name>/v{N}/
- 5. symlink: current → v{N}       ──local──  Atomic version switch
- 6. docker compose up -d          ──remote──  Start the service
- 7. Health check (HTTP :8080)     ──remote──  Verify + auto-rollback
+ 1. Auto-detect builder         ──local──  dockerfile / nixpacks / pack / skip (compose)
+ 2. Build & push image          ──local──  docker buildx → registry
+ 3. Upload files                ──network── tar + SSH pipe → /opt/sdk-ops/services/<name>/v{N}/
+ 4. docker compose up -d        ──remote──  Start containers
+ 5. Health check                ──remote──  GET /health or /healthz → auto-rollback
 ```
+
+For projects with a `docker-compose.yml` using public images, steps 1-2 are skipped.
+
+### k3s runtime
+
+```
+ 1. Upload files                ──network── tar + SSH pipe → /opt/sdk-ops/services/<name>/v{N}/
+ 2. Generate YAML               ──remote──  Deployment + Service + Ingress from service.yaml
+ 3. kubectl apply -f            ──remote──  Create k8s resources
+ 4. Service accessible          ──network──  http://<domain>/ via Traefik ingress
+```
+
+### Blue/green zero-downtime
+
+```
+ 1. Upload new version          ──network── v{N+1} alongside v{N}
+ 2. Start green container       ──remote──  On a different port
+ 3. Health check green          ──remote──  Verify before switching traffic
+ 4. Switch proxy                ──remote──  Update Caddy/Traefik to point to green
+ 5. Stop blue container         ──remote──  Old version retired
+```
+
+### Hooks lifecycle
+
+```
+ pre-init → [hardening + Docker + k3s install] → post-init
+ pre-join → [join agent to cluster]            → post-join
+ pre-deploy → [upload + start + health check]  → post-deploy
+ pre-remove → [uninstall k3s + Docker]         → post-remove
+```
+
+Hooks are executable scripts placed in `/opt/sdk-ops/hooks/<phase>/` on the VPS. They receive context via environment variables (`SDK_OPS_PHASE`, `SDK_OPS_IP`, etc.). Pre-hooks can abort the operation by exiting non-zero.
 
 ## Hardening Steps
 
@@ -150,6 +206,8 @@ nodes:
     key: /home/user/.ssh/id_ed25519
     port: 22
     mode: k3s
+    role: server         # server or agent (auto-detected on init/join)
+    arch: x86_64         # x86_64, aarch64 (auto-detected on init/join)
 ```
 
 ### Provider credentials (`~/.sdk-ops/credentials.yaml`)

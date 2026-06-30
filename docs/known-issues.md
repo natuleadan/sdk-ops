@@ -68,3 +68,41 @@ Some providers have specific cloud-init requirements:
 - **User-data scripts must be valid YAML** in the `#cloud-config` format
 - Some providers (Hetzner, DigitalOcean, Vultr, AWS) accept cloud-init natively
 - If a provider doesn't support cloud-init, `--cloud-init` falls back to SSH-based provisioning
+
+## nftables Forward Policy
+
+The hardening step used to set `policy drop` on the forward chain, which broke inter-container networking (Docker containers could not communicate with each other). Starting from the current release, forward policy defaults to `accept` for Docker compatibility.
+
+If you need to block forwarding for security reasons, manually add rules:
+
+```bash
+ssh <ip> "sudo nft add chain inet filter forward '{ type filter hook forward priority 0; policy drop; }'"
+```
+
+## Health Check
+
+The health check in `deploy push` looks for HTTP 200 on `/health` or `/healthz` endpoints on ports 18081, 8080, or 3000. If your app:
+
+- Listens on a different port (e.g., nginx on port 80)
+- Uses a different health endpoint (e.g., `/` or `/ping`)
+- Returns a non-200 status (e.g., 302 redirect)
+
+The health check will fail and trigger a rollback. To work around this, ensure your app has a `/health` endpoint returning 200, or increase the service.yaml health timeout.
+
+## Docker Port Conflict with k3s Traefik
+
+When k3s is installed with Traefik (default), Traefik occupies ports 80 and 443 via iptables DNAT rules. Docker containers that also expose port 80 will conflict. Solutions:
+
+- Use `--disable-traefik` during `infra init` to skip Traefik installation
+- Deploy with `--runtime k3s` to use k3s Deployment + Service + Ingress instead of docker-compose
+- Expose Docker containers on non-conflicting ports (e.g., 8080, 8081)
+
+## Cert Install: Let's Encrypt Validation
+
+Let's Encrypt HTTP-01 validation requires the domain to be publicly accessible on port 80. If the domain is behind Cloudflare proxy (orange cloud), the ACME challenge may fail. Solutions:
+
+- Pause Cloudflare proxy (gray cloud) during certificate issuance
+- Use Cloudflare Origin CA instead (requires CF API)
+- Use DNS-01 challenge (requires Cloudflare API token)
+
+The `--runtime k3s` flag configures the cert via Traefik, which can use its own ACME resolver if configured.
