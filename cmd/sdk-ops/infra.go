@@ -387,11 +387,28 @@ Examples:
 			}
 			defer conn.Close()
 
-			return deploy.InstallCaddy(conn, deploy.CaddyConfig{
+			provider, _ := cmd.Flags().GetString("provider")
+			certFile, _ := cmd.Flags().GetString("cert-file")
+			keyFile, _ := cmd.Flags().GetString("key-file")
+			certRuntime, _ := cmd.Flags().GetString("runtime")
+
+			certProvider := deploy.CertLetsEncrypt
+			switch provider {
+			case "cloudflare":
+				certProvider = deploy.CertCloudflare
+			case "manual":
+				certProvider = deploy.CertManual
+			}
+
+			return deploy.InstallCert(conn, deploy.CertConfig{
 				Domain:     domain,
 				Email:      email,
+				Provider:   certProvider,
+				CertFile:   certFile,
+				KeyFile:    keyFile,
 				TargetPort: port,
 				Staging:    staging,
+				Runtime:    certRuntime,
 			})
 		},
 	}
@@ -400,6 +417,10 @@ Examples:
 	certInstallCmd.Flags().Int("port", 8080, "Local port to proxy")
 	certInstallCmd.Flags().Bool("staging", false, "Use Let's Encrypt staging environment")
 	certInstallCmd.Flags().StringP("node", "n", "", "Target node IP")
+	certInstallCmd.Flags().String("provider", "letsencrypt", "Cert provider: letsencrypt, cloudflare, manual")
+	certInstallCmd.Flags().String("cert-file", "", "Path to cert file (for --provider manual)")
+	certInstallCmd.Flags().String("key-file", "", "Path to key file (for --provider manual)")
+	certInstallCmd.Flags().String("runtime", "k3s", "Runtime: docker or k3s (affects how cert is installed)")
 
 	certInfoCmd := &cobra.Command{
 		Use:   "info",

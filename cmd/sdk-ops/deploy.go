@@ -91,6 +91,8 @@ Examples:
 			runAll, _ := cmd.Flags().GetBool("all")
 			builderType, _ := cmd.Flags().GetString("builder")
 			zeroDowntime, _ := cmd.Flags().GetBool("zero-downtime")
+			runtimeMode, _ := cmd.Flags().GetString("runtime")
+			deployDomain, _ := cmd.Flags().GetString("domain")
 
 			if nodeIP != "" {
 				if n := lookupNode(nodeIP); n != nil {
@@ -153,12 +155,16 @@ Examples:
 				}
 			} else {
 				detected := deploy.DetectBuilder(sourceDir)
-				fmt.Printf("  → Detected builder: %s\n", detected)
-				imageRef, buildErr = deploy.BuildImage(sourceDir, name, reg, detected)
-				if buildErr != nil {
-					fmt.Printf("  ⚠️  Build failed: %v\n", buildErr)
+				if detected == "" {
+					fmt.Println("  → docker-compose detected, skipping build")
 				} else {
-					fmt.Printf("  → Image pushed to registry via %s\n", detected)
+					fmt.Printf("  → Detected builder: %s\n", detected)
+					imageRef, buildErr = deploy.BuildImage(sourceDir, name, reg, detected)
+					if buildErr != nil {
+						fmt.Printf("  ⚠️  Build failed: %v\n", buildErr)
+					} else {
+						fmt.Printf("  → Image pushed to registry via %s\n", detected)
+					}
 				}
 			}
 
@@ -231,8 +237,7 @@ Examples:
 				uploadCfg := deploy.UploadConfig{
 					ServiceName: name,
 					SourceDir:   sourceDir,
-					Files:       []string{"docker-compose.yml", "service.yaml"},
-					Exclude:     []string{".git", "node_modules", ".env", ".DS_Store"},
+					Exclude:     []string{".git", "node_modules", ".env", ".DS_Store", "Dockerfile", ".dockerignore"},
 				}
 
 				result, err := deploy.UploadAndDeploy(conn, uploadCfg)
@@ -240,7 +245,21 @@ Examples:
 					return fmt.Errorf("upload: %w", err)
 				}
 
-				if zeroDowntime {
+				if runtimeMode == "k3s" {
+					domain := deployDomain
+					if domain == "" {
+						domain = name + ".local"
+					}
+					versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
+					if err := deploy.DeployK3sFromCompose(conn, name, versionDir, imageRef); err != nil {
+						return fmt.Errorf("k3s deploy: %w", err)
+					}
+					if deployDomain != "" {
+						fmt.Printf("  → Access at http://%s/\n", deployDomain)
+					}
+				} else if runtimeMode == "bare" {
+					fmt.Println("  → Bare mode: files uploaded, no service started")
+				} else if zeroDowntime {
 					serviceDir := fmt.Sprintf("/opt/sdk-ops/services/%s", name)
 					if err := deploy.DeployBlueGreen(conn, name, serviceDir, result.Version); err != nil {
 						return fmt.Errorf("blue/green: %w", err)
@@ -315,6 +334,8 @@ Examples:
 	deployCmd.Flags().Bool("all", false, "Deploy to all registered nodes in parallel")
 	deployCmd.Flags().String("builder", "", "Build method: dockerfile, nixpacks, pack (default: auto-detect)")
 	deployCmd.Flags().Bool("zero-downtime", false, "Blue/green deploy with zero downtime")
+	deployCmd.Flags().String("runtime", "", "Runtime: docker (default), k3s, bare")
+	deployCmd.Flags().String("domain", "", "Domain for k3s Ingress (required with --runtime k3s)")
 
 	encryptCmd := &cobra.Command{
 		Use:   "encrypt <file>",

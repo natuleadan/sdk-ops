@@ -43,7 +43,7 @@ func NewProxy(p ProxyType) Proxy {
 }
 
 func DetectProxy(client *goss.Client) ProxyType {
-	out, _, _ := ssh.Run(client, "command -v caddy && echo 'caddy' || command -v traefik && echo 'traefik' || command -v nginx && echo 'nginx' || echo 'none'")
+	out, _, _ := ssh.Run(client, `if command -v caddy >/dev/null 2>&1; then echo 'caddy'; elif command -v traefik >/dev/null 2>&1; then echo 'traefik'; elif command -v nginx >/dev/null 2>&1; then echo 'nginx'; else echo 'none'; fi`)
 	switch strings.TrimSpace(out) {
 	case "caddy":
 		return ProxyCaddy

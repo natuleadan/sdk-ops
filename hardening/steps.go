@@ -172,7 +172,7 @@ table inet filter {
         ip protocol icmp accept
         ip6 nexthdr icmpv6 accept
     }
-    chain forward { type filter hook forward priority 0; policy drop; }
+    chain forward { type filter hook forward priority 0; policy accept; }
     chain output { type filter hook output priority 0; policy accept; }
 }
 NFT

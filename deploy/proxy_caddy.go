@@ -25,7 +25,7 @@ func (p *CaddyProxy) Install(client *goss.Client, cfg ProxyConfig) error {
 	if cfg.Staging {
 		tlsBlock = fmt.Sprintf(`tls %s {
     issuer acme {
-        ca https://acme-staging-v02.api.letsencrypt.org/directory
+        dir https://acme-staging-v02.api.letsencrypt.org/directory
     }
 }`, cfg.Email)
 	}

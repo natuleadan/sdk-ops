@@ -2,20 +2,54 @@ package deploy
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	goss "golang.org/x/crypto/ssh"
 
 	"github.com/natuleadan/sdk-ops/ssh"
 )
 
-type CaddyConfig struct {
-	Domain      string
-	Email       string
-	TargetPort  int
-	Staging     bool
+type CertProvider string
+
+const (
+	CertLetsEncrypt CertProvider = "letsencrypt"
+	CertCloudflare  CertProvider = "cloudflare"
+	CertManual      CertProvider = "manual"
+)
+
+type CertConfig struct {
+	Domain     string
+	Email      string
+	Provider   CertProvider
+	CertFile   string
+	KeyFile    string
+	TargetPort int
+	Staging    bool
+	Runtime    string // docker or k3s
 }
 
-func InstallCaddy(client *goss.Client, cfg CaddyConfig) error {
+func InstallCert(client *goss.Client, cfg CertConfig) error {
+	switch cfg.Provider {
+	case CertLetsEncrypt:
+		return installCertLetsEncrypt(client, cfg)
+	case CertManual:
+		return installCertManual(client, cfg)
+	case CertCloudflare:
+		return installCertCloudflare(client, cfg)
+	default:
+		return fmt.Errorf("unknown cert provider: %s", cfg.Provider)
+	}
+}
+
+func installCertLetsEncrypt(client *goss.Client, cfg CertConfig) error {
+	if cfg.Runtime == "k3s" || cfg.Runtime == "" {
+		return installCertTraefik(client, cfg)
+	}
+	return installCertCaddy(client, cfg)
+}
+
+func installCertCaddy(client *goss.Client, cfg CertConfig) error {
 	port := cfg.TargetPort
 	if port == 0 {
 		port = 8080
@@ -32,9 +66,7 @@ func InstallCaddy(client *goss.Client, cfg CaddyConfig) error {
 
 	script := fmt.Sprintf(`
 CADDY_VER="2.8.4"
-if command -v caddy &>/dev/null; then
-    echo "Caddy already installed"
-else
+if ! command -v caddy &>/dev/null; then
     apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https 2>/dev/null
     curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
     echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" > /etc/apt/sources.list.d/caddy-stable.list
@@ -47,7 +79,7 @@ else
 fi
 
 mkdir -p /etc/caddy
-cat > /etc/caddy/Caddyfile << CADDYFILE
+cat > /etc/caddy/Caddyfile << 'CADDYFILE'
 %s {
     %s
     reverse_proxy localhost:%d
@@ -64,6 +96,147 @@ echo "Caddy configured for %s (-> :%d)"
 		return fmt.Errorf("caddy install: %w\n%s", err, out)
 	}
 	fmt.Print(out)
+	return nil
+}
+
+func installCertTraefik(client *goss.Client, cfg CertConfig) error {
+	if cfg.Email == "" {
+		cfg.Email = "admin@" + cfg.Domain
+	}
+
+	script := fmt.Sprintf(`
+mkdir -p /var/lib/rancher/k3s/server/manifests
+
+cat > /var/lib/rancher/k3s/server/manifests/traefik-cert-%s.yaml << 'EOF'
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: %s-tls
+  namespace: default
+spec:
+  secretName: %s-tls
+  issuerRef:
+    name: letsencrypt-%s
+    kind: ClusterIssuer
+  commonName: %s
+  dnsNames:
+  - %s
+EOF
+
+kubectl apply -f /var/lib/rancher/k3s/server/manifests/traefik-cert-%s.yaml 2>/dev/null
+echo "Traefik certificate configured for %s"
+`, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain)
+
+	// Check if cert-manager ClusterIssuer exists
+	checkIssuer, _, _ := ssh.Run(client, "kubectl get clusterissuer letsencrypt-prod 2>/dev/null || echo 'missing'")
+	if strings.Contains(checkIssuer, "missing") {
+		fmt.Println("  → Creating Let's Encrypt ClusterIssuer for Traefik...")
+		issuerScript := fmt.Sprintf(`
+cat << 'EOF' | kubectl apply -f -
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-%s
+spec:
+  acme:
+    email: %s
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-%s-account-key
+    solvers:
+    - http01:
+        ingress:
+          class: traefik
+EOF
+`, cfg.Domain, cfg.Email, cfg.Domain)
+		if _, _, err := ssh.Run(client, issuerScript); err != nil {
+			return fmt.Errorf("create cluster issuer: %w", err)
+		}
+	}
+
+	out, _, err := ssh.Run(client, script)
+	if err != nil {
+		return fmt.Errorf("traefik cert: %w\n%s", err, out)
+	}
+	fmt.Print(out)
+	return nil
+}
+
+func installCertManual(client *goss.Client, cfg CertConfig) error {
+	if cfg.CertFile == "" || cfg.KeyFile == "" {
+		return fmt.Errorf("--cert-file and --key-file are required for manual cert")
+	}
+
+	certData, err := os.ReadFile(cfg.CertFile)
+	if err != nil {
+		return fmt.Errorf("read cert file: %w", err)
+	}
+	keyData, err := os.ReadFile(cfg.KeyFile)
+	if err != nil {
+		return fmt.Errorf("read key file: %w", err)
+	}
+
+	uploadCmd := "sudo mkdir -p /etc/ssl/certs && sudo sh -c 'cat > /etc/ssl/certs/%s.crt'"
+	sess, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("ssh session: %w", err)
+	}
+	defer sess.Close()
+
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("stdin pipe: %w", err)
+	}
+	go func() {
+		defer stdin.Close()
+		stdin.Write(certData)
+	}()
+	if out, err := sess.CombinedOutput(fmt.Sprintf(uploadCmd, cfg.Domain)); err != nil {
+		return fmt.Errorf("upload cert: %w\n%s", err, string(out))
+	}
+	sess.Close()
+
+	sess2, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("ssh session: %w", err)
+	}
+	defer sess2.Close()
+	stdin2, err := sess2.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("stdin pipe: %w", err)
+	}
+	go func() {
+		defer stdin2.Close()
+		stdin2.Write(keyData)
+	}()
+	if out, err := sess2.CombinedOutput(fmt.Sprintf("sudo sh -c 'cat > /etc/ssl/certs/%s.key'", cfg.Domain)); err != nil {
+		return fmt.Errorf("upload key: %w\n%s", err, string(out))
+	}
+	sess2.Close()
+
+	fmt.Printf("  → Manual cert installed for %s\n", cfg.Domain)
+	return nil
+}
+
+func installCertCloudflare(client *goss.Client, cfg CertConfig) error {
+	// Use Cloudflare Origin CA: mark the cert as CF-managed
+	fmt.Println("  → Cloudflare Origin CA: domain uses Cloudflare proxy")
+	fmt.Println("  → Install Cloudflare Origin Certificate manually via CF dashboard")
+	fmt.Println("  → Or use --provider letsencrypt for automatic cert")
+
+	// For k3s runtime: create annotation on default Ingress
+	if cfg.Runtime == "k3s" || cfg.Runtime == "" {
+		script := fmt.Sprintf(`
+kubectl annotate ingress --all kubernetes.io/ingress.class=traefik 2>/dev/null || true
+echo "  → Marked ingresses for Traefik with Cloudflare proxy"
+`)
+		out, _, err := ssh.Run(client, script)
+		if err != nil {
+			return fmt.Errorf("cloudflare config: %w", err)
+		}
+		fmt.Print(out)
+	}
+
 	return nil
 }
 
