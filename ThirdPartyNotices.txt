@@ -79,8 +79,17 @@
 - github.com/digitalocean/godo (MIT)
   https://github.com/digitalocean/godo/blob/v1.197.0/LICENSE.txt
 
+- github.com/dustin/go-humanize (MIT)
+  https://github.com/dustin/go-humanize/blob/v1.0.1/LICENSE
+
+- github.com/ebitengine/purego (Apache-2.0)
+  https://github.com/ebitengine/purego/blob/v0.10.0/LICENSE
+
 - github.com/google/go-querystring/query (BSD-3-Clause)
   https://github.com/google/go-querystring/blob/v1.2.0/LICENSE
+
+- github.com/google/uuid (BSD-3-Clause)
+  https://github.com/google/uuid/blob/v1.6.0/LICENSE
 
 - github.com/hashicorp/go-cleanhttp (MPL-2.0)
   https://github.com/hashicorp/go-cleanhttp/blob/v0.5.2/LICENSE
@@ -91,8 +100,14 @@
 - github.com/hetznercloud/hcloud-go/v2/hcloud (MIT)
   https://github.com/hetznercloud/hcloud-go/blob/v2.44.0/LICENSE
 
+- github.com/mattn/go-isatty (MIT)
+  https://github.com/mattn/go-isatty/blob/v0.0.20/LICENSE
+
 - github.com/munnerz/goautoneg (BSD-3-Clause)
   https://github.com/munnerz/goautoneg/blob/a7dc8b61c822/LICENSE
+
+- github.com/ncruces/go-strftime (MIT)
+  https://github.com/ncruces/go-strftime/blob/v1.0.0/LICENSE
 
 - github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil (BSD-3-Clause)
   https://github.com/prometheus/client_golang/blob/v1.23.2/internal/github.com/golang/gddo/LICENSE
@@ -106,11 +121,23 @@
 - github.com/prometheus/common (Apache-2.0)
   https://github.com/prometheus/common/blob/v0.66.1/LICENSE
 
+- github.com/remyoudompheng/bigfft (BSD-3-Clause)
+  https://github.com/remyoudompheng/bigfft/blob/24d4a6f8daec/LICENSE
+
+- github.com/robfig/cron/v3 (MIT)
+  https://github.com/robfig/cron/blob/v3.0.1/LICENSE
+
+- github.com/shirou/gopsutil/v4 (BSD-3-Clause)
+  https://github.com/shirou/gopsutil/blob/v4.26.5/LICENSE
+
 - github.com/spf13/cobra (Apache-2.0)
   https://github.com/spf13/cobra/blob/v1.10.2/LICENSE.txt
 
 - github.com/spf13/pflag (BSD-3-Clause)
   https://github.com/spf13/pflag/blob/v1.0.9/LICENSE
+
+- github.com/tklauser/go-sysconf (BSD-3-Clause)
+  https://github.com/tklauser/go-sysconf/blob/v0.3.16/LICENSE
 
 - github.com/vultr/govultr/v3 (MIT)
   https://github.com/vultr/govultr/blob/v3.31.2/LICENSE
@@ -144,4 +171,16 @@
 
 - gopkg.in/yaml.v3 (MIT)
   https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE
+
+- modernc.org/libc (MIT)
+  https://gitlab.com/cznic/libc/blob/v1.73.4/LICENSE-3RD-PARTY.md
+
+- modernc.org/mathutil (Unknown)
+  Unknown
+
+- modernc.org/memory (BSD-3-Clause)
+  https://gitlab.com/cznic/memory/blob/v1.11.0/LICENSE-GO
+
+- modernc.org/sqlite (BSD-3-Clause)
+  https://gitlab.com/cznic/sqlite/blob/v1.53.0/LICENSE
 
