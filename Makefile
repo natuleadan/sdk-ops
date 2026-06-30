@@ -14,6 +14,9 @@ lint:
 test:
 	go test -race -count=1 ./...
 
+test-integration: build
+	npx bats tests/ 2>/dev/null || (npm install -g bats-core 2>/dev/null; bats tests/)
+
 clean:
 	rm -f $(BINARY)
 	go clean -cache -testcache
