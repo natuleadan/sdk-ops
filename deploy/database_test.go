@@ -17,7 +17,7 @@ func TestImageNames(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := imageName(tt.dbType, "latest")
+		got := imageName(tt.dbType)
 		if got != tt.want {
 			t.Errorf("imageName(%q) = %q, want %q", tt.dbType, got, tt.want)
 		}

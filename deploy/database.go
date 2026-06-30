@@ -25,7 +25,7 @@ type DBConfig struct {
 	Name    string
 	Version string
 	Port    int  // 0 = no external port (internal only)
-	Network string // Docker network name
+	Network string
 	User    string
 	Pass    string
 }
@@ -61,9 +61,8 @@ func ProvisionDatabase(client *goss.Client, cfg DBConfig) (*DBResult, error) {
 
 	containerName := fmt.Sprintf("sdk-db-%s", cfg.Name)
 
-	// Pull image first
-	pullCmd := fmt.Sprintf("docker pull %s 2>/dev/null || true", imageName(cfg.Type, cfg.Version))
-	ssh.Run(client, pullCmd)
+	// Pull image silently
+	ssh.Run(client, fmt.Sprintf("docker pull %s:%s 2>/dev/null || true", imageName(cfg.Type), cfg.Version))
 
 	var result DBResult
 
@@ -85,166 +84,92 @@ func ProvisionDatabase(client *goss.Client, cfg DBConfig) (*DBResult, error) {
 
 func provisionPostgres(client *goss.Client, cfg DBConfig, containerName string) DBResult {
 	dbName := strings.ReplaceAll(cfg.Name, "-", "_")
-	portMap := ""
-	exposedPort := 0
-	if cfg.Port > 0 {
-		portMap = fmt.Sprintf("-p %d:5432", cfg.Port)
-		exposedPort = cfg.Port
-	}
+	exposedPort := cfg.Port
 
-	runCmd := fmt.Sprintf(`docker rm -f %s 2>/dev/null; docker run -d \
-		--name %s \
-		-e POSTGRES_USER=%s \
-		-e POSTGRES_PASSWORD=%s \
-		-e POSTGRES_DB=%s \
-		%s \
-		--restart unless-stopped \
-		%s:%s 2>/dev/null`,
+	img := fmt.Sprintf("%s:%s", imageName(cfg.Type), cfg.Version)
+	runCmd := fmt.Sprintf("docker rm -f %s 2>/dev/null && docker run -d --name %s -e POSTGRES_USER=%s -e POSTGRES_PASSWORD=%s -e POSTGRES_DB=%s --restart unless-stopped %s %s",
 		containerName, containerName, cfg.User, cfg.Pass, dbName,
-		portMap,
-		imageName(cfg.Type, cfg.Version), cfg.Version)
+		portFlag(cfg.Port, 5432),
+		img)
 
 	ssh.Run(client, runCmd)
 
-	connStr := fmt.Sprintf("postgres://%s:%s@%s:5432/%s",
-		cfg.User, cfg.Pass, containerName, dbName)
+	connStr := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", cfg.User, cfg.Pass, containerName, dbName)
 	if exposedPort > 0 {
-		connStr = fmt.Sprintf("postgres://%s:%s@localhost:%d/%s",
-			cfg.User, cfg.Pass, exposedPort, dbName)
+		connStr = fmt.Sprintf("postgres://%s:%s@localhost:%d/%s", cfg.User, cfg.Pass, exposedPort, dbName)
 	}
 
 	return DBResult{
-		ConnString:    connStr,
-		ContainerName: containerName,
-		Image:         imageName(cfg.Type, cfg.Version),
-		InternalPort:  5432,
-		ExposedPort:   exposedPort,
-		User:          cfg.User,
-		Pass:          cfg.Pass,
-		Database:      dbName,
+		ConnString: connStr, ContainerName: containerName, Image: img,
+		InternalPort: 5432, ExposedPort: exposedPort,
+		User: cfg.User, Pass: cfg.Pass, Database: dbName,
 	}
 }
 
 func provisionMySQL(client *goss.Client, cfg DBConfig, containerName string) DBResult {
-	portMap := ""
-	exposedPort := 0
-	if cfg.Port > 0 {
-		portMap = fmt.Sprintf("-p %d:3306", cfg.Port)
-		exposedPort = cfg.Port
-	}
-
-	runCmd := fmt.Sprintf(`docker rm -f %s 2>/dev/null; docker run -d \
-		--name %s \
-		-e MYSQL_ROOT_PASSWORD=%s \
-		-e MYSQL_USER=%s \
-		-e MYSQL_PASSWORD=%s \
-		-e MYSQL_DATABASE=%s \
-		%s \
-		--restart unless-stopped \
-		%s:%s 2>/dev/null`,
+	img := fmt.Sprintf("%s:%s", imageName(cfg.Type), cfg.Version)
+	runCmd := fmt.Sprintf("docker rm -f %s 2>/dev/null && docker run -d --name %s -e MYSQL_ROOT_PASSWORD=%s -e MYSQL_USER=%s -e MYSQL_PASSWORD=%s -e MYSQL_DATABASE=%s --restart unless-stopped %s %s",
 		containerName, containerName, cfg.Pass, cfg.User, cfg.Pass, cfg.Name,
-		portMap,
-		imageName(cfg.Type, cfg.Version), cfg.Version)
+		portFlag(cfg.Port, 3306),
+		img)
 
 	ssh.Run(client, runCmd)
 
-	connStr := fmt.Sprintf("mysql://%s:%s@%s:3306/%s",
-		cfg.User, cfg.Pass, containerName, cfg.Name)
-	if exposedPort > 0 {
-		connStr = fmt.Sprintf("mysql://%s:%s@localhost:%d/%s",
-			cfg.User, cfg.Pass, exposedPort, cfg.Name)
+	connStr := fmt.Sprintf("mysql://%s:%s@%s:3306/%s", cfg.User, cfg.Pass, containerName, cfg.Name)
+	if cfg.Port > 0 {
+		connStr = fmt.Sprintf("mysql://%s:%s@localhost:%d/%s", cfg.User, cfg.Pass, cfg.Port, cfg.Name)
 	}
-
 	return DBResult{
-		ConnString:    connStr,
-		ContainerName: containerName,
-		Image:         imageName(cfg.Type, cfg.Version),
-		InternalPort:  3306,
-		ExposedPort:   exposedPort,
-		User:          cfg.User,
-		Pass:          cfg.Pass,
-		Database:      cfg.Name,
+		ConnString: connStr, ContainerName: containerName, Image: img,
+		InternalPort: 3306, ExposedPort: cfg.Port,
+		User: cfg.User, Pass: cfg.Pass, Database: cfg.Name,
 	}
 }
 
 func provisionRedis(client *goss.Client, cfg DBConfig, containerName string) DBResult {
-	portMap := ""
-	exposedPort := 0
+	img := fmt.Sprintf("%s:%s", imageName(cfg.Type), cfg.Version)
 	passFlag := ""
 	if cfg.Pass != "" {
 		passFlag = fmt.Sprintf("redis-server --requirepass %s", cfg.Pass)
 	}
-	if cfg.Port > 0 {
-		portMap = fmt.Sprintf("-p %d:6379", cfg.Port)
-		exposedPort = cfg.Port
-	}
 
-	runCmd := fmt.Sprintf(`docker rm -f %s 2>/dev/null; docker run -d \
-		--name %s \
-		%s \
-		--restart unless-stopped \
-		%s:%s %s 2>/dev/null`,
+	runCmd := fmt.Sprintf("docker rm -f %s 2>/dev/null && docker run -d --name %s --restart unless-stopped %s %s %s",
 		containerName, containerName,
-		portMap,
-		imageName(cfg.Type, cfg.Version), cfg.Version, passFlag)
+		portFlag(cfg.Port, 6379),
+		img, passFlag)
 
 	ssh.Run(client, runCmd)
 
-	connStr := fmt.Sprintf("redis://:%s@%s:6379/0",
-		cfg.Pass, containerName)
-	if exposedPort > 0 {
-		connStr = fmt.Sprintf("redis://:%s@localhost:%d/0",
-			cfg.Pass, exposedPort)
+	connStr := fmt.Sprintf("redis://:%s@%s:6379/0", cfg.Pass, containerName)
+	if cfg.Port > 0 {
+		connStr = fmt.Sprintf("redis://:%s@localhost:%d/0", cfg.Pass, cfg.Port)
 	}
 
 	return DBResult{
-		ConnString:    connStr,
-		ContainerName: containerName,
-		Image:         imageName(cfg.Type, cfg.Version),
-		InternalPort:  6379,
-		ExposedPort:   exposedPort,
-		Pass:          cfg.Pass,
+		ConnString: connStr, ContainerName: containerName, Image: img,
+		InternalPort: 6379, ExposedPort: cfg.Port,
+		Pass: cfg.Pass,
 	}
 }
 
 func provisionMongoDB(client *goss.Client, cfg DBConfig, containerName string) DBResult {
-	portMap := ""
-	exposedPort := 0
-	if cfg.Port > 0 {
-		portMap = fmt.Sprintf("-p %d:27017", cfg.Port)
-		exposedPort = cfg.Port
-	}
-
-	runCmd := fmt.Sprintf(`docker rm -f %s 2>/dev/null; docker run -d \
-		--name %s \
-		-e MONGO_INITDB_ROOT_USERNAME=%s \
-		-e MONGO_INITDB_ROOT_PASSWORD=%s \
-		-e MONGO_INITDB_DATABASE=%s \
-		%s \
-		--restart unless-stopped \
-		%s:%s 2>/dev/null`,
+	img := fmt.Sprintf("%s:%s", imageName(cfg.Type), cfg.Version)
+	runCmd := fmt.Sprintf("docker rm -f %s 2>/dev/null && docker run -d --name %s -e MONGO_INITDB_ROOT_USERNAME=%s -e MONGO_INITDB_ROOT_PASSWORD=%s -e MONGO_INITDB_DATABASE=%s --restart unless-stopped %s %s",
 		containerName, containerName, cfg.User, cfg.Pass, cfg.Name,
-		portMap,
-		imageName(cfg.Type, cfg.Version), cfg.Version)
+		portFlag(cfg.Port, 27017),
+		img)
 
 	ssh.Run(client, runCmd)
 
-	connStr := fmt.Sprintf("mongodb://%s:%s@%s:27017/%s",
-		cfg.User, cfg.Pass, containerName, cfg.Name)
-	if exposedPort > 0 {
-		connStr = fmt.Sprintf("mongodb://%s:%s@localhost:%d/%s",
-			cfg.User, cfg.Pass, exposedPort, cfg.Name)
+	connStr := fmt.Sprintf("mongodb://%s:%s@%s:27017/%s", cfg.User, cfg.Pass, containerName, cfg.Name)
+	if cfg.Port > 0 {
+		connStr = fmt.Sprintf("mongodb://%s:%s@localhost:%d/%s", cfg.User, cfg.Pass, cfg.Port, cfg.Name)
 	}
 
 	return DBResult{
-		ConnString:    connStr,
-		ContainerName: containerName,
-		Image:         imageName(cfg.Type, cfg.Version),
-		InternalPort:  27017,
-		ExposedPort:   exposedPort,
-		User:          cfg.User,
-		Pass:          cfg.Pass,
-		Database:      cfg.Name,
+		ConnString: connStr, ContainerName: containerName, Image: img,
+		InternalPort: 27017, ExposedPort: cfg.Port,
+		User: cfg.User, Pass: cfg.Pass, Database: cfg.Name,
 	}
 }
 
@@ -273,7 +198,7 @@ func ListDatabases(client *goss.Client) ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
-func imageName(dbType DBType, version string) string {
+func imageName(dbType DBType) string {
 	switch dbType {
 	case DBPostgres:
 		return "postgres"
@@ -301,6 +226,13 @@ func latestVersion(dbType DBType) string {
 	default:
 		return "latest"
 	}
+}
+
+func portFlag(port, internal int) string {
+	if port > 0 {
+		return fmt.Sprintf("-p %d:%d", port, internal)
+	}
+	return ""
 }
 
 func genPassword(length int) (string, error) {

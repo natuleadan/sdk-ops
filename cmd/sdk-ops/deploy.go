@@ -257,8 +257,16 @@ Examples:
 					if deployDomain != "" {
 						fmt.Printf("  → Access at http://%s/\n", deployDomain)
 					}
+				} else if runtimeMode == "swarm" {
+					versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
+					if err := deploy.DeploySwarm(conn, name, versionDir, imageRef); err != nil {
+						return fmt.Errorf("swarm deploy: %w", err)
+					}
 				} else if runtimeMode == "bare" {
-					fmt.Println("  → Bare mode: files uploaded, no service started")
+					versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
+					if err := deploy.DeployBare(conn, name, versionDir); err != nil {
+						return fmt.Errorf("bare deploy: %w", err)
+					}
 				} else if zeroDowntime {
 					serviceDir := fmt.Sprintf("/opt/sdk-ops/services/%s", name)
 					if err := deploy.DeployBlueGreen(conn, name, serviceDir, result.Version); err != nil {
@@ -334,7 +342,7 @@ Examples:
 	deployCmd.Flags().Bool("all", false, "Deploy to all registered nodes in parallel")
 	deployCmd.Flags().String("builder", "", "Build method: dockerfile, nixpacks, pack (default: auto-detect)")
 	deployCmd.Flags().Bool("zero-downtime", false, "Blue/green deploy with zero downtime")
-	deployCmd.Flags().String("runtime", "", "Runtime: docker (default), k3s, bare")
+	deployCmd.Flags().String("runtime", "", "Runtime: docker (default), k3s, swarm, bare")
 	deployCmd.Flags().String("domain", "", "Domain for k3s Ingress (required with --runtime k3s)")
 
 	encryptCmd := &cobra.Command{
@@ -371,15 +379,23 @@ Examples:
 		Long: `Generate project structure from a template.
 
 Templates:
-  html       Static HTML site with Nginx
-  node       Node.js Express app
-  wordpress  WordPress with MySQL
-  go         Go HTTP server (multi-stage build)
+  html            Static HTML site with Nginx
+  node            Node.js Express app
+  wordpress       WordPress with MySQL
+  go              Go HTTP server (multi-stage build)
+  nextjs          Next.js app (standalone output)
+  python-fastapi  FastAPI async Python app (uvicorn)
+  django          Django project (gunicorn + settings)
+
+Run 'sdk-ops deploy init' without --template to list available templates.
 
 Examples:
   sdk-ops deploy init ./my-site --template html
   sdk-ops deploy init ./my-blog --template wordpress
-  sdk-ops deploy init ./my-api --template go --name products-svc`,
+  sdk-ops deploy init ./my-api --template go --name products-svc
+  sdk-ops deploy init ./my-app --template nextjs
+  sdk-ops deploy init ./my-api --template python-fastapi
+  sdk-ops deploy init ./my-site --template django --name myblog`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tmpl, _ := cmd.Flags().GetString("template")
