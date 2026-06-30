@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -126,6 +127,12 @@ func (h *apiHandler) removeSchedule(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
+func toInt(s string) int {
+	var n int
+	fmt.Sscanf(s, "%d", &n)
+	return n
+}
+
 func jsonResp(w http.ResponseWriter, code int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -150,6 +157,17 @@ func startAPI(addr string, db *sql.DB, agent *Agent) *http.Server {
 			h.removeSchedule(w, r)
 		default:
 			jsonResp(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		}
+	})
+
+	// Support delete via GET with ?id=N (for busybox wget which lacks DELETE)
+	mux.HandleFunc("/schedules/remove", func(w http.ResponseWriter, r *http.Request) {
+		if idStr := r.URL.Query().Get("id"); idStr != "" {
+			h.agent.scheduler.removeSchedule(toInt(idStr))
+			removeSchedule(h.db, toInt(idStr))
+			jsonResp(w, http.StatusOK, map[string]string{"status": "removed"})
+		} else {
+			jsonResp(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 		}
 	})
 

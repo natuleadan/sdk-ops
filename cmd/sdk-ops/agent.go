@@ -206,6 +206,120 @@ ENTRYPOINT ["sdk-ops-agent"]`
 		},
 	}
 
+	scheduleCmd := &cobra.Command{
+		Use:   "schedule",
+		Short: "Manage scheduled tasks via the agent",
+	}
+
+	scheduleAddCmd := &cobra.Command{
+		Use:   "add <name> --cron <expr> --task <type> [--notify failure|always|never] [--node ip]",
+		Short: "Add a scheduled task to the agent",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			cronExpr, _ := cmd.Flags().GetString("cron")
+			taskType, _ := cmd.Flags().GetString("task")
+			taskConfig, _ := cmd.Flags().GetString("config")
+			notifyOn, _ := cmd.Flags().GetString("notify")
+			nodeIP, _ := cmd.Flags().GetString("node")
+
+			if nodeIP == "" {
+				return fmt.Errorf("--node is required")
+			}
+			if cronExpr == "" {
+				return fmt.Errorf("--cron is required")
+			}
+			if taskType == "" {
+				return fmt.Errorf("--task is required (backup-services, backup-database, docker-cleanup, shell)")
+			}
+
+			client := newSSHClient(nodeIP, user, port, key)
+			conn, err := client.Connect()
+			if err != nil {
+				return fmt.Errorf("ssh: %w", err)
+			}
+			defer conn.Close()
+
+			payload := fmt.Sprintf(`{"name":"%s","cron_expr":"%s","task_type":"%s","task_config":"%s","notify_on":"%s"}`,
+				name, cronExpr, taskType, taskConfig, notifyOn)
+			cmdStr := fmt.Sprintf("docker exec sdk-ops-agent wget -qO- --post-data='%s' --header='Content-Type: application/json' http://localhost:9000/schedules 2>&1 || echo 'agent-unreachable'", payload)
+			out, _, err := runSSH(conn, cmdStr)
+			if err != nil || strings.Contains(out, "agent-unreachable") {
+				return fmt.Errorf("agent unreachable on %s. Is it installed? (sdk-ops agent install --node %s)", nodeIP, nodeIP)
+			}
+			fmt.Printf("  ✅ Schedule %q added to agent\n", name)
+			return nil
+		},
+	}
+
+	scheduleListCmd := &cobra.Command{
+		Use:   "list [--node ip]",
+		Short: "List scheduled tasks from the agent",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, _ := cmd.Flags().GetString("node")
+			if nodeIP == "" {
+				return fmt.Errorf("--node is required")
+			}
+
+			client := newSSHClient(nodeIP, user, port, key)
+			conn, err := client.Connect()
+			if err != nil {
+				return fmt.Errorf("ssh: %w", err)
+			}
+			defer conn.Close()
+
+			out, _, err := runSSH(conn, "docker exec sdk-ops-agent wget -qO- http://localhost:9000/schedules 2>&1 || echo 'agent-unreachable'")
+			if err != nil || strings.Contains(out, "agent-unreachable") {
+				return fmt.Errorf("agent unreachable on %s", nodeIP)
+			}
+			fmt.Println(strings.TrimSpace(out))
+			return nil
+		},
+	}
+
+	scheduleRemoveCmd := &cobra.Command{
+		Use:   "rm <id> [--node ip]",
+		Short: "Remove a scheduled task from the agent",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			nodeIP, _ := cmd.Flags().GetString("node")
+			if nodeIP == "" {
+				return fmt.Errorf("--node is required")
+			}
+
+			client := newSSHClient(nodeIP, user, port, key)
+			conn, err := client.Connect()
+			if err != nil {
+				return fmt.Errorf("ssh: %w", err)
+			}
+			defer conn.Close()
+
+			cmdStr := fmt.Sprintf("docker exec sdk-ops-agent wget -qO- 'http://localhost:9000/schedules/remove?id=%s' 2>&1 || echo 'agent-unreachable'", id)
+			out, _, err := runSSH(conn, cmdStr)
+			if err != nil || strings.Contains(out, "agent-unreachable") {
+				return fmt.Errorf("agent unreachable on %s", nodeIP)
+			}
+			fmt.Printf("  ✅ Schedule %s removed\n", id)
+			return nil
+		},
+	}
+
+	for _, sc := range []*cobra.Command{scheduleAddCmd, scheduleListCmd, scheduleRemoveCmd} {
+		sc.Flags().StringP("node", "n", "", "Target node IP")
+		sc.Flags().StringVarP(&user, "user", "u", "root", "SSH user")
+		sc.Flags().StringVarP(&key, "key", "k", "", "SSH private key path")
+		sc.Flags().IntVarP(&port, "port", "p", 22, "SSH port")
+	}
+	scheduleAddCmd.Flags().String("cron", "", "Cron expression (e.g., '0 3 * * *')")
+	scheduleAddCmd.Flags().String("task", "", "Task type: backup-services, backup-database, docker-cleanup, shell")
+	scheduleAddCmd.Flags().String("config", "", "Task config (e.g., container name for backup-database)")
+	scheduleAddCmd.Flags().String("notify", "failure", "Notify on: failure, always, never")
+
+	scheduleCmd.AddCommand(scheduleAddCmd)
+	scheduleCmd.AddCommand(scheduleListCmd)
+	scheduleCmd.AddCommand(scheduleRemoveCmd)
+
 	uninstallCmd := &cobra.Command{
 		Use:   "uninstall --node <ip>",
 		Short: "Remove the agent from a node",
@@ -243,6 +357,7 @@ ENTRYPOINT ["sdk-ops-agent"]`
 	cmd.AddCommand(statusCmd)
 	cmd.AddCommand(logsCmd)
 	cmd.AddCommand(uninstallCmd)
+	cmd.AddCommand(scheduleCmd)
 	return cmd
 }
 
