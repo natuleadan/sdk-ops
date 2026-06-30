@@ -120,6 +120,74 @@ type DNSRecord struct {
 	Priority int // for MX
 }
 
+// --- K8s Addons ---
+
+type K8sAddon struct {
+	ID        string
+	Name      string
+	Slug      string
+	Version   string
+	Status    string
+	Installed bool
+}
+
+// --- K8s Node Pools ---
+
+type K8sNodePoolConfig struct {
+	Name      string
+	Plan      string
+	NodeCount int
+}
+
+type K8sNodePool struct {
+	ID      string
+	Name    string
+	Plan    string
+	Nodes   int
+	Status  string
+}
+
+// --- LB Advanced ---
+
+type LBListenerConfig struct {
+	Port       int
+	TargetPort int
+	Protocol   string
+}
+
+type LBListener struct {
+	ID          string
+	Port        int
+	TargetPort  int
+	Protocol    string
+	HealthCheck *LBHealthCheckConfig
+}
+
+type LBHealthCheckConfig struct {
+	Protocol string
+	Port     int
+	Path     string
+	Interval int
+	Timeout  int
+	Retries  int
+}
+
+type LBTargetConfig struct {
+	Type     string // vps, ip, baremetal
+	TargetID string
+	Port     int
+	Weight   int
+}
+
+type LBTarget struct {
+	ID      string
+	Type    string
+	TargetID string
+	Port    int
+	Weight  int
+	Status  string
+}
+
 // --- SSH Keys ---
 
 type SSHKey struct {

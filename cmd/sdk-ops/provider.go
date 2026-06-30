@@ -321,6 +321,174 @@ func newProviderK8sCmd() *cobra.Command {
 		},
 	}
 
+	updateCmd := &cobra.Command{
+		Use:   "update <id>",
+		Short: "Upgrade K8s version",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			version, _ := cmd.Flags().GetString("version")
+			if version == "" {
+				return fmt.Errorf("--version is required")
+			}
+			cl, err := p.UpdateK8s(context.Background(), args[0], version)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("[%s] upgraded to %s (%s)\n", cl.ID, cl.Version, cl.Status)
+			return nil
+		},
+	}
+	updateCmd.Flags().String("version", "", "Target K8s version")
+
+	protectionCmd := &cobra.Command{
+		Use:   "protection <id>",
+		Short: "Toggle K8s cluster deletion protection",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			cl, err := p.ToggleK8sProtection(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("[%s] protection toggled (%s)\n", cl.ID, cl.Status)
+			return nil
+		},
+	}
+
+	addonsCmd := &cobra.Command{Use: "addons", Short: "Manage K8s addons"}
+	addonsListCmd := &cobra.Command{
+		Use: "list <id>", Short: "List installed addons", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			list, err := p.ListK8sAddons(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			for _, a := range list {
+				fmt.Printf("[%s] %s (%s) v%s\n", a.ID, a.Name, a.Status, a.Version)
+			}
+			return nil
+		},
+	}
+	addonsAvailableCmd := &cobra.Command{
+		Use: "available", Short: "List available addons",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			list, err := p.ListAvailableAddons(context.Background())
+			if err != nil {
+				return err
+			}
+			for _, a := range list {
+				fmt.Printf("[%s] %s (%s)\n", a.Slug, a.Name, a.Version)
+			}
+			return nil
+		},
+	}
+	addonsInstallCmd := &cobra.Command{
+		Use: "install <id> <slug>", Short: "Install an addon", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			return p.InstallK8sAddon(context.Background(), args[0], args[1])
+		},
+	}
+	addonsUninstallCmd := &cobra.Command{
+		Use: "uninstall <id> <addon-id>", Short: "Uninstall an addon", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			return p.UninstallK8sAddon(context.Background(), args[0], args[1])
+		},
+	}
+	addonsCmd.AddCommand(addonsListCmd)
+	addonsCmd.AddCommand(addonsAvailableCmd)
+	addonsCmd.AddCommand(addonsInstallCmd)
+	addonsCmd.AddCommand(addonsUninstallCmd)
+
+	nodePoolCmd := &cobra.Command{Use: "node-pool", Short: "Manage K8s node pools"}
+	npListCmd := &cobra.Command{
+		Use: "list <id>", Short: "List node pools", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			pools, err := p.ListK8sNodePools(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			for _, po := range pools {
+				fmt.Printf("[%s] %s plan=%s nodes=%d (%s)\n", po.ID, po.Name, po.Plan, po.Nodes, po.Status)
+			}
+			return nil
+		},
+	}
+	npAddCmd := &cobra.Command{
+		Use: "add <id>", Short: "Add a node pool",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			plan, _ := cmd.Flags().GetString("plan")
+			nodes, _ := cmd.Flags().GetInt("nodes")
+			pool, err := p.CreateK8sNodePool(context.Background(), args[0], providers.K8sNodePoolConfig{
+				Plan: plan, NodeCount: nodes,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("[%s] %s (%d nodes)\n", pool.ID, pool.Plan, pool.Nodes)
+			return nil
+		},
+	}
+	npAddCmd.Flags().String("plan", "", "Node plan")
+	npAddCmd.Flags().Int("nodes", 1, "Number of nodes")
+	npScaleCmd := &cobra.Command{
+		Use: "scale <id> <pool-id>", Short: "Scale a node pool", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			nodes, _ := cmd.Flags().GetInt("nodes")
+			return p.ScaleK8sNodePool(context.Background(), args[0], args[1], nodes)
+		},
+	}
+	npScaleCmd.Flags().Int("nodes", 1, "Number of nodes")
+	npDeleteCmd := &cobra.Command{
+		Use: "delete <id> <pool-id>", Short: "Delete a node pool", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			return p.DeleteK8sNodePool(context.Background(), args[0], args[1])
+		},
+	}
+	nodePoolCmd.AddCommand(npListCmd)
+	nodePoolCmd.AddCommand(npAddCmd)
+	nodePoolCmd.AddCommand(npScaleCmd)
+	nodePoolCmd.AddCommand(npDeleteCmd)
+
 	createCmd.Flags().StringVar(&pf.name, "name", "", "Cluster name")
 	createCmd.Flags().StringVar(&pf.location, "location", "us-mia-1", "Location")
 	createCmd.Flags().StringVar(&pf.version, "version", "", "K8s version")
@@ -331,6 +499,10 @@ func newProviderK8sCmd() *cobra.Command {
 	cmd.AddCommand(listCmd)
 	cmd.AddCommand(deleteCmd)
 	cmd.AddCommand(kubeconfigCmd)
+	cmd.AddCommand(updateCmd)
+	cmd.AddCommand(protectionCmd)
+	cmd.AddCommand(addonsCmd)
+	cmd.AddCommand(nodePoolCmd)
 	return cmd
 }
 
@@ -396,6 +568,181 @@ func newProviderLBCmd() *cobra.Command {
 		},
 	}
 
+	listenerCmd := &cobra.Command{Use: "listener", Short: "Manage LB listeners"}
+	lsAddCmd := &cobra.Command{
+		Use: "add <lb-id>", Short: "Add a listener", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			port, _ := cmd.Flags().GetInt("port")
+			targetPort, _ := cmd.Flags().GetInt("target-port")
+			listener, err := p.CreateLBListener(context.Background(), args[0], providers.LBListenerConfig{
+				Port: port, TargetPort: targetPort,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("[%s] :%d → :%d\n", listener.ID, listener.Port, listener.TargetPort)
+			return nil
+		},
+	}
+	lsAddCmd.Flags().Int("port", 80, "Listener port")
+	lsAddCmd.Flags().Int("target-port", 8080, "Target port")
+	lsUpdateCmd := &cobra.Command{
+		Use: "update <lb-id> <listener-id>", Short: "Update a listener", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			port, _ := cmd.Flags().GetInt("port")
+			targetPort, _ := cmd.Flags().GetInt("target-port")
+			_, err = p.UpdateLBListener(context.Background(), args[0], args[1], providers.LBListenerConfig{
+				Port: port, TargetPort: targetPort,
+			})
+			return err
+		},
+	}
+	lsUpdateCmd.Flags().Int("port", 0, "Listener port")
+	lsUpdateCmd.Flags().Int("target-port", 0, "Target port")
+	lsDeleteCmd := &cobra.Command{
+		Use: "delete <lb-id> <listener-id>", Short: "Delete a listener", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			return p.DeleteLBListener(context.Background(), args[0], args[1])
+		},
+	}
+	listenerCmd.AddCommand(lsAddCmd)
+	listenerCmd.AddCommand(lsUpdateCmd)
+	listenerCmd.AddCommand(lsDeleteCmd)
+
+	healthCmd := &cobra.Command{
+		Use: "health-check <lb-id> <listener-id>", Short: "Set LB health check",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			path, _ := cmd.Flags().GetString("path")
+			return p.SetLBHealthCheck(context.Background(), args[0], args[1],
+				providers.LBHealthCheckConfig{Path: path})
+		},
+	}
+	healthCmd.Flags().String("path", "/health", "Health check path")
+
+	targetCmd := &cobra.Command{Use: "target", Short: "Manage LB targets"}
+	tgtAddCmd := &cobra.Command{
+		Use: "add <lb-id> <listener-id>", Short: "Add a target", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			targetType, _ := cmd.Flags().GetString("type")
+			targetID, _ := cmd.Flags().GetString("uuid")
+			port, _ := cmd.Flags().GetInt("port")
+			tgt, err := p.AddLBTarget(context.Background(), args[0], args[1],
+				providers.LBTargetConfig{Type: targetType, TargetID: targetID, Port: port})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("[%s] %s (%s:%d)\n", tgt.ID, tgt.Type, tgt.TargetID, tgt.Port)
+			return nil
+		},
+	}
+	tgtAddCmd.Flags().String("type", "vps", "Target type: vps, ip, baremetal")
+	tgtAddCmd.Flags().String("uuid", "", "Target UUID")
+	tgtAddCmd.Flags().Int("port", 8080, "Target port")
+	tgtListCmd := &cobra.Command{
+		Use: "list <lb-id> <listener-id>", Short: "List targets", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			tgts, err := p.ListLBTargets(context.Background(), args[0], args[1])
+			if err != nil {
+				return err
+			}
+			for _, t := range tgts {
+				fmt.Printf("[%s] %s → %s:%d (%s)\n", t.ID, t.Type, t.TargetID, t.Port, t.Status)
+			}
+			return nil
+		},
+	}
+	tgtDrainCmd := &cobra.Command{
+		Use: "drain <lb-id> <listener-id> <target-id>", Short: "Drain a target", Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			return p.DrainLBTarget(context.Background(), args[0], args[1], args[2])
+		},
+	}
+	targetCmd.AddCommand(tgtAddCmd)
+	targetCmd.AddCommand(tgtListCmd)
+	targetCmd.AddCommand(tgtDrainCmd)
+
+	resizeCmd := &cobra.Command{
+		Use: "resize <lb-id>", Short: "Resize LB plan",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			plan, _ := cmd.Flags().GetString("plan")
+			lb, err := p.ResizeLB(context.Background(), args[0], plan)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("[%s] resized to %s\n", lb.ID, lb.Plan)
+			return nil
+		},
+	}
+	resizeCmd.Flags().String("plan", "", "Target plan (e.g. lb.medium)")
+
+	metricsCmd := &cobra.Command{
+		Use: "metrics <lb-id>", Short: "Show LB metrics",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			m, err := p.GetLBMetrics(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Println(m)
+			return nil
+		},
+	}
+
+	lbProtectionCmd := &cobra.Command{
+		Use: "protection <lb-id>", Short: "Toggle LB deletion protection",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			lb, err := p.ToggleLBProtection(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("[%s] protection toggled\n", lb.ID)
+			return nil
+		},
+	}
+
 	createCmd.Flags().StringVar(&pf.name, "name", "", "LB name")
 	createCmd.Flags().StringVar(&pf.location, "location", "us-mia-1", "Location")
 	createCmd.Flags().StringVar(&pf.plan, "plan", "", "LB plan")
@@ -403,6 +750,12 @@ func newProviderLBCmd() *cobra.Command {
 	cmd.AddCommand(createCmd)
 	cmd.AddCommand(listCmd)
 	cmd.AddCommand(deleteCmd)
+	cmd.AddCommand(listenerCmd)
+	cmd.AddCommand(healthCmd)
+	cmd.AddCommand(targetCmd)
+	cmd.AddCommand(resizeCmd)
+	cmd.AddCommand(metricsCmd)
+	cmd.AddCommand(lbProtectionCmd)
 	return cmd
 }
 

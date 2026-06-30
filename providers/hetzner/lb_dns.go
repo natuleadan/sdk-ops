@@ -119,3 +119,43 @@ func (c *Client) DeleteDNSRecord(ctx context.Context, zoneID, recordID string) e
 	_, err := hc.do("DELETE", "/records/"+recordID, nil)
 	return err
 }
+
+func (c *Client) CreateLBListener(ctx context.Context, lbID string, cfg providers.LBListenerConfig) (*providers.LBListener, error) {
+	return nil, fmt.Errorf("hetzner: method not available")
+}
+
+func (c *Client) UpdateLBListener(ctx context.Context, lbID, listenerID string, cfg providers.LBListenerConfig) (*providers.LBListener, error) {
+	return nil, fmt.Errorf("hetzner: method not available")
+}
+
+func (c *Client) DeleteLBListener(ctx context.Context, lbID, listenerID string) error {
+	return fmt.Errorf("hetzner: method not available")
+}
+
+func (c *Client) SetLBHealthCheck(ctx context.Context, lbID, listenerID string, cfg providers.LBHealthCheckConfig) error {
+	return fmt.Errorf("hetzner: method not available")
+}
+
+func (c *Client) AddLBTarget(ctx context.Context, lbID, listenerID string, cfg providers.LBTargetConfig) (*providers.LBTarget, error) {
+	return nil, fmt.Errorf("hetzner: method not available")
+}
+
+func (c *Client) ListLBTargets(ctx context.Context, lbID, listenerID string) ([]providers.LBTarget, error) {
+	return nil, fmt.Errorf("hetzner: method not available")
+}
+
+func (c *Client) DrainLBTarget(ctx context.Context, lbID, listenerID, targetID string) error {
+	return fmt.Errorf("hetzner: method not available")
+}
+
+func (c *Client) ResizeLB(ctx context.Context, lbID, plan string) (*providers.LoadBalancer, error) {
+	return nil, fmt.Errorf("hetzner: method not available")
+}
+
+func (c *Client) GetLBMetrics(ctx context.Context, lbID string) (string, error) {
+	return "", fmt.Errorf("hetzner: method not available")
+}
+
+func (c *Client) ToggleLBProtection(ctx context.Context, lbID string) (*providers.LoadBalancer, error) {
+	return nil, fmt.Errorf("hetzner: method not available")
+}

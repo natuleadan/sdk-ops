@@ -122,3 +122,138 @@ func (c *Client) GetKubeconfig(ctx context.Context, id string) (string, error) {
 	}
 	return string(resp), nil
 }
+
+func (c *Client) UpdateK8s(ctx context.Context, id, version string) (*providers.K8sCluster, error) {
+	resp, err := c.do("PATCH", "/kubernetes/"+id, map[string]string{"version": version})
+	if err != nil {
+		return nil, fmt.Errorf("cubepath update k8s: %w", err)
+	}
+	var r map[string]any
+	if err := json.Unmarshal(resp, &r); err != nil {
+		return nil, fmt.Errorf("parse: %w\nbody: %s", err, string(resp))
+	}
+	return &providers.K8sCluster{ID: val(r, "uuid"), Status: val(r, "status"), Version: val(r, "version")}, nil
+}
+
+func (c *Client) ToggleK8sProtection(ctx context.Context, id string) (*providers.K8sCluster, error) {
+	_, err := c.do("POST", "/kubernetes/"+id+"/protection", nil)
+	if err != nil {
+		return nil, fmt.Errorf("cubepath toggle protection: %w", err)
+	}
+	return c.GetK8s(ctx, id)
+}
+
+func (c *Client) ListK8sAddons(ctx context.Context, id string) ([]providers.K8sAddon, error) {
+	resp, err := c.do("GET", "/kubernetes/"+id+"/addons", nil)
+	if err != nil {
+		return nil, fmt.Errorf("cubepath list addons: %w", err)
+	}
+	var list []map[string]any
+	if err := json.Unmarshal(resp, &list); err != nil {
+		return nil, fmt.Errorf("parse: %w\nbody: %s", err, string(resp))
+	}
+	var result []providers.K8sAddon
+	for _, r := range list {
+		result = append(result, providers.K8sAddon{
+			ID:        val(r, "uuid"),
+			Name:      val(r, "name"),
+			Slug:      val(r, "slug"),
+			Version:   val(r, "version"),
+			Status:    val(r, "status"),
+			Installed: val(r, "installed") == "true",
+		})
+	}
+	return result, nil
+}
+
+func (c *Client) ListAvailableAddons(ctx context.Context) ([]providers.K8sAddon, error) {
+	resp, err := c.do("GET", "/kubernetes/addons", nil)
+	if err != nil {
+		return nil, fmt.Errorf("cubepath list available addons: %w", err)
+	}
+	var list []map[string]any
+	if err := json.Unmarshal(resp, &list); err != nil {
+		return nil, fmt.Errorf("parse: %w\nbody: %s", err, string(resp))
+	}
+	var result []providers.K8sAddon
+	for _, r := range list {
+		result = append(result, providers.K8sAddon{
+			ID:      val(r, "uuid"),
+			Name:    val(r, "name"),
+			Slug:    val(r, "slug"),
+			Version: val(r, "version"),
+		})
+	}
+	return result, nil
+}
+
+func (c *Client) InstallK8sAddon(ctx context.Context, id, slug string) error {
+	_, err := c.do("POST", fmt.Sprintf("/kubernetes/%s/addons/%s/install", id, slug), nil)
+	return err
+}
+
+func (c *Client) UninstallK8sAddon(ctx context.Context, id, addonID string) error {
+	_, err := c.do("DELETE", fmt.Sprintf("/kubernetes/%s/addons/%s", id, addonID), nil)
+	return err
+}
+
+func (c *Client) ListK8sNodePools(ctx context.Context, id string) ([]providers.K8sNodePool, error) {
+	resp, err := c.do("GET", "/kubernetes/"+id+"/node-pools", nil)
+	if err != nil {
+		return nil, fmt.Errorf("cubepath list node pools: %w", err)
+	}
+	var list []map[string]any
+	if err := json.Unmarshal(resp, &list); err != nil {
+		return nil, fmt.Errorf("parse: %w\nbody: %s", err, string(resp))
+	}
+	var result []providers.K8sNodePool
+	for _, r := range list {
+		result = append(result, providers.K8sNodePool{
+			ID:     val(r, "uuid"),
+			Name:   val(r, "name"),
+			Plan:   val(r, "plan"),
+			Nodes:  atoi(val(r, "count")),
+			Status: val(r, "status"),
+		})
+	}
+	return result, nil
+}
+
+func (c *Client) CreateK8sNodePool(ctx context.Context, id string, cfg providers.K8sNodePoolConfig) (*providers.K8sNodePool, error) {
+	resp, err := c.do("POST", "/kubernetes/"+id+"/node-pools", nodePoolCreate{
+		Name:      cfg.Name,
+		Plan:      cfg.Plan,
+		NodeCount: cfg.NodeCount,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cubepath create node pool: %w", err)
+	}
+	var r map[string]any
+	if err := json.Unmarshal(resp, &r); err != nil {
+		return nil, fmt.Errorf("parse: %w\nbody: %s", err, string(resp))
+	}
+	return &providers.K8sNodePool{
+		ID:     val(r, "uuid"),
+		Name:   val(r, "name"),
+		Plan:   val(r, "plan"),
+		Nodes:  atoi(val(r, "count")),
+		Status: val(r, "status"),
+	}, nil
+}
+
+func (c *Client) ScaleK8sNodePool(ctx context.Context, id, poolID string, nodes int) error {
+	_, err := c.do("PATCH", fmt.Sprintf("/kubernetes/%s/node-pools/%s", id, poolID),
+		map[string]int{"count": nodes})
+	return err
+}
+
+func (c *Client) DeleteK8sNodePool(ctx context.Context, id, poolID string) error {
+	_, err := c.do("DELETE", fmt.Sprintf("/kubernetes/%s/node-pools/%s", id, poolID), nil)
+	return err
+}
+
+func atoi(s string) int {
+	var n int
+	fmt.Sscanf(s, "%d", &n)
+	return n
+}

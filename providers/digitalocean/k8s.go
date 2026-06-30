@@ -78,3 +78,43 @@ func (c *Client) GetKubeconfig(ctx context.Context, id string) (string, error) {
 	}
 	return string(kc.KubeconfigYAML), nil
 }
+
+func (c *Client) UpdateK8s(ctx context.Context, id, version string) (*providers.K8sCluster, error) {
+	return nil, fmt.Errorf("digitalocean: method not available")
+}
+
+func (c *Client) ToggleK8sProtection(ctx context.Context, id string) (*providers.K8sCluster, error) {
+	return nil, fmt.Errorf("digitalocean: method not available")
+}
+
+func (c *Client) ListK8sAddons(ctx context.Context, id string) ([]providers.K8sAddon, error) {
+	return nil, fmt.Errorf("digitalocean: method not available")
+}
+
+func (c *Client) ListAvailableAddons(ctx context.Context) ([]providers.K8sAddon, error) {
+	return nil, fmt.Errorf("digitalocean: method not available")
+}
+
+func (c *Client) InstallK8sAddon(ctx context.Context, id, slug string) error {
+	return fmt.Errorf("digitalocean: method not available")
+}
+
+func (c *Client) UninstallK8sAddon(ctx context.Context, id, addonID string) error {
+	return fmt.Errorf("digitalocean: method not available")
+}
+
+func (c *Client) ListK8sNodePools(ctx context.Context, id string) ([]providers.K8sNodePool, error) {
+	return nil, fmt.Errorf("digitalocean: method not available")
+}
+
+func (c *Client) CreateK8sNodePool(ctx context.Context, id string, cfg providers.K8sNodePoolConfig) (*providers.K8sNodePool, error) {
+	return nil, fmt.Errorf("digitalocean: method not available")
+}
+
+func (c *Client) ScaleK8sNodePool(ctx context.Context, id, poolID string, nodes int) error {
+	return fmt.Errorf("digitalocean: method not available")
+}
+
+func (c *Client) DeleteK8sNodePool(ctx context.Context, id, poolID string) error {
+	return fmt.Errorf("digitalocean: method not available")
+}

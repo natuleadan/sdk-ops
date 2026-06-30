@@ -17,6 +17,16 @@ type Provider interface {
 	ListK8s(ctx context.Context) ([]K8sCluster, error)
 	GetK8s(ctx context.Context, id string) (*K8sCluster, error)
 	GetKubeconfig(ctx context.Context, id string) (string, error)
+	UpdateK8s(ctx context.Context, id, version string) (*K8sCluster, error)
+	ToggleK8sProtection(ctx context.Context, id string) (*K8sCluster, error)
+	ListK8sAddons(ctx context.Context, id string) ([]K8sAddon, error)
+	ListAvailableAddons(ctx context.Context) ([]K8sAddon, error)
+	InstallK8sAddon(ctx context.Context, id, slug string) error
+	UninstallK8sAddon(ctx context.Context, id, addonID string) error
+	ListK8sNodePools(ctx context.Context, id string) ([]K8sNodePool, error)
+	CreateK8sNodePool(ctx context.Context, id string, cfg K8sNodePoolConfig) (*K8sNodePool, error)
+	ScaleK8sNodePool(ctx context.Context, id, poolID string, nodes int) error
+	DeleteK8sNodePool(ctx context.Context, id, poolID string) error
 
 	// Bare Metal
 	CreateBareMetal(ctx context.Context, cfg BareMetalCreateConfig) (*BareMetal, error)
@@ -27,6 +37,16 @@ type Provider interface {
 	CreateLB(ctx context.Context, cfg LBCreateConfig) (*LoadBalancer, error)
 	DeleteLB(ctx context.Context, id string) error
 	ListLB(ctx context.Context) ([]LoadBalancer, error)
+	CreateLBListener(ctx context.Context, lbID string, cfg LBListenerConfig) (*LBListener, error)
+	UpdateLBListener(ctx context.Context, lbID, listenerID string, cfg LBListenerConfig) (*LBListener, error)
+	DeleteLBListener(ctx context.Context, lbID, listenerID string) error
+	SetLBHealthCheck(ctx context.Context, lbID, listenerID string, cfg LBHealthCheckConfig) error
+	AddLBTarget(ctx context.Context, lbID, listenerID string, cfg LBTargetConfig) (*LBTarget, error)
+	ListLBTargets(ctx context.Context, lbID, listenerID string) ([]LBTarget, error)
+	DrainLBTarget(ctx context.Context, lbID, listenerID, targetID string) error
+	ResizeLB(ctx context.Context, lbID, plan string) (*LoadBalancer, error)
+	GetLBMetrics(ctx context.Context, lbID string) (string, error)
+	ToggleLBProtection(ctx context.Context, lbID string) (*LoadBalancer, error)
 
 	// DNS
 	ListDNSZones(ctx context.Context) ([]DNSZone, error)
