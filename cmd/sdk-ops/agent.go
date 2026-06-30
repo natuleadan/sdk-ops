@@ -457,12 +457,20 @@ func runAgentInstall(conn *goss.Client, nodeIP, user, key string, port int) erro
 	// Step 1: Cross-compile agent binary for linux/amd64
 	fmt.Println("  → Building agent binary (linux/amd64)...")
 	buildCmd := exec.Command("go", "build",
+		"-a",
 		"-ldflags=-s -w -X main.version="+version,
 		"-o", "/tmp/sdk-ops-agent-linux",
 		"./agent/")
 	buildCmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
-	if out, err := buildCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("build agent: %w\n%s", err, string(out))
+	buildOut, err := buildCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("build agent: %w\n%s", err, string(buildOut))
+	}
+	info, err := os.Stat("/tmp/sdk-ops-agent-linux")
+	if err == nil {
+		fmt.Printf("  → Binary size: %.1f MB\n", float64(info.Size())/1024/1024)
+	} else {
+		fmt.Printf("  → Binary built (size check failed: %v)\n", err)
 	}
 	defer os.Remove("/tmp/sdk-ops-agent-linux")
 

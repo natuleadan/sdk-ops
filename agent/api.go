@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os/exec"
 	"strconv"
 	"time"
 )
@@ -181,6 +183,78 @@ func startAPI(addr string, db *sql.DB, agent *Agent) *http.Server {
 		} else {
 			jsonResp(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 		}
+	})
+
+	// 1. Container health
+	mux.HandleFunc("/health/containers", func(w http.ResponseWriter, r *http.Request) {
+		jsonResp(w, http.StatusOK, checkContainerHealth())
+	})
+
+	// 2. Disk usage
+	mux.HandleFunc("/health/disk", func(w http.ResponseWriter, r *http.Request) {
+		jsonResp(w, http.StatusOK, checkDiskUsage())
+	})
+
+	// 3. SSL certs
+	mux.HandleFunc("/health/certs", func(w http.ResponseWriter, r *http.Request) {
+		jsonResp(w, http.StatusOK, checkSSLCerts())
+	})
+
+	// 6. Inventory (ports)
+	mux.HandleFunc("/inventory", func(w http.ResponseWriter, r *http.Request) {
+		jsonResp(w, http.StatusOK, scanInventory())
+	})
+
+	// 8. Remote exec
+	mux.HandleFunc("/exec", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			jsonResp(w, http.StatusMethodNotAllowed, map[string]string{"error": "use POST"})
+			return
+		}
+		var req struct {
+			Command string `json:"command"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonResp(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if req.Command == "" {
+			jsonResp(w, http.StatusBadRequest, map[string]string{"error": "command required"})
+			return
+		}
+		cmd := exec.Command("sh", "-c", req.Command)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		resp := map[string]interface{}{
+			"stdout": stdout.String(),
+			"stderr": stderr.String(),
+		}
+		if err != nil {
+			resp["error"] = err.Error()
+			jsonResp(w, http.StatusInternalServerError, resp)
+			return
+		}
+		jsonResp(w, http.StatusOK, resp)
+	})
+
+	// 9. Network latency
+	mux.HandleFunc("/health/network", func(w http.ResponseWriter, r *http.Request) {
+		jsonResp(w, http.StatusOK, checkNetworkLatency())
+	})
+
+	// 10. Temperature
+	mux.HandleFunc("/health/temperature", func(w http.ResponseWriter, r *http.Request) {
+		jsonResp(w, http.StatusOK, checkTemperature())
+	})
+
+	// 4+5. Docker events + log watcher status
+	mux.HandleFunc("/events/status", func(w http.ResponseWriter, r *http.Request) {
+		jsonResp(w, http.StatusOK, map[string]string{
+			"events_watcher": "running",
+			"logs_watcher":   "running",
+		})
 	})
 
 	server := &http.Server{
