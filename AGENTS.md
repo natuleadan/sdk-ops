@@ -90,14 +90,14 @@ Full reference: `docs/commands.md`. Categories:
 | **Alerts** | `infra alerts install/remove/rule add` |
 | **Operations** | `node list/info/top/exec`, `agent install/status/logs/update/schedule` |
 | **Deploy** | `deploy init/push`, `deploy encrypt/decrypt`, `service status/logs/restart/rollback/rotate` |
-| **Cluster** | `cluster nodes/pods/top/logs/scale` (16 kubectl commands) |
+| **Cluster** | `cluster nodes/pods/.../token/events/helm/node-ssh` (29 commands) |
 | **Databases** | `db create/list/remove` (postgres, mysql, redis, mongodb) |
 | **State** | `state show/sync` (resource inventory) |
 | **Compose** | `compose init/service/validate` |
 | **SSH Keys** | `key generate/list/deploy` |
 | **Notifications** | `notify send/test` |
 | **Config** | `config init/add-node/list-nodes/remove-node/set-credentials` |
-| **Provider** | `provider vps/k8s/lb/dns/ssh-key` |
+| **Provider** | `provider vps/k8s/lb/dns/ssh-key` (49 interface methods) |
 | **Utilities** | `status` (dashboard), `completion` (bash/zsh/fish) |
 
 ## Modes
@@ -112,12 +112,22 @@ Full reference: `docs/commands.md`. Categories:
 |------|---------|-------------|
 | `--ssh-port` | 0 | Migrate SSH to custom port (0 = keep 22) |
 | `--monitor` | false | Install node_exporter (port 9100) |
+| `--auditd` | false | Install auditd (CIS) |
+| `--lynis` | false | Install Lynis security auditor |
 | `--crowdsec` | false | Install CrowdSec WAF/IPS |
 | `--lock-root` | false | Lock root password |
 | `--logs` | "" | Install Promtail to Loki URL |
 | `--alerts` | "" | Install Alertmanager (Slack webhook) |
 | `--cloud-init` | false | Use cloud-init instead of SSH |
 | `--provider` | "" | Create VPS via provider API |
+| `--secrets-encryption` | false | Encrypt secrets in etcd (CIS) |
+| `--protect-kernel-defaults` | false | Protect kubelet kernel defaults (CIS) |
+| `--admission-plugins` | `NodeRestriction,EventRateLimit` | Admission plugins (CIS) |
+| `--cis-psa` | false | Pod Security Admission restricted |
+| `--cis-audit-log` | false | Kube-apiserver audit logging |
+| `--cis-netpol` | false | Default-deny NetworkPolicy |
+| `--cis-svcacc` | false | Patch ServiceAccount automount |
+| `--cis-tls-ciphers` | false | Restrict TLS cipher suites |
 
 ## Workflows (for AI assistants)
 
@@ -127,6 +137,18 @@ Full reference: `docs/commands.md`. Categories:
 2. sdk-ops infra init <ip>          # hardening + Docker + k3s (or --docker / --bare)
 3. Verify: sdk-ops infra status <ip>
    → SSH port stays on 22, user stays root (unless --ssh-port / --lock-root)
+   → After hardening: root SSH is blocked — use --user sdkops
+```
+
+### Provision with CIS hardening
+```
+1. sdk-ops config add-node <ip> --user root --key ~/.ssh/id_ed25519
+2. sdk-ops infra init <ip> \
+     --secrets-encryption --protect-kernel-defaults \
+     --cis-psa --cis-audit-log --cis-netpol --cis-svcacc --cis-tls-ciphers \
+     --auditd --lynis
+3. Verify: sdk-ops infra status <ip>
+   → PermitRootLogin no, MaxAuthTries 3, auditd active, Lynis installed
 ```
 
 ### Provision a new VPS via provider API + cloud-init
@@ -248,3 +270,6 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
 - **CubePath API rate limit**: 5 requests per 5 minutes. Add sleep between batch operations.
 - **`kubectl top` requires metrics-server** to be fully ready (may take 1-2 min after k3s install).
 - **Load Balancer cannot be deleted** while in "deploying" state. Wait for it to become active.
+- **PermitRootLogin no** after hardening — SSH as root is blocked. Use `--user sdkops` to connect.
+- **CIS hardening flags** (`--cis-*`) run post-install and may restart k3s (audit-log, tls-ciphers).
+- **etcd-snapshot** requires k3s with embedded etcd (default). Fails with "etcd datastore disabled" if using sqlite.

@@ -425,9 +425,10 @@ sdk-ops service rotate env <service> [flags]   # Rotate env var value
   --value string     Explicit value (auto-generated if empty)
 ```
 
-## sdk-ops cluster — k3s cluster operations
+## sdk-ops cluster — k3s cluster operations (29 commands)
 
 ```bash
+# Kubectl wrappers (16)
 sdk-ops cluster nodes                          # kubectl get nodes -o wide
 sdk-ops cluster pods                           # kubectl get pods --all-namespaces
 sdk-ops cluster services                       # kubectl get services
@@ -444,6 +445,35 @@ sdk-ops cluster scale <res> --replicas N       # kubectl scale
 sdk-ops cluster apply -f <file>               # kubectl apply
 sdk-ops cluster delete <res> <name>            # kubectl delete
 sdk-ops cluster describe <res> <name>          # kubectl describe
+
+# Cluster management (7)
+sdk-ops cluster token                          # Show cluster join token
+sdk-ops cluster restart                        # Restart k3s service
+sdk-ops cluster events [--type W] [--namespace N]  # Show cluster events (--type: Normal, Warning)
+sdk-ops cluster cordon <node>                  # Mark node unschedulable
+sdk-ops cluster uncordon <node>                # Mark node schedulable
+sdk-ops cluster drain <node>                   # Drain node for maintenance
+sdk-ops cluster label <node> <key>=<value>     # Label a node
+
+# Upgrades and maintenance (4)
+sdk-ops cluster upgrade --version X            # Upgrade k3s to a specific version
+sdk-ops cluster etcd-snapshot                  # Create an etcd snapshot
+sdk-ops cluster etcd-restore <snapshot-file>   # Restore etcd from snapshot
+sdk-ops cluster cert-rotate                    # Rotate k3s certificates
+
+# Resource inspection (1)
+sdk-ops cluster get <type> <name> [-o yaml|json|wide]  # Get resource as YAML
+
+# Helm (5)
+sdk-ops cluster helm repo-add <name> <url>     # Add Helm repository
+sdk-ops cluster helm repo-list                 # List Helm repositories
+sdk-ops cluster helm install <name> <chart>    # Install a Helm chart
+sdk-ops cluster helm upgrade <name> <chart>    # Upgrade a Helm release
+sdk-ops cluster helm list [--namespace N]      # List Helm releases
+
+# Advanced (2)
+sdk-ops cluster node-ssh <node-name>           # SSH into a cluster node (resolves InternalIP)
+sdk-ops cluster port-forward <pod> <local:remote> [-n ns]  # Forward port via SSH tunnel
 ```
 
 Auto-installs k3s on the target node if not already present.
@@ -487,28 +517,56 @@ sdk-ops provider vps export <id>               # Export as Terraform HCL
 ### k8s
 
 ```bash
+# Cluster lifecycle
 sdk-ops provider k8s create [flags]
   --name string           Cluster name
   --location string       Location (default "us-mia-1")
   --version string        K8s version
   --node-plan string      Node plan
   --nodes int             Number of nodes (default 3)
-
 sdk-ops provider k8s list
 sdk-ops provider k8s delete <id>
 sdk-ops provider k8s kubeconfig <id>           # Download kubeconfig YAML
+sdk-ops provider k8s update <id> --version X   # Upgrade K8s version
+sdk-ops provider k8s protection <id>            # Toggle deletion protection
+
+# Addons
+sdk-ops provider k8s addons list <id>           # List installed addons
+sdk-ops provider k8s addons available           # List available addons
+sdk-ops provider k8s addons install <id> <slug> # Install an addon
+sdk-ops provider k8s addons uninstall <id> <addon-id>  # Uninstall an addon
+
+# Node pools
+sdk-ops provider k8s node-pool list <id>       # List node pools
+sdk-ops provider k8s node-pool add <id> --plan X --nodes N  # Add a node pool
+sdk-ops provider k8s node-pool scale <id> <pool-id> --nodes N  # Scale a node pool
+sdk-ops provider k8s node-pool delete <id> <pool-id>  # Delete a node pool
 ```
 
 ### lb
 
 ```bash
+# Lifecycle
 sdk-ops provider lb create [flags]
   --name string           LB name
   --location string       Location (default "us-mia-1")
   --plan string           LB plan
-
 sdk-ops provider lb list
 sdk-ops provider lb delete <id>
+sdk-ops provider lb resize <id> --plan lb.medium  # Change LB plan
+sdk-ops provider lb protection <id>               # Toggle deletion protection
+sdk-ops provider lb metrics <id>                  # Show LB metrics
+
+# Listeners
+sdk-ops provider lb listener add <lb-id> --port 80 --target-port 8080  # Add listener
+sdk-ops provider lb listener update <lb-id> <listener-id> --port 443   # Update listener
+sdk-ops provider lb listener delete <lb-id> <listener-id>              # Delete listener
+sdk-ops provider lb health-check <lb-id> <listener-id> --path /health # Set health check
+
+# Targets
+sdk-ops provider lb target add <lb-id> <listener-id> --type vps --uuid X --port 8080  # Add target
+sdk-ops provider lb target list <lb-id> <listener-id>  # List targets
+sdk-ops provider lb target drain <lb-id> <listener-id> <target-id>  # Drain a target
 ```
 
 ### dns

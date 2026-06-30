@@ -87,9 +87,9 @@ secrets/             ← sops encryption/decryption helpers (deploy encrypt/decr
 ssh/                 ← SSH client (connect, exec, stream, PTY, agent support)
 ├── client.go        ← SSH Client + KnownHosts + agent auth + InsecureIgnoreHostKey
 
-hardening/           ← Step-by-step server hardening
+hardening/           ← Step-by-step server hardening (10 steps)
 ├── apply.go         ← Orchestrator (calls steps in order)
-├── steps.go         ← 7 steps: packages, user, kernel, fail2ban, SSH, nftables, node_exporter
+├── steps.go         ← 10 steps: packages, user, kernel, remove_unused, fail2ban, SSH, nftables, auditd, lynis, node_exporter
 ├── firewall.go      ← FirewallOpen/Close/List via nftables
 └── hconfig.go       ← YAML config export/import
 
@@ -126,7 +126,7 @@ notify/              ← Notifications (Slack, Discord, Telegram, Email, Webhook
 compose/             ← Docker Compose YAML manipulation
 
 providers/           ← Multi-provider interface
-├── provider.go      ← Provider interface (21 methods: VPS, K8s, LB, DNS, BareMetal, SSHKey)
+├── provider.go      ← Provider interface (49 methods: VPS, K8s, LB advanced, DNS, SSHKey)
 ├── types.go         ← VPS, K8sCluster, LB, BareMetal, DNSZone, DNSRecord, SSHKey
 ├── credentials.go   ← credential file loader (~/.sdk-ops/credentials.yaml)
 ├── cubepath/        ← CubePath (raw HTTP, schema in cubepath-api.json)
@@ -214,13 +214,16 @@ Hooks are executable scripts placed in `/opt/sdk-ops/hooks/<phase>/` on the VPS.
 |------|-------------|-----------|
 | 1. Install packages | nftables, fail2ban, unattended-upgrades, htop | no |
 | 2. Create user | `sdkops` with sudo + SSH key from root | no |
-| 3. Kernel tuning | sysctl: syncookies, rp_filter, ptrace_scope | no |
-| 4. fail2ban | SSH protection, 1h ban after 5 retries | no |
-| 5. SSH config | Keep port 22, disable password auth, restrict root login | no |
-| 6. nftables | Drop by default, allow 22/80/443/6443 | no |
-| 7. node_exporter | Prometheus node_exporter on port 9100 | `--monitor` |
-| 8. SSH port migration | Add new port + keep port 22 | `--ssh-port N` |
-| 9. Lock root | Lock root password after user creation | `--lock-root` |
+| 3. Kernel tuning | sysctl: syncookies, rp_filter, send_redirects=0, ptrace_scope | no |
+| 4. Remove unused services | telnet, ftp, rsh, rpcbind, avahi, cups | no |
+| 5. fail2ban | SSH protection, 1h ban after 5 retries | no |
+| 6. SSH config | CIS: PermitRootLogin no, MaxAuthTries 3, no password auth | no |
+| 7. nftables | Drop by default, allow 22/80/443/6443 | no |
+| 8. auditd | System auditing daemon | `--auditd` |
+| 9. lynis | Security auditor | `--lynis` |
+| 10. node_exporter | Prometheus node_exporter on port 9100 | `--monitor` |
+| 11. SSH port migration | Add new port + keep port 22 | `--ssh-port N` |
+| 12. Lock root | Lock root password after user creation | `--lock-root` |
 
 **Port 22 is never removed** from nftables. The default SSH port stays on 22. If `--ssh-port N` is used, the new port is added alongside port 22 (both remain open).
 

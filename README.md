@@ -169,10 +169,15 @@ sdk-ops deploy init ./app --template go --ci github
 | | `service versions` | List deployed versions |
 | | `service rotate db` | Rotate database password |
 | | `service rotate env` | Rotate environment variable |
-| **Cluster** | `cluster nodes/pods/services` | kubectl wrappers (16 commands) |
-| | `cluster top` | kubectl top nodes + pods |
-| | `cluster logs <pod>` | kubectl logs -f |
-| | `cluster scale deploy --replicas N` | kubectl scale |
+| **Cluster** | `cluster nodes/pods/services/...` | kubectl wrappers (16 commands) |
+| | `cluster top/logs/exec/scale/apply/delete/describe` | Pod + deployment management |
+| | `cluster token/restart/events` | Cluster info and monitoring |
+| | `cluster cordon/uncordon/drain/label` | Node management |
+| | `cluster upgrade/etcd-snapshot/etcd-restore/cert-rotate` | Upgrade and maintenance |
+| | `cluster get <type> <name> -o yaml` | Resource inspection |
+| | `cluster helm repo-add/repo-list/install/upgrade/list` | Helm chart management |
+| | `cluster node-ssh` | SSH into a cluster node |
+| | `cluster port-forward` | Port forwarding via SSH tunnel |
 | **Databases** | `db create` | Provision postgres, mysql, redis, mongodb |
 | | `db list` | List databases on a node |
 | | `db remove` | Remove a database |
@@ -186,7 +191,14 @@ sdk-ops deploy init ./app --template go --ci github
 | | `key deploy` | Deploy SSH key to server |
 | **Notifications** | `notify send` | Send notification (Slack, Discord, Telegram, Email) |
 | | `notify test` | Test all configured notifiers |
-| **Provider API** | CubePath, Hetzner, DO, Vultr, AWS | Create/destroy/list VPS, K8s, LB, DNS, SSH keys via API |
+| **Provider API** | CubePath, Hetzner, DO, Vultr, AWS | 49 methods: VPS, K8s, LB, DNS, SSH keys |
+| | `provider k8s update/protection` | Upgrade K8s version + toggle deletion protection |
+| | `provider k8s addons list/available/install/uninstall` | K8s addon management |
+| | `provider k8s node-pool list/add/scale/delete` | Node pool management |
+| | `provider lb listener add/update/delete` | LB listener management |
+| | `provider lb health-check set` | LB health check configuration |
+| | `provider lb target add/list/drain` | LB target management |
+| | `provider lb resize/metrics/protection` | LB plan, metrics, and protection |
 | | `provider ssh-key` | Upload/list/delete SSH keys on providers |
 | | `provider vps export` | Export VPS as Terraform HCL |
 | **State** | `state show` | Show tracked resources (services, databases, schedules) |
@@ -245,6 +257,8 @@ s.Cluster().Scale("deploy/my-app", 5)
 | `--mode` | `k3s` | k3s, docker, or bare |
 | `--ssh-port` | `0` | Migrate SSH to custom port (0 = keep port 22) |
 | `--monitor` | `false` | Install Prometheus node_exporter |
+| `--auditd` | `false` | Install auditd for system auditing (CIS) |
+| `--lynis` | `false` | Install Lynis security auditor |
 | `--crowdsec` | `false` | Install CrowdSec WAF/IPS |
 | `--lock-root` | `false` | Lock root password after creating sdkops user |
 | `--logs` | `""` | Install Promtail, ship logs to Loki URL |
@@ -253,6 +267,14 @@ s.Cluster().Scale("deploy/my-app", 5)
 | `--provider` | `""` | Create VPS via provider API first |
 | `--plan` | `gp.nano` | VPS plan (provider) |
 | `--location` | `us-mia-1` | VPS location (provider) |
+| `--secrets-encryption` | `false` | Enable secrets encryption at rest in etcd (CIS) |
+| `--protect-kernel-defaults` | `false` | Protect kubelet kernel defaults (CIS) |
+| `--admission-plugins` | `NodeRestriction,EventRateLimit` | Kube-apiserver admission plugins (CIS) |
+| `--cis-psa` | `false` | Enforce Pod Security Admission restricted (CIS) |
+| `--cis-audit-log` | `false` | Enable kube-apiserver audit logging (CIS) |
+| `--cis-netpol` | `false` | Apply default-deny NetworkPolicy (CIS) |
+| `--cis-svcacc` | `false` | Patch default ServiceAccount automount=false (CIS) |
+| `--cis-tls-ciphers` | `false` | Restrict TLS cipher suites (CIS) |
 
 ## 6. Deploy Flow
 

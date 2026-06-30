@@ -116,6 +116,25 @@ When k3s is installed with Traefik (default), Traefik occupies ports 80 and 443 
 - Deploy with `--runtime k3s` to use k3s Deployment + Service + Ingress instead of docker-compose
 - Expose Docker containers on non-conflicting ports (e.g., 8080, 8081)
 
+## SSH Access After Hardening
+
+The hardening step now sets `PermitRootLogin no` (CIS Level 1). After running `infra init`, root SSH access is blocked. Use the `sdkops` user instead:
+
+```bash
+# Before hardening (as root)
+sdk-ops infra init <ip> --user root
+
+# After hardening (as sdkops)
+ssh sdkops@<ip>
+sdk-ops infra status <ip> --user sdkops
+```
+
+If you need root access temporarily, connect as sdkops and use `sudo -i`.
+
+## Permissions After Drain
+
+After `cluster drain <node>`, the node is marked `Ready,SchedulingDisabled`. Use `cluster uncordon <node>` to re-enable scheduling.
+
 ## Cert Install: Let's Encrypt Validation
 
 Let's Encrypt HTTP-01 validation requires the domain to be publicly accessible on port 80. If the domain is behind Cloudflare proxy (orange cloud), the ACME challenge may fail. Solutions:
