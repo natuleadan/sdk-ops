@@ -1,6 +1,9 @@
 - github.com/aws/aws-sdk-go-v2 (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/v1.42.0/LICENSE.txt
 
+- github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/aws/protocol/eventstream/v1.6.10/aws/protocol/eventstream/LICENSE.txt
+
 - github.com/aws/aws-sdk-go-v2/config (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/config/v1.32.25/config/LICENSE.txt
 
@@ -34,11 +37,20 @@
 - github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/service/internal/accept-encoding/v1.13.12/service/internal/accept-encoding/LICENSE.txt
 
+- github.com/aws/aws-sdk-go-v2/service/internal/checksum (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/internal/checksum/v1.7.2/service/internal/checksum/LICENSE.txt
+
 - github.com/aws/aws-sdk-go-v2/service/internal/presigned-url (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/service/internal/presigned-url/v1.13.29/service/internal/presigned-url/LICENSE.txt
 
+- github.com/aws/aws-sdk-go-v2/service/internal/s3shared (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/internal/s3shared/v1.18.15/service/internal/s3shared/LICENSE.txt
+
 - github.com/aws/aws-sdk-go-v2/service/route53 (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/service/route53/v1.63.3/service/route53/LICENSE.txt
+
+- github.com/aws/aws-sdk-go-v2/service/s3 (Apache-2.0)
+  https://github.com/aws/aws-sdk-go-v2/blob/service/s3/v1.80.0/service/s3/LICENSE.txt
 
 - github.com/aws/aws-sdk-go-v2/service/signin (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/service/signin/v1.2.0/service/signin/LICENSE.txt
