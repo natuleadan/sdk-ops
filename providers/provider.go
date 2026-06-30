@@ -27,6 +27,7 @@ type Provider interface {
 	CreateK8sNodePool(ctx context.Context, id string, cfg K8sNodePoolConfig) (*K8sNodePool, error)
 	ScaleK8sNodePool(ctx context.Context, id, poolID string, nodes int) error
 	DeleteK8sNodePool(ctx context.Context, id, poolID string) error
+	ListK8sLBs(ctx context.Context, id string) ([]LoadBalancer, error)
 
 	// Bare Metal
 	CreateBareMetal(ctx context.Context, cfg BareMetalCreateConfig) (*BareMetal, error)

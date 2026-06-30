@@ -252,6 +252,24 @@ func (c *Client) DeleteK8sNodePool(ctx context.Context, id, poolID string) error
 	return err
 }
 
+func (c *Client) ListK8sLBs(ctx context.Context, id string) ([]providers.LoadBalancer, error) {
+	resp, err := c.do("GET", "/kubernetes/"+id+"/loadbalancers", nil)
+	if err != nil {
+		return nil, fmt.Errorf("cubepath list k8s lbs: %w", err)
+	}
+	var list []map[string]any
+	if err := json.Unmarshal(resp, &list); err != nil {
+		return nil, fmt.Errorf("parse: %w\nbody: %s", err, string(resp))
+	}
+	var result []providers.LoadBalancer
+	for _, r := range list {
+		result = append(result, providers.LoadBalancer{
+			ID: val(r, "uuid"), Name: val(r, "name"), IP: val(r, "ipv4_address"),
+		})
+	}
+	return result, nil
+}
+
 func atoi(s string) int {
 	var n int
 	fmt.Sscanf(s, "%d", &n)

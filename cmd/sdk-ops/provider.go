@@ -503,6 +503,26 @@ func newProviderK8sCmd() *cobra.Command {
 	cmd.AddCommand(protectionCmd)
 	cmd.AddCommand(addonsCmd)
 	cmd.AddCommand(nodePoolCmd)
+
+	lbListCmd := &cobra.Command{
+		Use: "lb-list <id>", Short: "List LBs attached to a K8s cluster", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := getProvider()
+			if err != nil {
+				return err
+			}
+			list, err := p.ListK8sLBs(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			for _, lb := range list {
+				fmt.Printf("[%s] %s @ %s\n", lb.ID, lb.Name, lb.IP)
+			}
+			return nil
+		},
+	}
+	cmd.AddCommand(lbListCmd)
+
 	return cmd
 }
 

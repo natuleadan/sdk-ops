@@ -15,6 +15,7 @@ type Config struct {
 	LockRoot      bool   // lock root password after creating sdkops user
 	EnableAuditd  bool   // install auditd
 	EnableLynis   bool   // install Lynis security auditor
+	EnableUSG     bool   // install Ubuntu Security Guide
 }
 
 func DefaultConfig() Config {
@@ -25,6 +26,7 @@ func DefaultConfig() Config {
 		LockRoot:      false,
 		EnableAuditd:  false,
 		EnableLynis:   false,
+		EnableUSG:     false,
 	}
 }
 
@@ -46,6 +48,7 @@ func Apply(client *goss.Client, cfg Config) error {
 		{"nftables", nftablesFirewall},
 		{"auditd", installAuditd},
 		{"lynis", installLynis},
+		{"usg", installUSG},
 		{"node_exporter", installNodeExporter},
 	}
 
@@ -74,6 +77,7 @@ func Check(client *goss.Client) (string, error) {
 		"sudo grep -q '^MaxAuthTries 3' /etc/ssh/sshd_config && echo 'max-auth-tries: OK' || echo 'max-auth-tries: FAIL'",
 		"sudo systemctl is-active auditd --quiet 2>/dev/null && echo 'auditd: OK' || echo 'auditd: MISSING'",
 		"command -v lynis &>/dev/null && echo 'lynis: OK' || echo 'lynis: MISSING'",
+		"command -v usg &>/dev/null && echo 'usg: OK' || echo 'usg: MISSING'",
 	}
 	cmd := ""
 	for _, c := range checks {

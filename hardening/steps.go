@@ -239,6 +239,23 @@ echo "lynis: OK"
 	return ssh.RunStream(client, script)
 }
 
+func installUSG(client *goss.Client, cfg Config) error {
+	if !cfg.EnableUSG {
+		fmt.Println("  → Skipping Ubuntu Security Guide (not enabled)")
+		return nil
+	}
+	fmt.Println("  → Installing Ubuntu Security Guide...")
+	script := `
+if ! command -v usg &>/dev/null; then
+    apt-get install -y -qq ubuntu-advantage-tools 2>&1 | tail -1
+    pro enable usg 2>&1 | tail -1
+    apt-get install -y -qq usg 2>&1 | tail -1
+fi
+echo "usg: OK"
+`
+	return ssh.RunStream(client, script)
+}
+
 func installNodeExporter(client *goss.Client, cfg Config) error {
 	if !cfg.EnableMonitor {
 		fmt.Println("  → Skipping node_exporter (not enabled)")

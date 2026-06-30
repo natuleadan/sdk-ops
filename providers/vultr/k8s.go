@@ -108,3 +108,7 @@ func (c *Client) ScaleK8sNodePool(ctx context.Context, id, poolID string, nodes 
 func (c *Client) DeleteK8sNodePool(ctx context.Context, id, poolID string) error {
 	return fmt.Errorf("vultr: method not available")
 }
+
+func (c *Client) ListK8sLBs(ctx context.Context, id string) ([]providers.LoadBalancer, error) {
+	return nil, fmt.Errorf("vultr: method not available")
+}

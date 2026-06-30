@@ -43,6 +43,7 @@ type infraFlags struct {
 	monitor     bool
 	auditd      bool
 	lynis       bool
+	usg         bool
 	lockRoot    bool
 	hardSSHPort int
 	logsURL     string
@@ -348,6 +349,7 @@ Examples:
 	initCmd.Flags().BoolVar(&f.monitor, "monitor", false, "Install Prometheus node_exporter (port 9100)")
 	initCmd.Flags().BoolVar(&f.auditd, "auditd", false, "Install auditd for system auditing (CIS)")
 	initCmd.Flags().BoolVar(&f.lynis, "lynis", false, "Install Lynis security auditor")
+	initCmd.Flags().BoolVar(&f.usg, "usg", false, "Install Ubuntu Security Guide (CIS Level 1/2 auditing)")
 	initCmd.Flags().BoolVar(&f.lockRoot, "lock-root", false, "Lock root password after creating sdkops user")
 	initCmd.Flags().IntVar(&f.hardSSHPort, "ssh-port", 0, "Migrate SSH to custom port (0=keep port 22)")
 	initCmd.Flags().StringVar(&f.logsURL, "logs", "", "Install Promtail and ship logs to this Loki URL")
@@ -1260,6 +1262,7 @@ func runInfraInit(ip string, f infraFlags) error {
 	hardCfg.EnableMonitor = f.monitor
 	hardCfg.EnableAuditd = f.auditd
 	hardCfg.EnableLynis = f.lynis
+	hardCfg.EnableUSG = f.usg
 	hardCfg.LockRoot = f.lockRoot
 	if f.hardSSHPort > 0 {
 		hardCfg.SSHPort = f.hardSSHPort
