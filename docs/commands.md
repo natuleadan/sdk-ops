@@ -1,5 +1,35 @@
 # Commands
 
+## sdk-ops completion — Shell completions
+
+```bash
+sdk-ops completion bash        # Generate bash completion script
+sdk-ops completion zsh         # Generate zsh completion script
+sdk-ops completion fish        # Generate fish completion script
+```
+
+## sdk-ops status — Unified dashboard
+
+```bash
+sdk-ops status                             # All registered nodes
+sdk-ops status --node 192.168.1.100        # Single node
+```
+
+Shows per-node: hostname, runtime, agent health, CPU, memory, disk, services.
+
+## sdk-ops state — Resource tracking
+
+```bash
+sdk-ops state show                         # All tracked resources
+sdk-ops state show --type service          # Filter by type
+sdk-ops state show --node 192.168.1.100    # Filter by node
+sdk-ops state sync                         # Scan all nodes and update inventory
+sdk-ops state sync --node 192.168.1.100    # Scan a single node
+```
+
+Resources are tracked in `~/.sdk-ops/state.yaml` and auto-recorded on
+`deploy push`, `db create`, and `backup schedule`.
+
 ## sdk-ops infra — Infrastructure
 
 ### init
@@ -71,6 +101,16 @@ sdk-ops infra ready <ip> [flags]
 ```
 
 Runs k3s diagnostics, verifies all nodes are Ready, and checks that core system pods are Running.
+
+### adopt
+
+Scan an existing server and register it without reprovisioning. Read-only — detects Docker, k3s, containers, services, and hardening, then prompts before registering.
+
+```bash
+sdk-ops infra adopt <ip> [flags]
+  --force           Skip confirmation prompt
+  --mode string     Override detected mode (k3s, docker, bare)
+```
 
 ### status
 
@@ -278,8 +318,9 @@ sdk-ops node exec --agents -- <command>        # Run only on agent nodes
 
 ```bash
 sdk-ops deploy init <dir> --template <name> [flags]
-  --template string   Template name: html, node, wordpress, go
+  --template string   Template name: html, node, wordpress, go, nextjs, python-fastapi, django
   --name string       Service name (default "app")
+  --ci string         Generate CI/CD config: github, gitlab
 
 sdk-ops deploy push <dir> --node <ip> [flags]
   --name             Service name (default: directory name)
@@ -305,13 +346,20 @@ sdk-ops deploy decrypt <file>
 Generate project scaffolding with a single command:
 
 ```bash
-sdk-ops deploy init ./my-site --template html        # Static HTML + Nginx
-sdk-ops deploy init ./my-blog --template wordpress    # WordPress + MySQL
-sdk-ops deploy init ./my-api --template node          # Node.js Express
-sdk-ops deploy init ./my-svc --template go           # Go HTTP server
+sdk-ops deploy init ./my-site --template html           # Static HTML + Nginx
+sdk-ops deploy init ./my-blog --template wordpress       # WordPress + MySQL
+sdk-ops deploy init ./my-api --template node             # Node.js Express
+sdk-ops deploy init ./my-svc --template go              # Go HTTP server
+sdk-ops deploy init ./my-app --template nextjs           # Next.js (standalone)
+sdk-ops deploy init ./my-app --template python-fastapi   # FastAPI + uvicorn
+sdk-ops deploy init ./my-app --template django           # Django + gunicorn
+
+# Also generate CI/CD pipeline
+sdk-ops deploy init ./my-app --template go --ci github   # + .github/workflows/deploy.yml
+sdk-ops deploy init ./my-app --template node --ci gitlab # + .gitlab-ci.yml
 ```
 
-Each template generates a docker-compose.yml, service.yaml, and any required config files.
+Each template generates a docker-compose.yml, service.yaml, and any required config files. GitHub Actions and GitLab CI templates are available via `--ci`.
 
 **Builder backends:**
 
@@ -330,6 +378,7 @@ For projects with a docker-compose.yml using public images (nginx:alpine, etc.),
 ```bash
 sdk-ops deploy push ./my-app --runtime docker        # docker-compose up -d (default)
 sdk-ops deploy push ./my-app --runtime k3s --domain app.example.com  # k3s Deployment + Service + Ingress
+sdk-ops deploy push ./my-app --runtime swarm         # Docker Stack deploy
 sdk-ops deploy push ./my-app --runtime bare           # Upload files only, no service start
 ```
 
@@ -368,6 +417,12 @@ sdk-ops service logs <name> [-f]               # Tail logs
 sdk-ops service restart <name>                 # Restart service
 sdk-ops service rollback <name>                # Rollback to previous version
 sdk-ops service versions <name>                # List deployed versions
+sdk-ops service rotate db <container> [flags]  # Rotate DB password
+  --type string      Database type: postgres, mysql, redis, mongodb (required)
+  --new-pass string  Explicit password (auto-generated if empty)
+sdk-ops service rotate env <service> [flags]   # Rotate env var value
+  --name string      Environment variable name (required)
+  --value string     Explicit value (auto-generated if empty)
 ```
 
 ## sdk-ops cluster — k3s cluster operations
@@ -473,6 +528,72 @@ sdk-ops provider ssh-key upload <name> [flags]
 sdk-ops provider ssh-key list
 sdk-ops provider ssh-key delete <id>
 ```
+
+## sdk-ops db — Database provisioning
+
+```bash
+sdk-ops db create postgres [flags]            # Provision PostgreSQL
+sdk-ops db create mysql [flags]               # Provision MySQL
+sdk-ops db create redis [flags]               # Provision Redis
+sdk-ops db create mongodb [flags]             # Provision MongoDB
+  --name string      Database name (default: type name)
+  --db-port int      Expose on external port (0 = internal only)
+  --db-user string   Database user (generated if empty)
+  --db-pass string   Database password (generated if empty)
+  --version string   Database version (e.g., 17-alpine, 8.0)
+  -n, --node         Target node IP
+sdk-ops db list [--node IP]                   # List databases on a node
+sdk-ops db remove <name> [--node IP]          # Remove a database
+```
+
+## sdk-ops agent — On-VPS monitoring agent
+
+```bash
+sdk-ops agent install [--node IP] [flags]     # Deploy agent (systemd default)
+  --runtime string   Runtime: bare (default), docker
+sdk-ops agent status [--node IP]              # Check agent health
+sdk-ops agent logs [--node IP] [--tail N]     # Show agent logs
+sdk-ops agent uninstall [--node IP] [flags]   # Remove agent
+  --yes              Skip confirmation prompt
+  --purge            Also remove agent data (audit, metrics, schedules)
+sdk-ops agent update [--node IP] [flags]      # Check and apply update
+  --force            Rebuild even if no update
+sdk-ops agent schedule add <name> [flags]     # Add scheduled task
+  --cron string      Cron expression (required)
+  --task string      Task type: shell, backup-services, backup-database, docker-cleanup
+  --config string    Task configuration (JSON)
+sdk-ops agent schedule list [--node IP]       # List scheduled tasks
+sdk-ops agent schedule rm <id> [--node IP]    # Remove a scheduled task
+```
+
+## sdk-ops compose — Docker Compose management
+
+```bash
+sdk-ops compose init <path>                   # Create new docker-compose.yml
+sdk-ops compose service add <name> --image X  # Add a service
+sdk-ops compose service rm <name>             # Remove a service
+sdk-ops compose service list                  # List services
+sdk-ops compose service env set <svc> <key>=<val>  # Set env var
+sdk-ops compose service env unset <svc> <key>       # Unset env var
+sdk-ops compose validate                      # Validate docker-compose.yml syntax
+```
+
+## sdk-ops key — SSH key management
+
+```bash
+sdk-ops key generate <name>                   # Generate SSH key pair locally
+sdk-ops key list                              # List local SSH keys
+sdk-ops key deploy <name> [--node IP]         # Deploy SSH key to server
+```
+
+## sdk-ops notify — Notifications
+
+```bash
+sdk-ops notify send <title> <message> [flags]  # Send notification
+sdk-ops notify test [flags]                    # Test all configured notifiers
+```
+
+Uses env vars for channels: `SLACK_WEBHOOK`, `DISCORD_WEBHOOK`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SMTP_*`.
 
 ## sdk-ops version
 

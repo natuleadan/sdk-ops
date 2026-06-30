@@ -2,7 +2,7 @@
 
 ## Overview
 
-sdk-ops is a single binary CLI (`sdk-ops`) that provisions and operates servers via SSH. It has no server-side agent — all operations are push-based.
+sdk-ops is a single binary CLI (`sdk-ops`) that provisions and operates servers via SSH. It has an optional on-VPS monitoring agent (systemd or Docker) for health checks, metrics, and scheduled tasks.
 
 ```
 ┌────────────────┐
@@ -14,14 +14,15 @@ sdk-ops is a single binary CLI (`sdk-ops`) that provisions and operates servers 
 ┌───────────────────────────────────────┐
 │           VPS / Bare Metal            │
 │  ┌─────────┐  ┌──────┐  ┌─────────┐  │
-│  │ nftables │  │ k3s  │  │ Docker  │  │
-│  │ fail2ban │  │      │  │         │  │
-│  │ sysctl   │  │      │  │         │  │
-│  │ node_exp │  │      │  │         │  │
+│  │ nftables │  │ k3s  │  │ Agent   │  │
+│  │ fail2ban │  │      │  │ :9000   │  │
+│  │ sysctl   │  │      │  │ 10 mon  │  │
+│  │ node_exp │  │ Docker│  │ SQLite  │  │
 │  └─────────┘  └──────┘  └─────────┘  │
 │                                       │
-│  /opt/sdk-ops/                             │
+│  /opt/sdk-ops/                        │
 │  ├── services/    ← deployed apps     │
+│  ├── agent-data/  ← metrics + audit   │
 │  ├── backups/     ← service backups   │
 │  └── logs/        ← service logs      │
 └───────────────────────────────────────┘
@@ -30,18 +31,37 @@ sdk-ops is a single binary CLI (`sdk-ops`) that provisions and operates servers 
 ## Package Structure (SDK)
 
 ```
-cmd/sdk-ops/              ← Cobra CLI root + all subcommands
-├── main.go          ← Root command, global --insecure flag, newSSHClient helper
-├── infra.go         ← infra init/join/ready/plan/apply/status/remove/backup/restore
+agent/               ← On-VPS monitoring agent
+├── main.go          ← Entrypoint: lifecycle + API server (:9000)
+├── api.go           ← HTTP API: /health, /metrics, /audit, /schedules, /events, /exec, /inventory
+├── health.go        ← 10 monitors: containers, disk, SSL, network, temperature
+├── metrics.go       ← CPU, RAM, disk, Docker stats (gopsutil)
+├── scheduler.go     ← Cron scheduler (robfig/cron)
+├── notify.go        ← Notification sending from agent
+├── events.go        ← Docker event watcher + log pattern watcher
+├── update.go        ← GitHub release checker
+├── config.go        ← Config loading
+└── db.go            ← SQLite storage (metrics, audit, schedules, events)
+
+cmd/sdk-ops/          ← Cobra CLI root + all subcommands (15 commands)
+├── main.go          ← Root command, 15 subcommands
+├── infra.go         ← infra init/join/adopt/ready/plan/apply/status/remove/backup/restore
 │                       firewall/cert/proxy/logs/alerts
 ├── node.go          ← node list/info/top/exec (--all, --servers, --agents)
-├── deploy.go        ← deploy init/push/encrypt/decrypt, auto Docker install, blue/green
+├── deploy.go        ← deploy init/push/encrypt/decrypt + service status/logs/restart/
+│                       rollback/versions/rotate db/env
 ├── cluster.go       ← cluster (16 kubectl wrappers, auto k3s install)
-├── service.go       ← service status/logs/restart/rollback/versions
+├── agent.go         ← agent install/status/logs/uninstall/update/schedule
 ├── config.go        ← config init/add-node/list-nodes/remove-node/set-credentials
-│                       NodeConfig with Role, Arch
 ├── provider.go      ← provider vps/k8s/lb/dns/ssh-key
-└── backup.go        ← backup create/restore (top-level)
+├── backup.go        ← backup create/restore/schedule/unschedule/list-schedules
+├── db.go            ← db create/list/remove (postgres, mysql, redis, mongodb)
+├── compose.go       ← compose init/service/validate
+├── key.go           ← key generate/list/deploy
+├── notify.go        ← notify send/test
+├── state.go         ← state show/sync (resource inventory)
+├── status.go        ← status (unified multi-node dashboard)
+└── spinner.go       ← CLI spinner animation
 
 server.go / config.go ← High-level ops.Server API + YAML config
 
@@ -49,8 +69,9 @@ hooks/               ← Pre/post trigger system
 ├── hooks.go         ← Run(phase, vars), InitHooksDir, InstallHook
 
 templates/           ← Project scaffolding
-├── templates.go     ← Scaffold, List, InitServiceYAML
-├── content.go       ← 4 templates: html, node, wordpress, go
+├── templates.go     ← Scaffold, List, InitServiceYAML, InitCICD
+├── content.go       ← 9 templates: html, node, wordpress, go, nextjs, python-fastapi, django
+│                       + CI/CD: github-actions, gitlab-ci
 
 plan/                ← Multi-node declarative provisioning
 ├── types.go         ← Plan, Host, Options structs
@@ -78,8 +99,10 @@ k3s/                 ← k3s install + join (auto sudo support)
 
 deploy/              ← Service lifecycle
 ├── upload.go        ← Tar/SSH upload, version management
-├── run.go           ← Runtime detection, docker/k3s/systemd, health check
-├── backup.go        ← BackupServices/RestoreServices
+├── run.go           ← Runtime detection, docker/k3s/systemd, health check (configurable)
+├── backup.go        ← BackupServices/RestoreServices + S3 upload
+├── database.go      ← DB provisioning (postgres, mysql, redis, mongodb)
+├── rotate.go        ← Secrets rotation (DB passwords, env vars)
 ├── tls.go           ← Cert providers: letsencrypt, cloudflare, manual + k3s runtime support
 ├── logging.go       ← Promtail install + Loki config
 ├── alerting.go      ← Alertmanager install + Slack/Email/Telegram config
@@ -92,9 +115,15 @@ deploy/              ← Service lifecycle
 ├── proxy_traefik.go      ← Traefik proxy implementation (Docker)
 ├── proxy_nginx.go        ← Nginx proxy implementation
 ├── bluegreen.go          ← Blue/green zero-downtime deploy logic
+├── bare_runtime.go       ← Bare metal systemd deploy
+├── swarm_runtime.go      ← Docker Swarm deploy
 └── k8s_runtime.go        ← k3s Deployment + Service + Ingress generation
 
 monitor/             ← Remote stats (CPU, RAM, disk, k3s status, top processes)
+
+notify/              ← Notifications (Slack, Discord, Telegram, Email, Webhook)
+
+compose/             ← Docker Compose YAML manipulation
 
 providers/           ← Multi-provider interface
 ├── provider.go      ← Provider interface (21 methods: VPS, K8s, LB, DNS, BareMetal, SSHKey)

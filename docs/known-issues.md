@@ -81,13 +81,32 @@ ssh <ip> "sudo nft add chain inet filter forward '{ type filter hook forward pri
 
 ## Health Check
 
-The health check in `deploy push` looks for HTTP 200 on `/health` or `/healthz` endpoints on ports 18081, 8080, or 3000. If your app:
+The health check in `deploy push` supports custom endpoints via `health_url` in `service.yaml`. If not set, it falls back to HTTP 200 on `/health` or `/healthz` on ports 18081, 8080, or 3000.
 
-- Listens on a different port (e.g., nginx on port 80)
-- Uses a different health endpoint (e.g., `/` or `/ping`)
-- Returns a non-200 status (e.g., 302 redirect)
+```yaml
+# service.yaml — custom health check
+health_url: http://localhost:9191/api/v1/health
+health_timeout: 15
+```
 
-The health check will fail and trigger a rollback. To work around this, ensure your app has a `/health` endpoint returning 200, or increase the service.yaml health timeout.
+Or use the nested YAML format:
+
+```yaml
+health:
+  path: /api/v1/health
+  interval: 15
+```
+
+Without a custom `health_url`, the fallback probes ports 18081, 8080, and 3000. If your app listens on a different port or uses a different endpoint, the health check will fail and trigger a rollback.
+
+## Secrets Rotation: PostgreSQL Readiness
+
+When rotating a PostgreSQL password with `service rotate db`, the command includes a retry loop (up to 3 attempts at 2s intervals) to wait for PostgreSQL readiness. If the rotation fails, ensure the container is actually running and accepting connections before retrying.
+
+```bash
+# Check if the DB container is ready
+docker exec <container> psql -h localhost -U <user> -c "SELECT 1;"
+```
 
 ## Docker Port Conflict with k3s Traefik
 

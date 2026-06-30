@@ -19,10 +19,16 @@
 | Docker operations | `docker/` |
 | k3s operations | `k3s/` |
 | Deploy engine | `deploy/` |
+| Agent (on-VPS) | `agent/` |
+| DB provisioning | `deploy/database.go` |
+| Secrets rotation | `deploy/rotate.go` |
+| State tracking | `cmd/sdk-ops/state.go` |
 | TLS certs | `deploy/tls.go` |
 | Log shipping | `deploy/logging.go` |
 | Alerting | `deploy/alerting.go` |
 | Monitoring | `monitor/` |
+| Notifications | `notify/` |
+| Docker Compose | `compose/` |
 | Cloud-init | `cloudinit/` |
 | Terraform export | `terraform/` |
 | sops secrets | `secrets/` |
@@ -38,14 +44,17 @@
 
 ## Entrypoints
 
-- `cmd/sdk-ops/` — CLI entrypoint (Cobra command tree)
+- `cmd/sdk-ops/` — CLI entrypoint (Cobra command tree, 15 commands)
+- `agent/` — On-VPS monitoring agent (systemd or Docker, API :9000)
 - `server.go` / `config.go` — High-level `ops.Server` API + YAML config
 - `ssh/` — SSH client abstraction (public SDK)
 - `hardening/` — VPS hardening (packages → user → kernel → fail2ban → SSH → nftables → node_exporter)
 - `docker/` — Docker install + compose generation
 - `k3s/` — k3s install + 16 kubectl wrappers
-- `deploy/` — Build → push → upload → compose → health check → auto-rollback
+- `deploy/` — Build → push → upload → compose → health check → auto-rollback + secrets rotation
 - `monitor/` — Real-time node dashboard (CPU, RAM, disk, k3s)
+- `notify/` — Notifications (Slack, Discord, Telegram, Email, Webhook)
+- `compose/` — Docker Compose YAML manipulation
 - `providers/` — Multi-provider interface (21 methods)
 
 ## Architecture
@@ -73,17 +82,23 @@ Full reference: `docs/commands.md`. Categories:
 
 | Category | Key commands |
 |----------|-------------|
-| **Provision** | `infra init/join/status/remove` |
-| **Backup** | `infra backup/restore`, `backup create/restore` |
+| **Provision** | `infra init/join/adopt/status/remove` |
+| **Backup** | `infra backup/restore`, `backup create/restore/schedule` |
 | **Firewall** | `infra firewall open/close/list` |
 | **TLS** | `infra cert install/info` |
 | **Logs** | `infra logs install/remove` |
 | **Alerts** | `infra alerts install/remove/rule add` |
-| **Operations** | `node list/info/top/exec` |
-| **Deploy** | `deploy push`, `deploy encrypt/decrypt`, `service status/logs/rollback` |
+| **Operations** | `node list/info/top/exec`, `agent install/status/logs/update/schedule` |
+| **Deploy** | `deploy init/push`, `deploy encrypt/decrypt`, `service status/logs/restart/rollback/rotate` |
 | **Cluster** | `cluster nodes/pods/top/logs/scale` (16 kubectl commands) |
+| **Databases** | `db create/list/remove` (postgres, mysql, redis, mongodb) |
+| **State** | `state show/sync` (resource inventory) |
+| **Compose** | `compose init/service/validate` |
+| **SSH Keys** | `key generate/list/deploy` |
+| **Notifications** | `notify send/test` |
 | **Config** | `config init/add-node/list-nodes/remove-node/set-credentials` |
 | **Provider** | `provider vps/k8s/lb/dns/ssh-key` |
+| **Utilities** | `status` (dashboard), `completion` (bash/zsh/fish) |
 
 ## Modes
 

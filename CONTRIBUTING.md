@@ -43,5 +43,6 @@ make test
 - SSH operations go through `ssh/`
 - Each hardening step is a separate function in `hardening/steps.go`
 - New provider features go in `providers/<name>/<feature>.go`
-- CLI commands follow `cmd/sdk-ops/<name>.go` pattern
-- New deploy-side features go in `deploy/<feature>.go`
+- CLI commands follow `cmd/sdk-ops/<name>.go` pattern (see: `state.go`, `status.go`, `spinner.go`)
+- New deploy-side features go in `deploy/<feature>.go` (see: `rotate.go`, `database.go`)
+- Agent features go in `agent/<feature>.go`

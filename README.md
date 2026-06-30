@@ -80,6 +80,55 @@ sdk-ops infra backup 192.168.1.100
 sdk-ops infra restore 192.168.1.100 ./backup.tar.gz
 ```
 
+### 2.8 Deploy monitoring agent
+
+```bash
+sdk-ops agent install --node 192.168.1.100                  # systemd (default)
+sdk-ops agent install --node 192.168.1.100 --runtime docker  # Docker container
+sdk-ops agent status --node 192.168.1.100
+sdk-ops agent schedule add nightly --cron "0 3 * * *" --task shell --config "echo hello"
+```
+
+### 2.9 Provision a database
+
+```bash
+sdk-ops db create postgres --name mydb --node 192.168.1.100
+sdk-ops db create redis --port 6379 --node 192.168.1.100
+```
+
+### 2.10 Rotate secrets
+
+```bash
+sdk-ops service rotate db my-postgres --type postgres --node 192.168.1.100
+sdk-ops service rotate env myservice --name API_KEY --node 192.168.1.100
+```
+
+### 2.11 Track resources
+
+```bash
+sdk-ops state show
+sdk-ops state sync --node 192.168.1.100
+```
+
+### 2.12 Unified dashboard
+
+```bash
+sdk-ops status
+sdk-ops status --node 192.168.1.100
+```
+
+### 2.13 Adopt existing server
+
+```bash
+sdk-ops infra adopt 192.168.1.100 --force
+```
+
+### 2.14 Generate CI/CD
+
+```bash
+sdk-ops deploy init ./app --template go --ci github
+```
+
 ## 3. Features
 
 | Category | Feature | Description |
@@ -91,6 +140,7 @@ sdk-ops infra restore 192.168.1.100 ./backup.tar.gz
 | | `infra apply` | Execute a multi-node plan (parallel servers + agents) |
 | | `infra status` | Show server health and installed components |
 | | `infra remove` | Uninstall sdk-ops from a server |
+| | `infra adopt` | Scan existing server + register without reprovisioning |
 | | `infra backup` | Backup all services from a node |
 | | `infra restore` | Restore services from a backup file |
 | | `infra firewall` | Open/close/list nftables rules |
@@ -101,23 +151,48 @@ sdk-ops infra restore 192.168.1.100 ./backup.tar.gz
 | | `node info` | Real-time dashboard (CPU, RAM, disk, k3s) |
 | | `node top` | Interactive htop via SSH |
 | | `node exec` | Run a command remotely (single, --all, --servers, --agents) |
+| | `agent install` | Deploy monitoring agent (systemd or Docker) |
+| | `agent status/logs` | Check agent health and logs |
+| | `agent uninstall` | Remove agent with optional data purge |
+| | `agent update` | Check and apply agent updates |
+| | `agent schedule` | Add/list/remove scheduled tasks on agent |
 | **Deploy** | `deploy push` | Build + upload + deploy a service with auto-rollback |
 | | `deploy push --all` | Deploy to all registered nodes in parallel |
 | | `deploy push --sops-key` | Auto-decrypt service.yaml with sops |
+| | `deploy push --runtime` | docker, k3s, swarm, bare |
 | | `deploy encrypt` | Encrypt a service.yaml with sops |
 | | `deploy decrypt` | Decrypt a sops-encrypted file |
+| | `deploy init` | Scaffold from template (html, node, wordpress, go, nextjs, python-fastapi, django) |
+| | `deploy init --ci` | Generate GitHub Actions / GitLab CI pipeline |
 | | `service status/logs/restart` | Manage deployed services |
 | | `service rollback` | Rollback to previous version |
 | | `service versions` | List deployed versions |
+| | `service rotate db` | Rotate database password |
+| | `service rotate env` | Rotate environment variable |
 | **Cluster** | `cluster nodes/pods/services` | kubectl wrappers (16 commands) |
 | | `cluster top` | kubectl top nodes + pods |
 | | `cluster logs <pod>` | kubectl logs -f |
 | | `cluster scale deploy --replicas N` | kubectl scale |
+| **Databases** | `db create` | Provision postgres, mysql, redis, mongodb |
+| | `db list` | List databases on a node |
+| | `db remove` | Remove a database |
 | **Config** | `config init/add-node/list-nodes/remove-node` | Manage ~/.sdk-ops/config.yaml |
 | | `config set-credentials` | Save provider credentials to file |
+| **Compose** | `compose init` | Create new docker-compose.yml |
+| | `compose service` | Add/remove/list/env services |
+| | `compose validate` | Validate docker-compose syntax |
+| **SSH Keys** | `key generate` | Generate SSH key pair locally |
+| | `key list` | List local SSH keys |
+| | `key deploy` | Deploy SSH key to server |
+| **Notifications** | `notify send` | Send notification (Slack, Discord, Telegram, Email) |
+| | `notify test` | Test all configured notifiers |
 | **Provider API** | CubePath, Hetzner, DO, Vultr, AWS | Create/destroy/list VPS, K8s, LB, DNS, SSH keys via API |
 | | `provider ssh-key` | Upload/list/delete SSH keys on providers |
 | | `provider vps export` | Export VPS as Terraform HCL |
+| **State** | `state show` | Show tracked resources (services, databases, schedules) |
+| | `state sync` | Scan nodes and update inventory |
+| **Utilities** | `status` | Unified dashboard for all nodes |
+| | `completion` | Generate bash/zsh/fish completion scripts |
 
 ## 4. Use as Go SDK
 
@@ -189,8 +264,10 @@ Local (Mac ARM)                        VPS (x86_64)
 3. tar files + SSH pipe ────────→      /opt/sdk-ops/services/<name>/v{N}/
 4.                                      symlink: current → v{N}
 5.                                      docker compose up -d
-6.                                      Health check → OK or rollback
+6.                                      Health check → OK or rollback (configurable via health_url)
 ```
+
+Health check probes configurable endpoints via `health_url` in `service.yaml`. Falls back to ports 18081/8080/3000 at `/healthz` and `/health`. Custom timeout via `health_timeout`.
 
 ## 7. Documentation
 
@@ -355,15 +432,34 @@ sdk-ops provider k8s delete <cluster-uuid>
 ## 9. Project Structure
 
 ```
-├── cmd/sdk-ops/              # CLI entrypoint (Cobra)
-│   ├── main.go           # Root command, version, newSSHClient helper
-│   ├── infra.go          # infra init/join/status/remove/backup/restore/firewall/cert/logs/alerts
-│   ├── node.go           # node list/info/top/exec (--all)
-│   ├── deploy.go         # deploy push/encrypt/decrypt + service status/logs/restart/rollback/versions
+├── agent/                # On-VPS monitoring agent (systemd or Docker)
+│   ├── main.go           # Agent entrypoint: lifecycle + API server on :9000
+│   ├── api.go            # HTTP API: /health, /metrics, /schedules, /exec, /inventory
+│   ├── health.go         # 10 monitors: containers, disk, SSL, network, temperature
+│   ├── metrics.go        # CPU, RAM, disk, Docker stats collection
+│   ├── scheduler.go      # Cron scheduler (robfig/cron)
+│   ├── notify.go         # Notification sending from agent
+│   ├── events.go         # Docker event watcher + log pattern watcher
+│   ├── update.go         # Self-update from GitHub releases
+│   ├── config.go         # Agent config loading
+│   └── db.go             # SQLite storage (metrics, audit, schedules)
+├── cmd/sdk-ops/          # CLI entrypoint (Cobra)
+│   ├── main.go           # Root command, 15 subcommands, newSSHClient
+│   ├── infra.go          # infra init/join/adopt/status/remove/backup/restore/firewall/cert/logs/alerts
+│   ├── node.go           # node list/info/top/exec (--all, --servers, --agents)
+│   ├── deploy.go         # deploy init/push/encrypt/decrypt + service status/logs/restart/rollback/versions/rotate
 │   ├── cluster.go        # cluster (16 kubectl wrappers)
+│   ├── agent.go          # agent install/status/logs/uninstall/update/schedule
 │   ├── config.go         # config init/add-node/list-nodes/remove-node/set-credentials
 │   ├── provider.go       # provider vps/k8s/lb/dns/ssh-key
-│   └── backup.go         # backup create/restore (top-level)
+│   ├── backup.go         # backup create/restore/schedule/unschedule/list-schedules
+│   ├── db.go             # db create/list/remove (postgres, mysql, redis, mongodb)
+│   ├── compose.go        # compose init/service/validate
+│   ├── key.go            # key generate/list/deploy
+│   ├── notify.go         # notify send/test
+│   ├── state.go          # state show/sync (resource inventory)
+│   ├── status.go         # status (unified multi-node dashboard)
+│   └── spinner.go        # CLI spinner animation
 ├── ssh/                  # SSH client abstraction (public SDK)
 ├── hardening/            # VPS hardening (public SDK)
 │   ├── apply.go          # Orchestrator (calls steps in order)
@@ -376,11 +472,23 @@ sdk-ops provider k8s delete <cluster-uuid>
 ├── deploy/               # Build + push + deploy engine (public SDK)
 │   ├── upload.go         # Tar/SSH upload, version management, rollback
 │   ├── run.go            # Service lifecycle (status, logs, restart, health check)
-│   ├── backup.go         # Backup/restore services
+│   ├── backup.go         # Backup/restore services + S3 upload
+│   ├── database.go       # DB provisioning (postgres, mysql, redis, mongodb)
+│   ├── rotate.go         # Secrets rotation (DB passwords, env vars)
 │   ├── tls.go            # Caddy TLS cert install
 │   ├── logging.go        # Promtail log shipper install
-│   └── alerting.go       # Alertmanager install
+│   ├── alerting.go       # Alertmanager install
+│   ├── builder.go        # Builder interface + DetectBuilder, BuildImage
+│   ├── builder_dockerfile.go, builder_nixpacks.go, builder_pack.go
+│   ├── proxy.go          # Proxy interface + DetectProxy
+│   ├── proxy_caddy.go, proxy_traefik.go, proxy_nginx.go
+│   ├── bluegreen.go      # Blue/green zero-downtime deploy
+│   ├── bare_runtime.go   # Bare metal systemd deploy
+│   ├── swarm_runtime.go  # Docker Swarm deploy
+│   └── k8s_runtime.go    # k3s Deployment + Service + Ingress
+├── compose/              # Docker Compose YAML manipulation
 ├── monitor/              # Node dashboard + metrics (public SDK)
+├── notify/               # Notifications (Slack, Discord, Telegram, Email, Webhook)
 ├── terraform/            # Terraform HCL generation (export)
 ├── secrets/              # sops encryption/decryption helpers
 ├── providers/            # Multi-provider interface + implementations
