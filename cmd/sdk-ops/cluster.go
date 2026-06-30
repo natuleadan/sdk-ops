@@ -128,8 +128,117 @@ Examples:
 	}
 	describeCmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace")
 
+	// --- New commands 15-24 ---
+
+	tokenCmd := &cobra.Command{
+		Use:   "token",
+		Short: "Show cluster join token",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterToken(cmd)
+		},
+	}
+
+	restartCmd := &cobra.Command{
+		Use:   "restart",
+		Short: "Restart k3s service",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterRestart(cmd)
+		},
+	}
+
+	eventsCmd := &cobra.Command{
+		Use:   "events",
+		Short: "Show cluster events",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ns, _ := cmd.Flags().GetString("namespace")
+			eventType, _ := cmd.Flags().GetString("type")
+			return runClusterEvents(ns, eventType, cmd)
+		},
+	}
+	eventsCmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace")
+	eventsCmd.Flags().String("type", "", "Filter by type (Normal, Warning)")
+
+	cordonCmd := &cobra.Command{
+		Use:   "cordon <node>",
+		Short: "Mark node as unschedulable",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterNodeOp("cordon", args[0], cmd)
+		},
+	}
+
+	uncordonCmd := &cobra.Command{
+		Use:   "uncordon <node>",
+		Short: "Mark node as schedulable",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterNodeOp("uncordon", args[0], cmd)
+		},
+	}
+
+	drainCmd := &cobra.Command{
+		Use:   "drain <node>",
+		Short: "Drain node for maintenance",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterNodeOp("drain --ignore-daemonsets --delete-emptydir-data", args[0], cmd)
+		},
+	}
+
+	labelCmd := &cobra.Command{
+		Use:   "label <node> <key=value>",
+		Short: "Label a node",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterNodeOp(fmt.Sprintf("label node %s %s", args[0], args[1]), "", cmd)
+		},
+	}
+
+	upgradeCmd := &cobra.Command{
+		Use:   "upgrade",
+		Short: "Upgrade k3s to a specific version",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			version, _ := cmd.Flags().GetString("version")
+			return runClusterUpgrade(version, cmd)
+		},
+	}
+	upgradeCmd.Flags().String("version", "", "Target version (default: latest stable)")
+
+	etcdSnapshotCmd := &cobra.Command{
+		Use:   "etcd-snapshot",
+		Short: "Create an etcd snapshot",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterEtcdSnapshot(cmd)
+		},
+	}
+
+	certRotateCmd := &cobra.Command{
+		Use:   "cert-rotate",
+		Short: "Rotate k3s certificates",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runClusterCertRotate(cmd)
+		},
+	}
+
+	getCmd := &cobra.Command{
+		Use:   "get <type> <name>",
+		Short: "Get a resource as YAML",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ns, _ := cmd.Flags().GetString("namespace")
+			format, _ := cmd.Flags().GetString("output")
+			return runClusterGet(args[0], args[1], ns, format, cmd)
+		},
+	}
+	getCmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace")
+	getCmd.Flags().StringP("output", "o", "yaml", "Output format (yaml, json, wide)")
+
 	// Add global flags to all subcommands
-	for _, sc := range []*cobra.Command{topCmd, logsCmd, execCmd, scaleCmd, applyCmd, deleteCmd, describeCmd} {
+	for _, sc := range []*cobra.Command{
+		topCmd, logsCmd, execCmd, scaleCmd, applyCmd, deleteCmd, describeCmd,
+		tokenCmd, restartCmd, eventsCmd, cordonCmd, uncordonCmd, drainCmd,
+		labelCmd, upgradeCmd, etcdSnapshotCmd, certRotateCmd, getCmd,
+	} {
 		sc.Flags().StringP("node", "N", "", "k3s server node IP (default: first registered)")
 		sc.Flags().StringP("user", "u", "root", "SSH user")
 		sc.Flags().StringP("key", "k", "", "SSH private key path")
@@ -155,6 +264,17 @@ Examples:
 	cmd.AddCommand(applyCmd)
 	cmd.AddCommand(deleteCmd)
 	cmd.AddCommand(describeCmd)
+	cmd.AddCommand(tokenCmd)
+	cmd.AddCommand(restartCmd)
+	cmd.AddCommand(eventsCmd)
+	cmd.AddCommand(cordonCmd)
+	cmd.AddCommand(uncordonCmd)
+	cmd.AddCommand(drainCmd)
+	cmd.AddCommand(labelCmd)
+	cmd.AddCommand(upgradeCmd)
+	cmd.AddCommand(etcdSnapshotCmd)
+	cmd.AddCommand(certRotateCmd)
+	cmd.AddCommand(getCmd)
 
 	return cmd
 }
@@ -318,6 +438,137 @@ func runClusterDelete(resource, name, namespace string, cmd *cobra.Command) erro
 func runClusterDescribe(resource, name, namespace string, cmd *cobra.Command) error {
 	ip, user, key, port := getClusterFlags(cmd)
 	kargs := fmt.Sprintf("describe %s %s", resource, name)
+	if namespace != "" {
+		kargs += fmt.Sprintf(" --namespace=%s", namespace)
+	}
+	return k3sExec(ip, user, key, port, kargs)
+}
+
+// 15. cluster token
+func runClusterToken(cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	client := newSSHClient(ip, user, port, key)
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh %s: %w", ip, err)
+	}
+	defer conn.Close()
+	out, _, err := ssh.Run(conn, "sudo cat /var/lib/rancher/k3s/server/token")
+	if err != nil {
+		return fmt.Errorf("token: %w", err)
+	}
+	fmt.Printf("  Token: %s", out)
+	return nil
+}
+
+// 16. cluster restart
+func runClusterRestart(cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	client := newSSHClient(ip, user, port, key)
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh %s: %w", ip, err)
+	}
+	defer conn.Close()
+	fmt.Println("  → Restarting k3s...")
+	out, _, err := ssh.Run(conn, "sudo systemctl restart k3s && echo 'k3s restarted'")
+	if err != nil {
+		return fmt.Errorf("restart: %w\n%s", err, out)
+	}
+	fmt.Print(out)
+	return nil
+}
+
+// 17+24. cluster events
+func runClusterEvents(namespace, eventType string, cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	kargs := "get events"
+	if namespace != "" {
+		kargs += fmt.Sprintf(" --namespace=%s", namespace)
+	} else {
+		kargs += " --all-namespaces"
+	}
+	if eventType != "" {
+		kargs += fmt.Sprintf(" --field-selector type=%s", eventType)
+	}
+	return k3sExec(ip, user, key, port, kargs)
+}
+
+// 18. cluster node cordon/uncordon/drain
+func runClusterNodeOp(op, node string, cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	kargs := fmt.Sprintf("%s %s", op, node)
+	if op == "label" {
+		kargs = op + " " + node
+		return k3sExec(ip, user, key, port, kargs)
+	}
+	return k3sExec(ip, user, key, port, kargs)
+}
+
+// 20. cluster upgrade
+func runClusterUpgrade(version string, cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	client := newSSHClient(ip, user, port, key)
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh %s: %w", ip, err)
+	}
+	defer conn.Close()
+
+	fmt.Println("  → Upgrading k3s...")
+	installCmd := "curl -sfL https://get.k3s.io | sudo sh -"
+	if version != "" {
+		installCmd = fmt.Sprintf("INSTALL_K3S_VERSION=%s %s", version, installCmd)
+	}
+	out, _, err := ssh.Run(conn, installCmd)
+	if err != nil {
+		return fmt.Errorf("upgrade: %w\n%s", err, out)
+	}
+	fmt.Print(out)
+	fmt.Println("  → k3s upgraded successfully")
+	return nil
+}
+
+// 21. cluster etcd-snapshot
+func runClusterEtcdSnapshot(cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	client := newSSHClient(ip, user, port, key)
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh %s: %w", ip, err)
+	}
+	defer conn.Close()
+	fmt.Println("  → Creating etcd snapshot...")
+	out, _, err := ssh.Run(conn, "sudo k3s etcd-snapshot save && echo 'etcd-snapshot: OK' || echo 'etcd-snapshot: FAIL'")
+	if err != nil {
+		return fmt.Errorf("etcd-snapshot: %w\n%s", err, out)
+	}
+	fmt.Print(out)
+	return nil
+}
+
+// 22. cluster cert-rotate
+func runClusterCertRotate(cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	client := newSSHClient(ip, user, port, key)
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh %s: %w", ip, err)
+	}
+	defer conn.Close()
+	fmt.Println("  → Rotating certificates...")
+	out, _, err := ssh.Run(conn, "sudo k3s certificate rotate && sudo systemctl restart k3s && echo 'cert-rotate: OK'")
+	if err != nil {
+		return fmt.Errorf("cert-rotate: %w\n%s", err, out)
+	}
+	fmt.Print(out)
+	return nil
+}
+
+// 23. cluster get <type> <name>
+func runClusterGet(resType, name, namespace, format string, cmd *cobra.Command) error {
+	ip, user, key, port := getClusterFlags(cmd)
+	kargs := fmt.Sprintf("get %s %s -o %s", resType, name, format)
 	if namespace != "" {
 		kargs += fmt.Sprintf(" --namespace=%s", namespace)
 	}
