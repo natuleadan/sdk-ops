@@ -8,9 +8,29 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
+
+var shellMetaRe = regexp.MustCompile(`[;&\x60$(){}<>!'"\\|]`)
+
+// validateCmd rejects shell metacharacters to prevent command injection.
+// Only allows alphanumeric, spaces, /, _, -, ., :, @, =, +, %, ~, ?, and comma.
+func validateCmd(cmd string) error {
+	if cmd == "" {
+		return fmt.Errorf("command is empty")
+	}
+	if shellMetaRe.MatchString(cmd) {
+		return fmt.Errorf("command contains shell metacharacters: %s", shellMetaRe.FindString(cmd))
+	}
+	// Block consecutive dots (path traversal)
+	if strings.Contains(cmd, "..") {
+		return fmt.Errorf("command contains path traversal")
+	}
+	return nil
+}
 
 type apiHandler struct {
 	db    *sql.DB
@@ -218,8 +238,10 @@ func startAPI(addr string, db *sql.DB, agent *Agent) *http.Server {
 			jsonResp(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if req.Command == "" {
-			jsonResp(w, http.StatusBadRequest, map[string]string{"error": "command required"})
+		if err := validateCmd(req.Command); err != nil {
+			jsonResp(w, http.StatusBadRequest, map[string]string{
+				"error": "invalid command: " + err.Error(),
+			})
 			return
 		}
 		cmd := exec.Command("sh", "-c", req.Command)
