@@ -10,13 +10,16 @@ import (
 )
 
 func (c *Client) CreateVPS(ctx context.Context, cfg providers.VPSCreateConfig) (*providers.VPS, error) {
-	instance, _, err := c.client.Instance.Create(ctx, &govultr.InstanceCreateReq{
+	instance, resp, err := c.client.Instance.Create(ctx, &govultr.InstanceCreateReq{
 		Label:    cfg.Label,
 		Plan:     cfg.Plan,
 		Region:   cfg.Location,
 		Hostname: cfg.Hostname,
 		UserData: cfg.UserData,
 	})
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create instance: %w", err)
 	}
@@ -38,7 +41,10 @@ func (c *Client) DeleteVPS(ctx context.Context, id string) error {
 }
 
 func (c *Client) ListVPS(ctx context.Context) ([]providers.VPS, error) {
-	instances, meta, _, err := c.client.Instance.List(ctx, &govultr.ListOptions{})
+	instances, meta, resp, err := c.client.Instance.List(ctx, &govultr.ListOptions{})
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list instances: %w", err)
 	}
@@ -53,7 +59,10 @@ func (c *Client) ListVPS(ctx context.Context) ([]providers.VPS, error) {
 }
 
 func (c *Client) GetVPS(ctx context.Context, id string) (*providers.VPS, error) {
-	inst, _, err := c.client.Instance.Get(ctx, id)
+	inst, resp, err := c.client.Instance.Get(ctx, id)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr get instance: %w", err)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -714,6 +715,9 @@ func runClusterHelm(kargs string, cmd *cobra.Command) error {
 
 	fullCmd := fmt.Sprintf("sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm %s 2>&1 || true", kargs)
 	out, _, err = ssh.Run(conn, fullCmd)
+	if err != nil {
+		log.Printf("helm command warning (non-fatal): %v", err)
+	}
 	output := strings.TrimSpace(out)
 	if output != "" {
 		fmt.Println(output)
@@ -735,6 +739,9 @@ func runClusterNodeSSH(nodeName string, cmd *cobra.Command) error {
 	nodeIP, _, err := ssh.Run(conn, fmt.Sprintf(
 		`sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl get node %s -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "not-found"`,
 		nodeName))
+	if err != nil {
+		log.Printf("node lookup warning: %v", err)
+	}
 	nodeIP = strings.TrimSpace(nodeIP)
 	if nodeIP == "" || nodeIP == "not-found" || strings.HasPrefix(nodeIP, "not-found") {
 		return fmt.Errorf("node %s not found or has no InternalIP", nodeName)

@@ -42,7 +42,7 @@ func TestNewNotifyDispatcherWithAll(t *testing.T) {
 	}
 }
 
-func TestNotifyDispatcherSendEmpty(t *testing.T) {
+func TestNotifyDispatcherSendEmpty(_ *testing.T) {
 	cfg := AgentConfig{}
 	nd := newNotifyDispatcher(cfg)
 

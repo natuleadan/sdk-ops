@@ -3,6 +3,7 @@ package sdk_ops
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,15 +17,13 @@ type Config struct {
 }
 
 func LoadConfig(path string) (*ServerConfig, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
 	// Expand env vars
-	data = []byte(os.Expand(string(data), func(key string) string {
-		return os.Getenv(key)
-	}))
+	data = []byte(os.Expand(string(data), os.Getenv))
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {

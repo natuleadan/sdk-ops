@@ -25,7 +25,7 @@ func (c *Client) CreateK8s(ctx context.Context, cfg providers.K8sCreateConfig) (
 			"count": cfg.NodeCount,
 		}},
 	}
-	resp, err := c.raw().do("POST", "/kubernetes/clusters", body)
+	resp, err := c.raw().do(ctx, "POST", "/kubernetes/clusters", body)
 	if err != nil {
 		return nil, fmt.Errorf("hetzner create k8s: %w", err)
 	}
@@ -43,12 +43,12 @@ func (c *Client) CreateK8s(ctx context.Context, cfg providers.K8sCreateConfig) (
 }
 
 func (c *Client) DeleteK8s(ctx context.Context, id string) error {
-	_, err := c.raw().do("DELETE", "/kubernetes/clusters/"+id, nil)
+	_, err := c.raw().do(ctx, "DELETE", "/kubernetes/clusters/"+id, nil)
 	return err
 }
 
 func (c *Client) ListK8s(ctx context.Context) ([]providers.K8sCluster, error) {
-	resp, err := c.raw().do("GET", "/kubernetes/clusters", nil)
+	resp, err := c.raw().do(ctx, "GET", "/kubernetes/clusters", nil)
 	if err != nil {
 		return nil, fmt.Errorf("hetzner list k8s: %w", err)
 	}
@@ -66,7 +66,7 @@ func (c *Client) ListK8s(ctx context.Context) ([]providers.K8sCluster, error) {
 }
 
 func (c *Client) GetK8s(ctx context.Context, id string) (*providers.K8sCluster, error) {
-	resp, err := c.raw().do("GET", "/kubernetes/clusters/"+id, nil)
+	resp, err := c.raw().do(ctx, "GET", "/kubernetes/clusters/"+id, nil)
 	if err != nil {
 		return nil, fmt.Errorf("hetzner get k8s: %w", err)
 	}
@@ -80,7 +80,7 @@ func (c *Client) GetK8s(ctx context.Context, id string) (*providers.K8sCluster, 
 }
 
 func (c *Client) GetKubeconfig(ctx context.Context, id string) (string, error) {
-	resp, err := c.raw().do("GET", "/kubernetes/clusters/"+id+"/kubeconfig", nil)
+	resp, err := c.raw().do(ctx, "GET", "/kubernetes/clusters/"+id+"/kubeconfig", nil)
 	if err != nil {
 		return "", fmt.Errorf("hetzner kubeconfig: %w", err)
 	}

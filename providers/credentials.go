@@ -22,7 +22,7 @@ func CredentialsPath() string {
 }
 
 func LoadCredentials() (*Credentials, error) {
-	path := CredentialsPath()
+	path := filepath.Clean(CredentialsPath())
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

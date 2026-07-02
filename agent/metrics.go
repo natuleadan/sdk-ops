@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	gosnet "net"
 	"os"
@@ -13,7 +14,7 @@ import (
 	gopsnet "github.com/shirou/gopsutil/v4/net"
 )
 
-func collectMetrics() (MetricRow, error) {
+func collectMetrics() MetricRow {
 	var m MetricRow
 	m.Timestamp = time.Now()
 
@@ -46,7 +47,7 @@ func collectMetrics() (MetricRow, error) {
 		m.NetTx = netIO[0].BytesSent
 	}
 
-	return m, nil
+	return m
 }
 
 func getHostInfo() map[string]string {
@@ -75,7 +76,7 @@ func getUptime() string {
 }
 
 func getLocalIP() string {
-	conn, err := gosnet.Dial("udp", "8.8.8.8:80")
+	conn, err := (&gosnet.Dialer{}).DialContext(context.Background(), "udp", "8.8.8.8:80")
 	if err != nil {
 		return "unknown"
 	}

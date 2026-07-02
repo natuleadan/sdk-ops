@@ -1,9 +1,6 @@
 package notify
 
-import (
-	"fmt"
-	"strings"
-)
+import "fmt"
 
 type Notifier interface {
 	Send(title, message string) error
@@ -61,11 +58,4 @@ func SendAll(nn []Notifier, title, message string) []error {
 	return errs
 }
 
-func fmtMsg(title, message string) string {
-	var b strings.Builder
-	if title != "" {
-		b.WriteString(fmt.Sprintf("*%s*\n", title))
-	}
-	b.WriteString(message)
-	return b.String()
-}
+

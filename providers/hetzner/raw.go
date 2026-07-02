@@ -2,6 +2,7 @@ package hetzner
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,7 +24,7 @@ func newRawClient(token string) *rawClient {
 	}
 }
 
-func (c *rawClient) do(method, path string, body any) ([]byte, error) {
+func (c *rawClient) do(ctx context.Context, method, path string, body any) ([]byte, error) {
 	var buf io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -33,7 +34,7 @@ func (c *rawClient) do(method, path string, body any) ([]byte, error) {
 		buf = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequest(method, c.baseURL+path, buf)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, buf)
 	if err != nil {
 		return nil, fmt.Errorf("request: %w", err)
 	}
@@ -64,6 +65,4 @@ func val(m map[string]any, k string) string {
 	return fmt.Sprintf("%v", v)
 }
 
-func id(v any) string {
-	return fmt.Sprintf("%v", v)
-}
+

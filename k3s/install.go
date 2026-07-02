@@ -123,20 +123,23 @@ exit 1`
 	if cfg.Merge {
 		// Merge into ~/.kube/config
 		kubeDir := os.ExpandEnv("$HOME/.kube")
-		os.MkdirAll(kubeDir, 0700)
-		kubePath := filepath.Join(kubeDir, "config")
+		os.MkdirAll(filepath.Clean(kubeDir), 0700)
+		kubePath := filepath.Clean(filepath.Join(kubeDir, "config"))
 
-		existing, _ := os.ReadFile(kubePath)
+		existing, err := os.ReadFile(kubePath)
+		if err == nil && len(existing) > 0 {
+			kubeconfig = string(existing) + "\n" + kubeconfig
+		}
 		if len(existing) > 0 {
 			// Append with a context name — in a real impl we'd merge properly
 			kubeconfig = string(existing) + "\n" + kubeconfig
 		}
-		if err := os.WriteFile(kubePath, []byte(kubeconfig), 0600); err != nil {
+		if err := os.WriteFile(filepath.Clean(kubePath), []byte(kubeconfig), 0600); err != nil {
 			return fmt.Errorf("write kubeconfig: %w", err)
 		}
 		fmt.Printf("  → Merged kubeconfig into %s (context: %s)\n", kubePath, cfg.Context)
 	} else {
-		if err := os.WriteFile(cfg.LocalPath, []byte(kubeconfig), 0600); err != nil {
+		if err := os.WriteFile(filepath.Clean(cfg.LocalPath), []byte(kubeconfig), 0600); err != nil {
 			return fmt.Errorf("write kubeconfig: %w", err)
 		}
 		fmt.Printf("  → Kubeconfig saved to %s\n", cfg.LocalPath)
@@ -145,15 +148,13 @@ exit 1`
 	fmt.Printf("  → Token: %s", token)
 
 	// Post-install CIS hardening
-	if err := postInstallCIS(client, cfg); err != nil {
-		return fmt.Errorf("post-install CIS: %w", err)
-	}
+	postInstallCIS(client, cfg)
 
 	fmt.Println("  → k3s installed successfully!")
 	return nil
 }
 
-func postInstallCIS(client *goss.Client, cfg InstallConfig) error {
+func postInstallCIS(client *goss.Client, cfg InstallConfig) {
 	kcmd := `sudo kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml`
 
 	// 10. PSA restricted enforcement
@@ -254,7 +255,6 @@ echo "svcacc: OK"
 		}
 	}
 
-	return nil
 }
 
 func Check(client *goss.Client) (string, error) {

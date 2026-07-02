@@ -106,26 +106,26 @@ func Scaffold(name, dir string) error {
 		return err
 	}
 
-	if err := os.MkdirAll(absDir, 0755); err != nil {
+	if err := os.MkdirAll(absDir, 0750); err != nil {
 		return fmt.Errorf("create dir: %w", err)
 	}
 
 	for filename, content := range t.Files {
 		path := filepath.Join(absDir, filename)
 		dir := filepath.Dir(path)
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("create dir %s: %w", dir, err)
 		}
 		if content == "" {
 			// Create empty file (e.g., __init__.py)
-			f, err := os.Create(path)
+			f, err := os.Create(filepath.Clean(path))
 			if err != nil {
 				return fmt.Errorf("create %s: %w", filename, err)
 			}
 			f.Close()
 			continue
 		}
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 			return fmt.Errorf("write %s: %w", filename, err)
 		}
 		fmt.Printf("  ✓ %s\n", path)
@@ -147,7 +147,7 @@ health:
   path: /
   interval: 30
 `, appName)
-	return os.WriteFile(path, []byte(content), 0644)
+	return os.WriteFile(filepath.Clean(path), []byte(content), 0600)
 }
 
 func InitCICD(dir, ciType string) error {
@@ -163,10 +163,10 @@ func InitCICD(dir, ciType string) error {
 	default:
 		return fmt.Errorf("unsupported CI: %s (use: github, gitlab)", ciType)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(content), 0644)
+	return os.WriteFile(filepath.Clean(path), []byte(content), 0600)
 }
 
 func ValidateName(name string) error {

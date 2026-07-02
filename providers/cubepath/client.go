@@ -2,6 +2,7 @@ package cubepath
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,7 +28,7 @@ func New(apiKey string, projectID int) *Client {
 	}
 }
 
-func (c *Client) do(method, path string, body any) ([]byte, error) {
+func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte, error) {
 	var buf io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -37,7 +38,7 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 		buf = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequest(method, c.baseURL+path, buf)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, buf)
 	if err != nil {
 		return nil, fmt.Errorf("request: %w", err)
 	}

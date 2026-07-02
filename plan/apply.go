@@ -284,7 +284,7 @@ type RootConfig struct {
 
 func configDir() string {
 	dir := os.ExpandEnv("$HOME/.sdk-ops")
-	os.MkdirAll(dir, 0700)
+	func() { if err := os.MkdirAll(dir, 0700); err != nil { fmt.Fprintf(os.Stderr, "mkdir: %v\n", err) } }()
 	return dir
 }
 

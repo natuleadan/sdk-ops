@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -19,22 +20,21 @@ import (
 )
 
 type providerFlags struct {
-	provider   string
-	plan       string
-	location   string
-	template   string
-	hostname   string
-	sshKeyIDs  string
-	apiKey     string
-	projectID  int
-	name       string
-	version    string
-	nodePlan   string
-	nodeCount  int
+	provider  string
+	plan      string
+	location  string
+	template  string
+	hostname  string
+	sshKeyIDs string
+	apiKey    string
+	projectID int
+	name      string
+	version   string
+	nodePlan  string
+	nodeCount int
 }
 
 var pf providerFlags
-var sshKeyName string
 var sshKeyPub string
 
 func newProviderCmd() *cobra.Command {
@@ -156,7 +156,7 @@ func newProviderVPSCmd() *cobra.Command {
 			cfg.EnableIPv4, _ = cmd.Flags().GetBool("ipv4")
 			cfg.EnableIPv6, _ = cmd.Flags().GetBool("ipv6")
 			if pf.sshKeyIDs != "" {
-				for _, s := range strings.Split(pf.sshKeyIDs, ",") {
+				for s := range strings.SplitSeq(pf.sshKeyIDs, ",") {
 					var id int
 					fmt.Sscanf(s, "%d", &id)
 					if id > 0 {
@@ -864,7 +864,7 @@ func newProviderSSHKeyCmd() *cobra.Command {
 			if pubKey == "" {
 				pubKey = os.ExpandEnv("$HOME/.ssh/id_ed25519.pub")
 			}
-			data, err := os.ReadFile(pubKey)
+			data, err := os.ReadFile(filepath.Clean(pubKey))
 			if err != nil {
 				return fmt.Errorf("read key: %w", err)
 			}

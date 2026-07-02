@@ -3,13 +3,14 @@ package plan
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 func ParseFile(path string) (*Plan, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read plan file: %w", err)
 	}
@@ -100,18 +101,18 @@ func (p *Plan) fillDefaults() {
 
 func (p *Plan) Summary() string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Mode:      %s\n", p.Mode))
-	b.WriteString(fmt.Sprintf("Parallel:  %d\n", p.Parallel))
+	fmt.Fprintf(&b, "Mode:      %s\n", p.Mode)
+	fmt.Fprintf(&b, "Parallel:  %d\n", p.Parallel)
 	b.WriteString("Servers:\n")
 	for _, h := range p.Hosts {
 		if h.Role == "server" {
-			b.WriteString(fmt.Sprintf("  - %s (%s)\n", h.Name, h.Host))
+			fmt.Fprintf(&b, "  - %s (%s)\n", h.Name, h.Host)
 		}
 	}
 	b.WriteString("Agents:\n")
 	for _, h := range p.Hosts {
 		if h.Role == "agent" {
-			b.WriteString(fmt.Sprintf("  - %s (%s)\n", h.Name, h.Host))
+			fmt.Fprintf(&b, "  - %s (%s)\n", h.Name, h.Host)
 		}
 	}
 	return b.String()

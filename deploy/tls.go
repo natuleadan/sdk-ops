@@ -226,10 +226,10 @@ func installCertCloudflare(client *goss.Client, cfg CertConfig) error {
 
 	// For k3s runtime: create annotation on default Ingress
 	if cfg.Runtime == "k3s" || cfg.Runtime == "" {
-		script := fmt.Sprintf(`
+		script := `
 kubectl annotate ingress --all kubernetes.io/ingress.class=traefik 2>/dev/null || true
 echo "  → Marked ingresses for Traefik with Cloudflare proxy"
-`)
+`
 		out, _, err := ssh.Run(client, script)
 		if err != nil {
 			return fmt.Errorf("cloudflare config: %w", err)

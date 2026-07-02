@@ -132,11 +132,8 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			m, err := collectMetrics()
-			if err != nil {
-				log.Printf("metrics: %v", err)
-				continue
-			}
+			m := collectMetrics()
+			_ = m
 			if err := insertMetric(db, m); err != nil {
 				log.Printf("metrics insert: %v", err)
 			}
@@ -171,7 +168,8 @@ func main() {
 		case <-diskCheckTicker.C:
 			disks := checkDiskUsage()
 			for _, d := range disks {
-				if d.Status == "critical" {
+				switch d.Status {
+				case "critical":
 					insertAudit(db, AuditRow{
 						Timestamp: time.Now(),
 						Action:    "disk:critical",
@@ -180,7 +178,7 @@ func main() {
 					})
 					log.Printf("disk: CRITICAL %s at %.0f%% - running prune", d.Mount, d.UsedPercent)
 					autoPruneDisk()
-				} else if d.Status == "warning" {
+				case "warning":
 					log.Printf("disk: WARNING %s at %.0f%%", d.Mount, d.UsedPercent)
 				}
 			}
@@ -188,7 +186,8 @@ func main() {
 		case <-certCheckTicker.C:
 			certs := checkSSLCerts()
 			for _, c := range certs {
-				if c.Status == "critical" || c.Status == "expired" {
+				switch c.Status {
+				case "critical", "expired":
 					insertAudit(db, AuditRow{
 						Timestamp: time.Now(),
 						Action:    "cert:expiring",
@@ -196,7 +195,7 @@ func main() {
 						Message:   fmt.Sprintf("%s expires in %s", c.Domain, c.ExpiresIn),
 					})
 					log.Printf("cert: %s expires in %s", c.Domain, c.ExpiresIn)
-				} else if c.Status == "warning" {
+				case "warning":
 					log.Printf("cert: %s expires in %s (warning)", c.Domain, c.ExpiresIn)
 				}
 			}
@@ -204,7 +203,8 @@ func main() {
 		case <-latencyTicker.C:
 			results := checkNetworkLatency()
 			for _, pr := range results {
-				if pr.Status == "critical" {
+				switch pr.Status {
+				case "critical":
 					insertAudit(db, AuditRow{
 						Timestamp: time.Now(),
 						Action:    "net:latency",
@@ -212,7 +212,7 @@ func main() {
 						Message:   fmt.Sprintf("%s: %.0fms, %.0f%% loss", pr.Target, pr.LatencyMs, pr.PacketLoss),
 					})
 					log.Printf("net: %s unreachable (%.0fms, %.0f%% loss)", pr.Target, pr.LatencyMs, pr.PacketLoss)
-				} else if pr.Status == "warning" {
+				case "warning":
 					log.Printf("net: %s slow (%.0fms)", pr.Target, pr.LatencyMs)
 				}
 			}
@@ -244,7 +244,7 @@ func main() {
 				Message:   fmt.Sprintf("signal: %v", sig),
 			})
 			nd.send("sdk-ops-agent stopped", fmt.Sprintf("Agent stopped (signal: %v)", sig))
-			os.Exit(0)
+			return
 		}
 	}
 }

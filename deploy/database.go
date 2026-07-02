@@ -49,7 +49,7 @@ func ProvisionDatabase(client *goss.Client, cfg DBConfig) (*DBResult, error) {
 		cfg.User = cfg.Name
 	}
 	if cfg.Pass == "" {
-		pass, err := genPassword(24)
+		pass, err := genPassword()
 		if err != nil {
 			return nil, fmt.Errorf("generate password: %w", err)
 		}
@@ -235,9 +235,9 @@ func portFlag(port, internal int) string {
 	return ""
 }
 
-func genPassword(length int) (string, error) {
+func genPassword() (string, error) {
 	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	result := make([]byte, length)
+	result := make([]byte, 24)
 	for i := range result {
 		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
 		if err != nil {

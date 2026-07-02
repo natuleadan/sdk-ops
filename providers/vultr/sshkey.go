@@ -10,10 +10,13 @@ import (
 )
 
 func (c *Client) CreateSSHKey(ctx context.Context, cfg providers.SSHKeyCreateConfig) (*providers.SSHKey, error) {
-	key, _, err := c.client.SSHKey.Create(ctx, &govultr.SSHKeyReq{
+	key, resp, err := c.client.SSHKey.Create(ctx, &govultr.SSHKeyReq{
 		Name:   cfg.Name,
 		SSHKey: cfg.PublicKey,
 	})
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create ssh key: %w", err)
 	}
@@ -24,7 +27,10 @@ func (c *Client) CreateSSHKey(ctx context.Context, cfg providers.SSHKeyCreateCon
 }
 
 func (c *Client) ListSSHKeys(ctx context.Context) ([]providers.SSHKey, error) {
-	keys, _, _, err := c.client.SSHKey.List(ctx, &govultr.ListOptions{})
+	keys, _, resp, err := c.client.SSHKey.List(ctx, &govultr.ListOptions{})
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list ssh keys: %w", err)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os/exec"
@@ -22,13 +23,13 @@ func scanInventory() []ServiceInventory {
 
 func scanDockerPorts() []ServiceInventory {
 	var results []ServiceInventory
-	out, err := exec.Command("docker", "ps", "--format", "{{.Names}}|{{.Ports}}").Output()
+	out, err := exec.CommandContext(context.Background(), "docker", "ps", "--format", "{{.Names}}|{{.Ports}}").Output()
 	if err != nil {
 		return results
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(strings.TrimSpace(string(out)), "\n")
+	for line := range lines {
 		parts := strings.SplitN(line, "|", 2)
 		if len(parts) < 2 {
 			continue
@@ -39,8 +40,8 @@ func scanDockerPorts() []ServiceInventory {
 		// Parse "0.0.0.0:8080->8080/tcp, :::8080->8080/tcp"
 		// Deduplicate by port
 		seenPorts := make(map[int]bool)
-		portMappings := strings.Split(portsStr, ",")
-		for _, pm := range portMappings {
+		portMappings := strings.SplitSeq(portsStr, ",")
+		for pm := range portMappings {
 			pm = strings.TrimSpace(pm)
 			if pm == "" {
 				continue
@@ -76,17 +77,17 @@ func scanHostPorts() []ServiceInventory {
 	var results []ServiceInventory
 
 	// Try ss first (modern Linux)
-	out, err := exec.Command("ss", "-tlnp", "4").Output()
+	out, err := exec.CommandContext(context.Background(), "ss", "-tlnp", "4").Output()
 	if err != nil {
 		// Fall back to netstat
-		out, err = exec.Command("netstat", "-tlnp").Output()
+		out, err = exec.CommandContext(context.Background(), "netstat", "-tlnp").Output()
 		if err != nil {
 			return results
 		}
 	}
 
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(out), "\n")
+	for line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "State") || strings.HasPrefix(line, "Active") || strings.HasPrefix(line, "Proto") {
 			continue

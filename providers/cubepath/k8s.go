@@ -59,7 +59,7 @@ func (c *Client) CreateK8s(ctx context.Context, cfg providers.K8sCreateConfig) (
 		body.NodePools[0].Plan = "gp.nano"
 	}
 
-	resp, err := c.do("POST", "/kubernetes/", body)
+	resp, err := c.do(ctx, "POST", "/kubernetes/", body)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath create k8s: %w", err)
 	}
@@ -78,12 +78,12 @@ func (c *Client) CreateK8s(ctx context.Context, cfg providers.K8sCreateConfig) (
 }
 
 func (c *Client) DeleteK8s(ctx context.Context, id string) error {
-	_, err := c.do("DELETE", "/kubernetes/"+id, nil)
+	_, err := c.do(ctx, "DELETE", "/kubernetes/"+id, nil)
 	return err
 }
 
 func (c *Client) ListK8s(ctx context.Context) ([]providers.K8sCluster, error) {
-	resp, err := c.do("GET", "/kubernetes/", nil)
+	resp, err := c.do(ctx, "GET", "/kubernetes/", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath list k8s: %w", err)
 	}
@@ -116,7 +116,7 @@ func (c *Client) GetK8s(ctx context.Context, id string) (*providers.K8sCluster, 
 }
 
 func (c *Client) GetKubeconfig(ctx context.Context, id string) (string, error) {
-	resp, err := c.do("GET", "/kubernetes/"+id+"/kubeconfig", nil)
+	resp, err := c.do(ctx, "GET", "/kubernetes/"+id+"/kubeconfig", nil)
 	if err != nil {
 		return "", fmt.Errorf("cubepath kubeconfig: %w", err)
 	}
@@ -124,7 +124,7 @@ func (c *Client) GetKubeconfig(ctx context.Context, id string) (string, error) {
 }
 
 func (c *Client) UpdateK8s(ctx context.Context, id, version string) (*providers.K8sCluster, error) {
-	resp, err := c.do("PATCH", "/kubernetes/"+id, map[string]string{"version": version})
+	resp, err := c.do(ctx, "PATCH", "/kubernetes/"+id, map[string]string{"version": version})
 	if err != nil {
 		return nil, fmt.Errorf("cubepath update k8s: %w", err)
 	}
@@ -136,7 +136,7 @@ func (c *Client) UpdateK8s(ctx context.Context, id, version string) (*providers.
 }
 
 func (c *Client) ToggleK8sProtection(ctx context.Context, id string) (*providers.K8sCluster, error) {
-	_, err := c.do("POST", "/kubernetes/"+id+"/protection", nil)
+	_, err := c.do(ctx, "POST", "/kubernetes/"+id+"/protection", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath toggle protection: %w", err)
 	}
@@ -144,7 +144,7 @@ func (c *Client) ToggleK8sProtection(ctx context.Context, id string) (*providers
 }
 
 func (c *Client) ListK8sAddons(ctx context.Context, id string) ([]providers.K8sAddon, error) {
-	resp, err := c.do("GET", "/kubernetes/"+id+"/addons", nil)
+	resp, err := c.do(ctx, "GET", "/kubernetes/"+id+"/addons", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath list addons: %w", err)
 	}
@@ -167,7 +167,7 @@ func (c *Client) ListK8sAddons(ctx context.Context, id string) ([]providers.K8sA
 }
 
 func (c *Client) ListAvailableAddons(ctx context.Context) ([]providers.K8sAddon, error) {
-	resp, err := c.do("GET", "/kubernetes/addons", nil)
+	resp, err := c.do(ctx, "GET", "/kubernetes/addons", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath list available addons: %w", err)
 	}
@@ -188,17 +188,17 @@ func (c *Client) ListAvailableAddons(ctx context.Context) ([]providers.K8sAddon,
 }
 
 func (c *Client) InstallK8sAddon(ctx context.Context, id, slug string) error {
-	_, err := c.do("POST", fmt.Sprintf("/kubernetes/%s/addons/%s/install", id, slug), nil)
+	_, err := c.do(ctx, "POST", fmt.Sprintf("/kubernetes/%s/addons/%s/install", id, slug), nil)
 	return err
 }
 
 func (c *Client) UninstallK8sAddon(ctx context.Context, id, addonID string) error {
-	_, err := c.do("DELETE", fmt.Sprintf("/kubernetes/%s/addons/%s", id, addonID), nil)
+	_, err := c.do(ctx, "DELETE", fmt.Sprintf("/kubernetes/%s/addons/%s", id, addonID), nil)
 	return err
 }
 
 func (c *Client) ListK8sNodePools(ctx context.Context, id string) ([]providers.K8sNodePool, error) {
-	resp, err := c.do("GET", "/kubernetes/"+id+"/node-pools", nil)
+	resp, err := c.do(ctx, "GET", "/kubernetes/"+id+"/node-pools", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath list node pools: %w", err)
 	}
@@ -220,7 +220,7 @@ func (c *Client) ListK8sNodePools(ctx context.Context, id string) ([]providers.K
 }
 
 func (c *Client) CreateK8sNodePool(ctx context.Context, id string, cfg providers.K8sNodePoolConfig) (*providers.K8sNodePool, error) {
-	resp, err := c.do("POST", "/kubernetes/"+id+"/node-pools", nodePoolCreate{
+	resp, err := c.do(ctx, "POST", "/kubernetes/"+id+"/node-pools", nodePoolCreate{
 		Name:      cfg.Name,
 		Plan:      cfg.Plan,
 		NodeCount: cfg.NodeCount,
@@ -242,18 +242,18 @@ func (c *Client) CreateK8sNodePool(ctx context.Context, id string, cfg providers
 }
 
 func (c *Client) ScaleK8sNodePool(ctx context.Context, id, poolID string, nodes int) error {
-	_, err := c.do("PATCH", fmt.Sprintf("/kubernetes/%s/node-pools/%s", id, poolID),
+	_, err := c.do(ctx, "PATCH", fmt.Sprintf("/kubernetes/%s/node-pools/%s", id, poolID),
 		map[string]int{"count": nodes})
 	return err
 }
 
 func (c *Client) DeleteK8sNodePool(ctx context.Context, id, poolID string) error {
-	_, err := c.do("DELETE", fmt.Sprintf("/kubernetes/%s/node-pools/%s", id, poolID), nil)
+	_, err := c.do(ctx, "DELETE", fmt.Sprintf("/kubernetes/%s/node-pools/%s", id, poolID), nil)
 	return err
 }
 
 func (c *Client) ListK8sLBs(ctx context.Context, id string) ([]providers.LoadBalancer, error) {
-	resp, err := c.do("GET", "/kubernetes/"+id+"/loadbalancers", nil)
+	resp, err := c.do(ctx, "GET", "/kubernetes/"+id+"/loadbalancers", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath list k8s lbs: %w", err)
 	}

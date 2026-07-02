@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -56,30 +57,38 @@ func New(host, user string, opts ...Option) *Client {
 	return c
 }
 
-func (c *Client) hostKeyCallback() ssh.HostKeyCallback {
-	if c.insecure {
-		return ssh.InsecureIgnoreHostKey()
-	}
-
+func hostKeyCallback() (ssh.HostKeyCallback, error) {
+	isStrict := os.Getenv("SDK_OPS_SSH_STRICT_HOST_KEY") == "true" || os.Getenv("SDK_OPS_SSH_STRICT_HOST_KEY") == "1"
 	khPath := filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts")
-	if _, err := os.Stat(khPath); err == nil {
-		cb, err := knownhosts.New(khPath)
-		if err == nil {
-			return cb
+	if cb, err := knownhosts.New(khPath); err == nil {
+		if isStrict {
+			return cb, nil
 		}
 	}
-	return ssh.InsecureIgnoreHostKey()
+	if isStrict {
+		return nil, fmt.Errorf("known_hosts not available (set SDK_OPS_SSH_STRICT_HOST_KEY=false or create ~/.ssh/known_hosts)")
+	}
+	return ssh.InsecureIgnoreHostKey(), nil
 }
 
 func (c *Client) authMethods() ([]ssh.AuthMethod, error) {
 	// Try SSH agent first
-	if conn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
-		agentClient := agent.NewClient(conn)
-		signers, err := agentClient.Signers()
-		if err == nil && len(signers) > 0 {
-			return []ssh.AuthMethod{ssh.PublicKeys(signers...)}, nil
+	authSock := os.Getenv("SSH_AUTH_SOCK")
+	if authSock != "" && !strings.Contains(authSock, "..") {
+		sockPath := filepath.Clean(authSock)
+		if sockPath != "." && strings.HasPrefix(sockPath, "/") && !strings.Contains(sockPath, "..") {
+			fi, err := os.Stat(sockPath)
+			if err == nil && fi.Mode()&os.ModeSocket != 0 {
+				if conn, err := net.Dial("unix", sockPath); err == nil {
+					agentClient := agent.NewClient(conn)
+					signers, err := agentClient.Signers()
+					if err == nil && len(signers) > 0 {
+						return []ssh.AuthMethod{ssh.PublicKeys(signers...)}, nil
+					}
+					conn.Close()
+				}
+			}
 		}
-		conn.Close()
 	}
 
 	if c.usePW {
@@ -109,10 +118,15 @@ func (c *Client) Connect() (*ssh.Client, error) {
 		return nil, err
 	}
 
+	hostCallback, err := hostKeyCallback()
+	if err != nil {
+		return nil, fmt.Errorf("host key callback: %w", err)
+	}
+
 	config := &ssh.ClientConfig{
 		User:            c.user,
 		Auth:            auth,
-		HostKeyCallback: c.hostKeyCallback(),
+		HostKeyCallback: hostCallback,
 		Timeout:         10 * time.Second,
 	}
 

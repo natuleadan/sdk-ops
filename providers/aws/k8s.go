@@ -11,8 +11,6 @@ import (
 	"github.com/natuleadan/sdk-ops/providers"
 )
 
-func awsBool(b bool) *bool { return &b }
-
 func (c *Client) CreateK8s(ctx context.Context, cfg providers.K8sCreateConfig) (*providers.K8sCluster, error) {
 	roleArn := cfg.Label
 	if roleArn == "" {
@@ -23,7 +21,7 @@ func (c *Client) CreateK8s(ctx context.Context, cfg providers.K8sCreateConfig) (
 		Version: &cfg.Version,
 		RoleArn: &roleArn,
 		ResourcesVpcConfig: &types.VpcConfigRequest{
-			EndpointPublicAccess: awsBool(true),
+			EndpointPublicAccess: new(true),
 		},
 	})
 	if err != nil {

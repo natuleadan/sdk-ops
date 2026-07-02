@@ -2,6 +2,7 @@ package docker
 
 import (
 	"fmt"
+	"strings"
 
 	goss "golang.org/x/crypto/ssh"
 
@@ -45,11 +46,11 @@ func Check(client *goss.Client) (string, error) {
 		"docker compose version 2>/dev/null && echo 'compose: OK' || echo 'compose: MISSING'",
 		"systemctl is-active docker --quiet && echo 'docker-daemon: OK' || echo 'docker-daemon: MISSING'",
 	}
-	cmd := ""
+	var cmd strings.Builder
 	for _, c := range checks {
-		cmd += c + "; "
+		cmd.WriteString(c + "; ")
 	}
-	out, _, err := ssh.Run(client, cmd)
+	out, _, err := ssh.Run(client, cmd.String())
 	if err != nil {
 		return "", fmt.Errorf("docker check: %w", err)
 	}

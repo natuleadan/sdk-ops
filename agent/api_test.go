@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,7 +23,7 @@ func TestValidateCmdSafe(t *testing.T) {
 		"du -sh /var/log",
 	}
 	for _, cmd := range safe {
-		if err := validateCmd(cmd); err != nil {
+		if _, err := validateCmd(cmd); err != nil {
 			t.Errorf("validateCmd(%q) = %v, want nil", cmd, err)
 		}
 	}
@@ -47,14 +48,14 @@ func TestValidateCmdUnsafe(t *testing.T) {
 		{"../etc/passwd", "path traversal"},
 	}
 	for _, tc := range unsafe {
-		if err := validateCmd(tc.cmd); err == nil {
+		if _, err := validateCmd(tc.cmd); err == nil {
 			t.Errorf("validateCmd(%q) = nil, want error for %s", tc.cmd, tc.desc)
 		}
 	}
 }
 
 func TestValidateCmdEmpty(t *testing.T) {
-	if err := validateCmd(""); err == nil {
+	if _, err := validateCmd(""); err == nil {
 		t.Error("validateCmd empty: expected error")
 	}
 }
@@ -69,7 +70,7 @@ func TestExecRejectsMalicious(t *testing.T) {
 			jsonResp(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := validateCmd(req.Command); err != nil {
+		if _, err := validateCmd(req.Command); err != nil {
 			jsonResp(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
@@ -77,7 +78,7 @@ func TestExecRejectsMalicious(t *testing.T) {
 	})
 
 	body := bytes.NewBufferString(`{"command":"echo hello; rm -rf /"}`)
-	req := httptest.NewRequest(http.MethodPost, "/exec", body)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/exec", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -97,7 +98,7 @@ func TestExecAcceptsSafe(t *testing.T) {
 			jsonResp(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := validateCmd(req.Command); err != nil {
+		if _, err := validateCmd(req.Command); err != nil {
 			jsonResp(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
@@ -105,7 +106,7 @@ func TestExecAcceptsSafe(t *testing.T) {
 	})
 
 	body := bytes.NewBufferString(`{"command":"docker ps"}`)
-	req := httptest.NewRequest(http.MethodPost, "/exec", body)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/exec", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)

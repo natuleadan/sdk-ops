@@ -23,7 +23,7 @@ func newComposeCmd() *cobra.Command {
 			name, _ := cmd.Flags().GetString("name")
 			path := args[0]
 			if !strings.HasSuffix(path, ".yml") && !strings.HasSuffix(path, ".yaml") {
-				path = path + "/docker-compose.yml"
+				path += "/docker-compose.yml"
 			}
 			if err := compose.Init(path, name); err != nil {
 				return err

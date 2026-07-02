@@ -2,6 +2,7 @@ package notify
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,18 +17,23 @@ func NewSlack(webhookURL string) *Slack {
 }
 
 func (s *Slack) Send(title, message string) error {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"text": fmt.Sprintf("*%s*\n%s", title, message),
 	}
 	return s.post(payload)
 }
 
-func (s *Slack) post(payload interface{}) error {
+func (s *Slack) post(payload any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("slack marshal: %w", err)
 	}
-	resp, err := http.Post(s.webhookURL, "application/json", bytes.NewReader(body))
+	req, reqErr := http.NewRequestWithContext(context.Background(), "POST", s.webhookURL, bytes.NewReader(body))
+	if reqErr != nil {
+		return fmt.Errorf("slack request: %w", reqErr)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("slack post: %w", err)
 	}

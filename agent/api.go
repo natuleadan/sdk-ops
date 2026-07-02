@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -18,18 +19,17 @@ var shellMetaRe = regexp.MustCompile(`[;&\x60$(){}<>!'"\\|]`)
 
 // validateCmd rejects shell metacharacters to prevent command injection.
 // Only allows alphanumeric, spaces, /, _, -, ., :, @, =, +, %, ~, ?, and comma.
-func validateCmd(cmd string) error {
+func validateCmd(cmd string) (string, error) {
 	if cmd == "" {
-		return fmt.Errorf("command is empty")
+		return "", fmt.Errorf("command is empty")
 	}
 	if shellMetaRe.MatchString(cmd) {
-		return fmt.Errorf("command contains shell metacharacters: %s", shellMetaRe.FindString(cmd))
+		return "", fmt.Errorf("command contains shell metacharacters: %s", shellMetaRe.FindString(cmd))
 	}
-	// Block consecutive dots (path traversal)
 	if strings.Contains(cmd, "..") {
-		return fmt.Errorf("command contains path traversal")
+		return "", fmt.Errorf("command contains path traversal")
 	}
-	return nil
+	return cmd, nil
 }
 
 type apiHandler struct {
@@ -46,12 +46,7 @@ func (h *apiHandler) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *apiHandler) currentMetrics(w http.ResponseWriter, r *http.Request) {
-	m, err := collectMetrics()
-	if err != nil {
-		jsonResp(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	jsonResp(w, http.StatusOK, m)
+	jsonResp(w, http.StatusOK, collectMetrics())
 }
 
 func (h *apiHandler) metricsHistory(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +81,7 @@ func (h *apiHandler) auditLog(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, http.StatusOK, entries)
 }
 
-func (h *apiHandler) listSchedules(w http.ResponseWriter, r *http.Request) {
+func (h *apiHandler) listSchedules(w http.ResponseWriter, _ *http.Request) {
 	schedules, err := listSchedules(h.db)
 	if err != nil {
 		jsonResp(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -238,18 +233,19 @@ func startAPI(addr string, db *sql.DB, agent *Agent) *http.Server {
 			jsonResp(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := validateCmd(req.Command); err != nil {
+		safeCmd, err := validateCmd(req.Command)
+		if err != nil {
 			jsonResp(w, http.StatusBadRequest, map[string]string{
 				"error": "invalid command: " + err.Error(),
 			})
 			return
 		}
-		cmd := exec.Command("sh", "-c", req.Command)
+		cmd := exec.CommandContext(context.Background(), "sh", "-c", safeCmd)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
-		err := cmd.Run()
-		resp := map[string]interface{}{
+		err = cmd.Run()
+		resp := map[string]any{
 			"stdout": stdout.String(),
 			"stderr": stderr.String(),
 		}

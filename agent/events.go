@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -33,12 +34,12 @@ func watchDockerEvents(db *sql.DB, stop chan struct{}) {
 			log.Println("events: watcher stopped")
 			return
 		case <-ticker.C:
-			cmd := "docker events --since '30s' --format '{{.Type}}|{{.Action}}|{{.Actor.ID}}|{{.Actor.Attributes.name}}' 2>/dev/null"
+			eventSince := "30s"
 			if since != "" {
-				cmd = fmt.Sprintf("docker events --since '%s' --format '{{.Type}}|{{.Action}}|{{.Actor.ID}}|{{.Actor.Attributes.name}}' 2>/dev/null", since)
+				eventSince = since
 			}
-
-			out, err := exec.Command("sh", "-c", cmd).Output()
+			args := []string{"events", "--since", eventSince, "--format", "{{.Type}}|{{.Action}}|{{.Actor.ID}}|{{.Actor.Attributes.name}}"}
+			out, err := exec.CommandContext(context.Background(), "docker", args...).Output()
 			if err != nil {
 				continue
 			}
@@ -109,7 +110,7 @@ func watchContainerLogs(db *sql.DB, stop chan struct{}) {
 			return
 		case <-ticker.C:
 			// Get running containers
-			out, err := exec.Command("docker", "ps", "--format", "{{.Names}}").Output()
+			out, err := exec.CommandContext(context.Background(), "docker", "ps", "--format", "{{.Names}}").Output()
 			if err != nil {
 				continue
 			}
@@ -117,6 +118,10 @@ func watchContainerLogs(db *sql.DB, stop chan struct{}) {
 			names := strings.Fields(string(out))
 			for _, name := range names {
 				if name == "sdk-ops-agent" {
+					continue
+				}
+
+				if _, ok := validContainerName(name); !ok {
 					continue
 				}
 
@@ -176,3 +181,11 @@ func min(a, b int) int {
 }
 
 
+
+
+func validContainerName(name string) (string, bool) {
+	if name == "" || strings.ContainsAny(name, "/;|&`$(){}<>!") {
+		return "", false
+	}
+	return name, true
+}

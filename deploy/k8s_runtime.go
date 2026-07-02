@@ -105,10 +105,10 @@ func DeployK3sFromCompose(client *goss.Client, name, versionDir, imageRef string
 	svcYaml := filepath.Join(versionDir, "service.yaml")
 	out, _, err := ssh.Run(client, fmt.Sprintf("cat %s 2>/dev/null || true", svcYaml))
 	if err == nil {
-		for _, line := range strings.Split(out, "\n") {
+		for line := range strings.SplitSeq(out, "\n") {
 			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "domain:") {
-				domain = strings.TrimSpace(strings.TrimPrefix(line, "domain:"))
+			if after, ok := strings.CutPrefix(line, "domain:"); ok {
+				domain = strings.TrimSpace(after)
 			}
 			if strings.HasPrefix(line, "port:") {
 				fmt.Sscanf(line, "port: %d", &port)
@@ -120,9 +120,9 @@ func DeployK3sFromCompose(client *goss.Client, name, versionDir, imageRef string
 					fmt.Sscanf(parts[len(parts)-1], "%d", &port)
 				}
 			}
-			if strings.HasPrefix(line, "image:") {
+			if after, ok := strings.CutPrefix(line, "image:"); ok {
 				if imageRef == "" {
-					imageRef = strings.TrimSpace(strings.TrimPrefix(line, "image:"))
+					imageRef = strings.TrimSpace(after)
 				}
 			}
 		}

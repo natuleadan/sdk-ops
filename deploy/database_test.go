@@ -45,7 +45,7 @@ func TestLatestVersions(t *testing.T) {
 }
 
 func TestGenPassword(t *testing.T) {
-	p1, err := genPassword(24)
+	p1, err := genPassword()
 	if err != nil {
 		t.Fatalf("genPassword: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestGenPassword(t *testing.T) {
 		t.Errorf("expected length 24, got %d", len(p1))
 	}
 
-	p2, err := genPassword(24)
+	p2, err := genPassword()
 	if err != nil {
 		t.Fatalf("genPassword: %v", err)
 	}

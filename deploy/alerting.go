@@ -112,7 +112,7 @@ echo "Alertmanager configured and started"
 }
 
 func InstallAlertRule(client *goss.Client, ruleFilePath string) error {
-	data, err := os.ReadFile(ruleFilePath)
+	data, err := os.ReadFile(filepath.Clean(ruleFilePath))
 	if err != nil {
 		return fmt.Errorf("read rule file: %w", err)
 	}

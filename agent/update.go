@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -18,11 +19,11 @@ type GitHubRelease struct {
 }
 
 type VersionInfo struct {
-	Current    string `json:"current"`
-	Latest     string `json:"latest"`
-	UpdateAvail bool  `json:"update_available"`
-	ReleaseURL string `json:"release_url"`
-	CheckedAt  string `json:"checked_at"`
+	Current     string `json:"current"`
+	Latest      string `json:"latest"`
+	UpdateAvail bool   `json:"update_available"`
+	ReleaseURL  string `json:"release_url"`
+	CheckedAt   string `json:"checked_at"`
 }
 
 var (
@@ -50,7 +51,7 @@ func checkForUpdate() (*VersionInfo, error) {
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", ghOwner, ghRepo)
-	req, err := http.NewRequest("GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", apiURL, nil)
 	if err != nil {
 		return info, fmt.Errorf("create request: %w", err)
 	}
@@ -101,7 +102,7 @@ func isNewerVersion(latest, current string) bool {
 	lParts := strings.Split(latest, ".")
 	cParts := strings.Split(current, ".")
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		var lv, cv int
 		if i < len(lParts) {
 			fmt.Sscanf(lParts[i], "%d", &lv)

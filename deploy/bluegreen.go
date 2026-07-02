@@ -48,7 +48,7 @@ services:
 	// Health check green
 	fmt.Println("  → Health checking green container...")
 	healthOK := false
-	for i := 0; i < 15; i++ {
+	for range 15 {
 		check, _, _ := ssh.Run(client, fmt.Sprintf("curl -sf http://localhost:%d/health 2>/dev/null || echo 'fail'", greenPort))
 		if strings.TrimSpace(check) != "fail" {
 			healthOK = true

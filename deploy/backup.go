@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -64,7 +65,7 @@ func BackupServices(client *goss.Client, destDir string) (string, error) {
 		return "", fmt.Errorf("download backup: %w", err)
 	}
 
-	if err := os.WriteFile(localPath, []byte(outBytes), 0644); err != nil {
+	if err := os.WriteFile(localPath, []byte(outBytes), 0600); err != nil {
 		return "", fmt.Errorf("write backup: %w", err)
 	}
 
@@ -115,7 +116,7 @@ func BackupDatabase(client *goss.Client, dbType DBType, dbName, containerName st
 	if err != nil {
 		return "", fmt.Errorf("download db backup: %w", err)
 	}
-	if err := os.WriteFile(localPath, []byte(catBytes), 0644); err != nil {
+	if err := os.WriteFile(localPath, []byte(catBytes), 0600); err != nil {
 		return "", fmt.Errorf("write db backup: %w", err)
 	}
 
@@ -143,7 +144,7 @@ func UploadToS3(localPath string, cfg S3Config) error {
 		}
 	})
 
-	file, err := os.Open(localPath)
+	file, err := os.Open(filepath.Clean(localPath))
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
 	}
@@ -189,7 +190,7 @@ func ScheduleBackup(client *goss.Client, backupType BackupType, dbName, containe
 	}
 
 	// Cleanup old backups (keep last 7 by default)
-	cleanupCmd := fmt.Sprintf(`ls -t /tmp/sdk-ops-backup-*.tar.gz /tmp/db-*.sql.gz /tmp/db-*.archive.gz /tmp/db-*.rdb.gz 2>/dev/null | tail -n +8 | xargs -r rm -f`)
+	cleanupCmd := `ls -t /tmp/sdk-ops-backup-*.tar.gz /tmp/db-*.sql.gz /tmp/db-*.archive.gz /tmp/db-*.rdb.gz 2>/dev/null | tail -n +8 | xargs -r rm -f`
 
 	// Parse cron expression into OnCalendar format
 	cal := cronToSystemdCalendar(cronExpr)
@@ -287,7 +288,7 @@ func S3ConfigFromEnv() S3Config {
 }
 
 func RestoreServices(client *goss.Client, backupPath string) error {
-	data, err := os.ReadFile(backupPath)
+	data, err := os.ReadFile(filepath.Clean(backupPath))
 	if err != nil {
 		return fmt.Errorf("read backup: %w", err)
 	}

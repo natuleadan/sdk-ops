@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,10 +40,10 @@ func (b *NixpacksBuilder) Build(dir, name string, reg RegistryConfig) (string, e
 	// Check if nixpacks is available
 	if _, err := exec.LookPath("nixpacks"); err != nil {
 		fmt.Println("  → Installing nixpacks...")
-		install := exec.Command("npx", "nixpacks", "--version")
+		install := exec.CommandContext(context.Background(), "npx", "nixpacks", "--version")
 		install.Stderr = os.Stderr
 		if err := install.Run(); err != nil {
-			install2 := exec.Command("npm", "install", "-g", "nixpacks")
+			install2 := exec.CommandContext(context.Background(), "npm", "install", "-g", "nixpacks")
 			install2.Stdout = os.Stdout
 			install2.Stderr = os.Stderr
 			if err := install2.Run(); err != nil {
@@ -53,7 +54,7 @@ func (b *NixpacksBuilder) Build(dir, name string, reg RegistryConfig) (string, e
 
 	// Login to registry
 	fmt.Printf("  → Logging in to %s...\n", reg.Server)
-	login := exec.Command("docker", "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
+	login := exec.CommandContext(context.Background(), "docker", "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
 	login.Stdout = os.Stdout
 	login.Stderr = os.Stderr
 	if err := login.Run(); err != nil {
@@ -68,7 +69,7 @@ func (b *NixpacksBuilder) Build(dir, name string, reg RegistryConfig) (string, e
 		"--push",
 	}
 
-	cmd := exec.Command("nixpacks", args...)
+	cmd := exec.CommandContext(context.Background(), "nixpacks", args...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

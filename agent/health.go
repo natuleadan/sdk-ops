@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -29,7 +30,7 @@ type ContainerHealth struct {
 
 func checkContainerHealth() []ContainerHealth {
 	var results []ContainerHealth
-	out, err := exec.Command("docker", "ps", "--format", "{{.Names}}|{{.Image}}|{{.Ports}}|{{.Status}}").Output()
+	out, err := exec.CommandContext(context.Background(), "docker", "ps", "--format", "{{.Names}}|{{.Image}}|{{.Ports}}|{{.Status}}").Output()
 	if err != nil {
 		log.Printf("health: docker ps failed: %v", err)
 		return results
@@ -63,7 +64,8 @@ func checkContainerHealth() []ContainerHealth {
 			}
 			for _, url := range urls {
 				client := &http.Client{Timeout: 3 * time.Second}
-				resp, err := client.Get(url)
+				req, _ := http.NewRequestWithContext(context.Background(), "GET", url, nil)
+			resp, err := client.Do(req)
 				if err == nil {
 					resp.Body.Close()
 					if resp.StatusCode == 200 {
@@ -79,6 +81,10 @@ func checkContainerHealth() []ContainerHealth {
 
 		// Auto-heal: if unhealthy but status is running, restart
 		if !ch.Healthy && ch.Status == "running" {
+			if _, ok := validContainerName(ch.Name); !ok {
+				log.Printf("health: skipping invalid container name: %q", ch.Name)
+				continue
+			}
 			log.Printf("health: %s unhealthy, restarting...", ch.Name)
 			restartOut, err := exec.Command("docker", "restart", ch.Name).CombinedOutput()
 			if err != nil {
@@ -104,14 +110,18 @@ func checkContainerHealth() []ContainerHealth {
 }
 
 func getContainerIP(name string) string {
-	out, err := exec.Command("docker", "inspect", "--format", "{{.NetworkSettings.IPAddress}}", name).Output()
+	containerName, ok := validContainerName(name)
+	if !ok {
+		return ""
+	}
+	out, err := exec.Command("docker", "inspect", "--format", "{{.NetworkSettings.IPAddress}}", containerName).Output()
 	if err != nil {
 		return ""
 	}
 	ip := strings.TrimSpace(string(out))
 	if ip == "" || ip == "<no value>" {
 		// Try Networks default IP
-		out2, err2 := exec.Command("docker", "inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", name).Output()
+		out2, err2 := exec.Command("docker", "inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerName).Output()
 		if err2 != nil {
 			return ""
 		}
@@ -151,7 +161,7 @@ type DiskInfo struct {
 
 func checkDiskUsage() []DiskInfo {
 	var results []DiskInfo
-	out, err := exec.Command("/bin/df", "-kP", "/").Output()
+	out, err := exec.CommandContext(context.Background(), "/bin/df", "-kP", "/").Output()
 	if err != nil {
 		log.Printf("disk: df failed: %v", err)
 		return results
@@ -221,7 +231,7 @@ func clampPercent(p float64) float64 {
 
 func autoPruneDisk() {
 	log.Println("disk: running auto-prune (disk >95%)")
-	out, err := exec.Command("docker", "system", "prune", "-af", "--volumes").CombinedOutput()
+	out, err := exec.CommandContext(context.Background(), "docker", "system", "prune", "-af", "--volumes").CombinedOutput()
 	if err != nil {
 		log.Printf("disk: prune failed: %v\n%s", err, string(out))
 		return
@@ -305,7 +315,7 @@ func checkCertFile(path string) *CertInfo {
 		ci.Domain = cert.Subject.CommonName
 	}
 
-	ci.DaysLeft = int(cert.NotAfter.Sub(time.Now()).Hours() / 24)
+	ci.DaysLeft = int(time.Until(cert.NotAfter).Hours() / 24)
 	if ci.DaysLeft < 0 {
 		ci.DaysLeft = 0
 	}
@@ -451,7 +461,7 @@ func checkTemperature() []TempInfo {
 	}
 
 	// Try lm-sensors (optional)
-	out, err := exec.Command("sensors", "-u").Output()
+	out, err := exec.CommandContext(context.Background(), "sensors", "-u").Output()
 	if err == nil {
 		scanner := bufio.NewScanner(strings.NewReader(string(out)))
 		var currentSensor string

@@ -13,7 +13,7 @@ func (c *Client) CreateSSHKey(ctx context.Context, cfg providers.SSHKeyCreateCon
 		"name":    cfg.Name,
 		"ssh_key": cfg.PublicKey,
 	}
-	resp, err := c.do("POST", "/sshkey/create", body)
+	resp, err := c.do(ctx, "POST", "/sshkey/create", body)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath create ssh key: %w", err)
 	}
@@ -29,7 +29,7 @@ func (c *Client) CreateSSHKey(ctx context.Context, cfg providers.SSHKeyCreateCon
 }
 
 func (c *Client) ListSSHKeys(ctx context.Context) ([]providers.SSHKey, error) {
-	resp, err := c.do("GET", "/sshkey/user/sshkeys", nil)
+	resp, err := c.do(ctx, "GET", "/sshkey/user/sshkeys", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath list ssh keys: %w", err)
 	}
@@ -55,6 +55,6 @@ func (c *Client) ListSSHKeys(ctx context.Context) ([]providers.SSHKey, error) {
 }
 
 func (c *Client) DeleteSSHKey(ctx context.Context, id string) error {
-	_, err := c.do("DELETE", "/sshkey/"+id, nil)
+	_, err := c.do(ctx, "DELETE", "/sshkey/"+id, nil)
 	return err
 }

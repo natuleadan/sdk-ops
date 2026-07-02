@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,7 +40,7 @@ func (b *PackBuilder) Build(dir, name string, reg RegistryConfig) (string, error
 
 	// Login to registry
 	fmt.Printf("  → Logging in to %s...\n", reg.Server)
-	login := exec.Command("docker", "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
+	login := exec.CommandContext(context.Background(), "docker", "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
 	login.Stdout = os.Stdout
 	login.Stderr = os.Stderr
 	if err := login.Run(); err != nil {
@@ -54,7 +55,7 @@ func (b *PackBuilder) Build(dir, name string, reg RegistryConfig) (string, error
 		"--path", dir,
 	}
 
-	cmd := exec.Command("pack", args...)
+	cmd := exec.CommandContext(context.Background(), "pack", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,9 +9,10 @@ import (
 )
 
 func EncryptFile(path, ageKey string) error {
-	cmd := exec.Command("sops", "--encrypt",
+	cleanPath := filepath.Clean(path)
+	cmd := exec.CommandContext(context.Background(), "sops", "--encrypt",
 		"--age", ageKey,
-		"--in-place", path)
+		"--in-place", cleanPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -20,7 +22,8 @@ func EncryptFile(path, ageKey string) error {
 }
 
 func DecryptFile(path string) ([]byte, error) {
-	cmd := exec.Command("sops", "--decrypt", path)
+	cleanPath := filepath.Clean(path)
+	cmd := exec.CommandContext(context.Background(), "sops", "--decrypt", cleanPath)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("sops decrypt: %w", err)
@@ -29,7 +32,7 @@ func DecryptFile(path string) ([]byte, error) {
 }
 
 func FileIsEncrypted(path string) bool {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return false
 	}
@@ -39,7 +42,8 @@ func FileIsEncrypted(path string) bool {
 }
 
 func DecryptFileInPlace(path string) error {
-	cmd := exec.Command("sops", "--decrypt", "--in-place", path)
+	cleanPath := filepath.Clean(path)
+	cmd := exec.CommandContext(context.Background(), "sops", "--decrypt", "--in-place", cleanPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -50,7 +54,7 @@ func DecryptFileInPlace(path string) error {
 
 func CreateSOPSConfig(ageKey string) error {
 	configDir := filepath.Join(os.Getenv("HOME"), ".config", "sops")
-	if err := os.MkdirAll(configDir, 0700); err != nil {
+	if err := os.MkdirAll(filepath.Clean(configDir), 0700); err != nil {
 		return err
 	}
 
@@ -59,5 +63,5 @@ func CreateSOPSConfig(ageKey string) error {
   - age: %s
 `, ageKey)
 
-	return os.WriteFile(configPath, []byte(config), 0600)
+	return os.WriteFile(filepath.Clean(configPath), []byte(config), 0600)
 }

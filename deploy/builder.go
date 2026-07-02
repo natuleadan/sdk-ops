@@ -61,6 +61,4 @@ func BuildImage(dir, name string, reg RegistryConfig, builder BuilderType) (stri
 	return imageRef, nil
 }
 
-func ensureDir(dir string) error {
-	return os.MkdirAll(dir, 0755)
-}
+

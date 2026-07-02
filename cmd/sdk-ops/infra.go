@@ -34,7 +34,6 @@ type infraFlags struct {
 	user        string
 	key         string
 	port        int
-	insecure    bool
 	mode        string // k3s, docker, bare
 	crowdsec    bool
 	cloudInit   bool
@@ -253,11 +252,12 @@ Examples:
 			// Detect mode
 			mode := adoptMode
 			if mode == "" {
-				if hasK3s {
-					mode = "k3s"
-				} else if hasDocker {
-					mode = "docker"
-				} else {
+				switch {
+					case hasK3s:
+						mode = "k3s"
+					case hasDocker:
+						mode = "docker"
+					default:
 					mode = "bare"
 				}
 			}
@@ -388,11 +388,12 @@ Examples:
 		useK3s, _ := cmd.Flags().GetBool("k3s")
 		useDocker, _ := cmd.Flags().GetBool("docker")
 		useBare, _ := cmd.Flags().GetBool("bare")
-		if useK3s {
+		switch {
+		case useK3s:
 			f.mode = "k3s"
-		} else if useDocker {
+		case useDocker:
 			f.mode = "docker"
-		} else if useBare {
+		case useBare:
 			f.mode = "bare"
 		}
 		return nil
@@ -1117,9 +1118,10 @@ func runInfraInit(ip string, f infraFlags) error {
 	if f.cloudInitOnly {
 		ciCfg := cloudinit.DefaultConfig()
 		ciCfg.SSHKeys = sshPublicKeys()
-		if f.mode == "docker" {
+		switch f.mode {
+		case "docker":
 			ciCfg.Mode = "docker"
-		} else if f.mode == "bare" {
+		case "bare":
 			ciCfg.Mode = "bare"
 		}
 		if f.hardSSHPort > 0 {
@@ -1351,11 +1353,11 @@ func runInfraInit(ip string, f infraFlags) error {
 
 			// Download locally
 			fmt.Printf("  → Downloading %s...\n", dlURL)
-			dlCmd := exec.Command("curl", "-sfLo", localFile, dlURL)
+			dlCmd := exec.CommandContext(context.Background(), "curl", "-sfLo", localFile, dlURL)
 			if out, err := dlCmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("download k3s binary: %w\n%s", err, string(out))
 			}
-			if err := os.Chmod(localFile, 0755); err != nil {
+			if err := os.Chmod(localFile, 0600); err != nil {
 				return fmt.Errorf("chmod binary: %w", err)
 			}
 			defer os.Remove(localFile)

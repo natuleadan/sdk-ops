@@ -46,7 +46,7 @@ func (c *Client) CreateVPS(ctx context.Context, cfg providers.VPSCreateConfig) (
 func (c *Client) DeleteVPS(ctx context.Context, id string) error {
 	var idInt int64
 	fmt.Sscanf(id, "%d", &idInt)
-	_, err := c.client.Server.Delete(ctx, &hcloud.Server{ID: idInt})
+	_, _, err := c.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: idInt})
 	if err != nil {
 		return fmt.Errorf("hetzner delete server: %w", err)
 	}

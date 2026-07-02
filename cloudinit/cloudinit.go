@@ -27,7 +27,8 @@ func Generate(cfg Config) string {
 	user := cfg.User
 	sshPort := cfg.SSHPort
 
-	script := fmt.Sprintf(`#cloud-config
+	var script strings.Builder
+	fmt.Fprintf(&script, `#cloud-config
 package_update: true
 package_upgrade: false
 
@@ -48,21 +49,21 @@ users:
 
 	// SSH keys
 	if len(cfg.SSHKeys) > 0 {
-		script += "    ssh_authorized_keys:\n"
+		script.WriteString("    ssh_authorized_keys:\n")
 		for _, key := range cfg.SSHKeys {
-			script += fmt.Sprintf("      - %s\n", key)
+			fmt.Fprintf(&script, "      - %s\n", key)
 		}
 	}
 
-	script += fmt.Sprintf(`
+	fmt.Fprintf(&script, `
 write_files:
   - path: /etc/sysctl.d/99-sdk-ops.conf
     content: |
       net.ipv4.tcp_syncookies=1
       net.ipv4.conf.all.rp_filter=1
       net.ipv4.conf.default.rp_filter=1
-      net.ipv4.conf.all.accept_source_route=0
-      net.ipv6.conf.all.accept_source_route=0
+      net.ipv4.conf.all.accept_redirects=0
+      net.ipv6.conf.all.accept_redirects=0
       net.ipv4.conf.all.accept_redirects=0
       net.ipv6.conf.all.accept_redirects=0
       kernel.yama.ptrace_scope=1
@@ -88,7 +89,7 @@ write_files:
 `, sshPort)
 
 	// SSH hardening
-	script += fmt.Sprintf(`
+	fmt.Fprintf(&script, `
   - path: /etc/ssh/sshd_config.d/50-sdk-ops.conf
     content: |
       Port %d
@@ -97,7 +98,7 @@ write_files:
 `, sshPort)
 
 	// nftables
-	script += fmt.Sprintf(`
+	fmt.Fprintf(&script, `
   - path: /etc/nftables.conf
     content: |
       #!/usr/sbin/nft -f
@@ -118,7 +119,7 @@ write_files:
 `, sshPort)
 
 	// Lock root
-	script += `
+	script.WriteString(`
   - path: /etc/sudoers.d/90-cloud-init-users
     content: |
       # User rules for sdk-ops
@@ -131,15 +132,15 @@ runcmd:
   - [ systemctl, restart, fail2ban ]
   - [ systemctl, enable, unattended-upgrades ]
   - [ systemctl, restart, unattended-upgrades ]
-`
+`)
 
 	// Docker
 	if cfg.Mode == "docker" || cfg.Mode == "k3s" {
-		script += `  - [ curl, -fsSL, https://get.docker.com, -o, /tmp/get-docker.sh ]
+		script.WriteString(`  - [ curl, -fsSL, https://get.docker.com, -o, /tmp/get-docker.sh ]
   - [ sh, /tmp/get-docker.sh ]
   - [ systemctl, enable, docker ]
   - [ systemctl, start, docker ]
-`
+`)
 	}
 
 	// k3s
@@ -148,26 +149,26 @@ runcmd:
 		if cfg.DisableTraefik {
 			traefikFlag = "--disable traefik"
 		}
-		script += fmt.Sprintf(`  - [ sh, -c, 'curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --tls-san $(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || hostname -I | awk "{print \$1}") %s" sh -' ]
+		fmt.Fprintf(&script, `  - [ sh, -c, 'curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --tls-san $(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || hostname -I | awk "{print \$1}") %s" sh -' ]
 `, traefikFlag)
-		script += `  - [ sh, -c, 'mkdir -p /opt/sdk-ops/services /opt/sdk-ops/backups /opt/sdk-ops/logs && echo "sdk-ops-init" > /opt/sdk-ops/.version' ]
-`
+		script.WriteString(`  - [ sh, -c, 'mkdir -p /opt/sdk-ops/services /opt/sdk-ops/backups /opt/sdk-ops/logs && echo "sdk-ops-init" > /opt/sdk-ops/.version' ]
+`)
 	}
 
 	// CrowdSec
 	if cfg.CrowdSec {
-		script += `  - [ curl, -fsSL, https://install.crowdsec.net, -o, /tmp/install-crowdsec.sh ]
+		script.WriteString(`  - [ curl, -fsSL, https://install.crowdsec.net, -o, /tmp/install-crowdsec.sh ]
   - [ sh, /tmp/install-crowdsec.sh ]
   - [ systemctl, enable, crowdsec ]
   - [ systemctl, start, crowdsec ]
-`
+`)
 	}
 
 	// Node Exporter
 	if cfg.EnableMonitor {
-		script += `  - [ sh, -c, 'VER="1.8.2"; curl -fsSLO "https://github.com/prometheus/node_exporter/releases/download/v${VER}/node_exporter-${VER}.linux-amd64.tar.gz" && tar xzf "node_exporter-${VER}.linux-amd64.tar.gz" && cp "node_exporter-${VER}.linux-amd64/node_exporter" /usr/local/bin/ && rm -rf "node_exporter-${VER}.linux-amd64" "node_exporter-${VER}.linux-amd64.tar.gz"' ]
-`
-		script += `  - [ sh, -c, 'cat > /etc/systemd/system/node_exporter.service << "SERVICE"
+		script.WriteString(`  - [ sh, -c, 'VER="1.8.2"; curl -fsSLO "https://github.com/prometheus/node_exporter/releases/download/v${VER}/node_exporter-${VER}.linux-amd64.tar.gz" && tar xzf "node_exporter-${VER}.linux-amd64.tar.gz" && cp "node_exporter-${VER}.linux-amd64/node_exporter" /usr/local/bin/ && rm -rf "node_exporter-${VER}.linux-amd64" "node_exporter-${VER}.linux-amd64.tar.gz"' ]
+`)
+		script.WriteString(`  - [ sh, -c, 'cat > /etc/systemd/system/node_exporter.service << "SERVICE"
 [Unit]
 Description=Prometheus Node Exporter
 After=network.target
@@ -181,17 +182,17 @@ Restart=always
 WantedBy=multi-user.target
 SERVICE
 systemctl daemon-reload && systemctl enable node_exporter && systemctl start node_exporter' ]
-`
+`)
 	}
 
 	// Cleanup old SSH port 22
-	script += fmt.Sprintf(`  - [ sed, -i, '/^Port 22$/d', /etc/ssh/sshd_config ]
+	script.WriteString(`  - [ sed, -i, '/^Port 22$/d', /etc/ssh/sshd_config ]
   - [ systemctl, restart, ssh ]
   - [ rm, -f, /root/.ssh/authorized_keys ]
   - [ echo, "sdk-ops cloud-init provisioning complete" ]
 `)
 
-	return strings.TrimSpace(script)
+	return strings.TrimSpace(script.String())
 }
 
 func ValidateMode(mode string) error {

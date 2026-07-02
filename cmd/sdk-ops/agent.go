@@ -4,9 +4,12 @@ import (
 	"archive/tar"
 	"bufio"
 	"compress/gzip"
+	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -107,7 +110,7 @@ Examples:
 				fmt.Printf("%s (%s)\n", status, src)
 			}
 
-			health, _, _ := runSSH(conn, agentAPICmd("wget -qO- http://localhost:9000/health 2>/dev/null || echo '{\"status\":\"unreachable\"}'"))
+			health, _ := runSSH(conn, agentAPICmd("wget -qO- http://localhost:9000/health 2>/dev/null || echo '{\"status\":\"unreachable\"}'"))
 			fmt.Printf("  API: %s\n", strings.TrimSpace(health))
 			return nil
 		},
@@ -176,7 +179,7 @@ Examples:
 			payload := fmt.Sprintf(`{"name":"%s","cron_expr":"%s","task_type":"%s","task_config":"%s","notify_on":"%s"}`,
 				name, cronExpr, taskType, taskConfig, notifyOn)
 			cmdStr := agentAPICmd(fmt.Sprintf("wget -qO- --post-data='%s' --header='Content-Type: application/json' http://localhost:9000/schedules", payload))
-			_, _, rErr := runSSH(conn, cmdStr)
+			_, rErr := runSSH(conn, cmdStr)
 			if rErr != nil {
 				return fmt.Errorf("agent unreachable on %s: %v", nodeIP, rErr)
 			}
@@ -201,7 +204,7 @@ Examples:
 			}
 			defer conn.Close()
 
-			out, _, lErr := runSSH(conn, agentAPICmd("wget -qO- http://localhost:9000/schedules")+" || echo 'agent-unreachable'")
+			out, lErr := runSSH(conn, agentAPICmd("wget -qO- http://localhost:9000/schedules")+" || echo 'agent-unreachable'")
 			if lErr != nil || strings.Contains(out, "agent-unreachable") {
 				return fmt.Errorf("agent unreachable on %s", nodeIP)
 			}
@@ -229,7 +232,7 @@ Examples:
 			defer conn.Close()
 
 			cmdStr := agentAPICmd(fmt.Sprintf("wget -qO- 'http://localhost:9000/schedules/remove?id=%s'", id))
-			resp, _, rErr := runSSH(conn, cmdStr)
+			resp, rErr := runSSH(conn, cmdStr)
 			if rErr != nil {
 				return fmt.Errorf("agent unreachable on %s: %v", nodeIP, rErr)
 			}
@@ -272,7 +275,7 @@ If a newer version is available, rebuild and restart the agent.`,
 			}
 			defer conn.Close()
 
-			vOut, _, vErr := runSSH(conn, agentAPICmd("wget -qO- http://localhost:9000/version")+" 2>/dev/null || echo '{\"current\":\"unknown\"}'")
+			vOut, vErr := runSSH(conn, agentAPICmd("wget -qO- http://localhost:9000/version")+" 2>/dev/null || echo '{\"current\":\"unknown\"}'")
 			if vErr != nil {
 				return fmt.Errorf("check version: %w", vErr)
 			}
@@ -338,20 +341,38 @@ Examples:
 			defer conn.Close()
 
 			// Stop systemd (if exists) or Docker container
-			runSSH(conn, "systemctl stop sdk-ops-agent 2>/dev/null || true")
-			runSSH(conn, "systemctl disable sdk-ops-agent 2>/dev/null || true")
-			runSSH(conn, "rm -f /etc/systemd/system/sdk-ops-agent.service")
-			runSSH(conn, "systemctl daemon-reload 2>/dev/null || true")
-			runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true")
-			runSSH(conn, "docker rmi sdk-ops-agent:latest 2>/dev/null || true")
+			if _, err := runSSH(conn, "systemctl stop sdk-ops-agent 2>/dev/null || true"); err != nil {
+				log.Printf("ssh: %v", err)
+			}
+			if _, err := runSSH(conn, "systemctl disable sdk-ops-agent 2>/dev/null || true"); err != nil {
+				log.Printf("ssh: %v", err)
+			}
+			if _, err := runSSH(conn, "rm -f /etc/systemd/system/sdk-ops-agent.service"); err != nil {
+				log.Printf("ssh: %v", err)
+			}
+			if _, err := runSSH(conn, "systemctl daemon-reload 2>/dev/null || true"); err != nil {
+				log.Printf("ssh: %v", err)
+			}
+			if _, err := runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true"); err != nil {
+				log.Printf("ssh: %v", err)
+			}
+			if _, err := runSSH(conn, "docker rmi sdk-ops-agent:latest 2>/dev/null || true"); err != nil {
+				log.Printf("ssh: %v", err)
+			}
 
 			// Remove binary
-			runSSH(conn, "rm -rf /opt/sdk-ops/agent")
+			if _, err := runSSH(conn, "rm -rf /opt/sdk-ops/agent"); err != nil {
+				log.Printf("ssh: %v", err)
+			}
 
 			// Remove data if --purge
 			if purge {
-				runSSH(conn, "rm -rf /opt/sdk-ops/agent-data")
-				runSSH(conn, "docker volume rm sdk-ops-agent-data 2>/dev/null || true")
+				if _, err := runSSH(conn, "rm -rf /opt/sdk-ops/agent-data"); err != nil {
+					log.Printf("ssh: %v", err)
+				}
+				if _, err := runSSH(conn, "docker volume rm sdk-ops-agent-data 2>/dev/null || true"); err != nil {
+					log.Printf("ssh: %v", err)
+				}
 				fmt.Printf("  ✅ Agent removed from %s (data purged)\n", nodeIP)
 			} else {
 				fmt.Printf("  ✅ Agent removed from %s (data kept at /opt/sdk-ops/agent-data)\n", nodeIP)
@@ -388,12 +409,12 @@ func agentAPICmd(inner string) string {
 }
 
 func checkAgentStatus(conn *goss.Client) (status, src string) {
-	out, _, _ := runSSH(conn, "systemctl is-active sdk-ops-agent 2>/dev/null || echo inactive")
+	out, _ := runSSH(conn, "systemctl is-active sdk-ops-agent 2>/dev/null || echo inactive")
 	status = strings.TrimSpace(out)
 	if status == "active" {
 		return "active", "systemd"
 	}
-	out, _, _ = runSSH(conn, `docker inspect sdk-ops-agent --format='{{.State.Status}}' 2>/dev/null || echo "not-found"`)
+	out, _ = runSSH(conn, `docker inspect sdk-ops-agent --format='{{.State.Status}}' 2>/dev/null || echo "not-found"`)
 	status = strings.TrimSpace(out)
 	if status != "" && status != "not-found" {
 		return status, "docker"
@@ -402,11 +423,11 @@ func checkAgentStatus(conn *goss.Client) (status, src string) {
 }
 
 func uploadAgentBinary(conn *goss.Client, binaryPath string) error {
-	binData, err := os.ReadFile(binaryPath)
+	binData, err := os.ReadFile(filepath.Clean(binaryPath))
 	if err != nil {
 		return err
 	}
-	if _, _, err := runSSH(conn, "mkdir -p /opt/sdk-ops/agent"); err != nil {
+	if _, err := runSSH(conn, "mkdir -p /opt/sdk-ops/agent"); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
 
@@ -450,7 +471,7 @@ func uploadAgentBinary(conn *goss.Client, binaryPath string) error {
 
 func buildAgentBinary() (string, error) {
 	fmt.Println("  → Building agent binary (linux/amd64)...")
-	buildCmd := exec.Command("go", "build",
+	buildCmd := exec.CommandContext(context.Background(), "go", "build",
 		"-a",
 		"-ldflags=-s -w -X main.version="+version,
 		"-o", "/tmp/sdk-ops-agent-linux",
@@ -468,7 +489,9 @@ func buildAgentBinary() (string, error) {
 
 func installAgentBare(conn *goss.Client, nodeIP string) error {
 	// Clean up any Docker container first
-	runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true")
+	if _, err := runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
 
 	binaryPath, err := buildAgentBinary()
 	if err != nil {
@@ -484,12 +507,14 @@ func installAgentBare(conn *goss.Client, nodeIP string) error {
 	// Create systemd service
 	fmt.Println("  → Installing systemd service...")
 	dataDir := "/opt/sdk-ops/agent-data"
-	runSSH(conn, fmt.Sprintf("mkdir -p %s", dataDir))
+	if _, err := runSSH(conn, fmt.Sprintf("mkdir -p %s", dataDir)); err != nil {
+		log.Printf("ssh: %v", err)
+	}
 
 	notifyEnvs := collectNotifyEnvVars()
-	envLines := ""
+	var envLines strings.Builder
 	for _, e := range notifyEnvs {
-		envLines += fmt.Sprintf("Environment=%s\n", e)
+		fmt.Fprintf(&envLines, "Environment=%s\n", e)
 	}
 
 	unitContent := fmt.Sprintf(`[Unit]
@@ -507,7 +532,7 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-`, dataDir, envLines)
+`, dataDir, envLines.String())
 
 	installScript := fmt.Sprintf(`
 cat > /etc/systemd/system/sdk-ops-agent.service << 'SERVICEEOF'
@@ -518,20 +543,20 @@ systemctl enable --now sdk-ops-agent 2>&1
 systemctl restart sdk-ops-agent 2>&1
 echo "done"`, unitContent)
 
-	if out, _, err := runSSH(conn, installScript); err != nil {
+	if out, err := runSSH(conn, installScript); err != nil {
 		return fmt.Errorf("systemd install: %w\n%s", err, out)
 	}
 
 	time.Sleep(3 * time.Second)
-	out, _, _ := runSSH(conn, "systemctl is-active sdk-ops-agent 2>/dev/null || echo inactive")
+	out, _ := runSSH(conn, "systemctl is-active sdk-ops-agent 2>/dev/null || echo inactive")
 	status := strings.TrimSpace(out)
 
 	if status == "active" {
-		logOut, _, _ := runSSH(conn, "journalctl -u sdk-ops-agent -n 5 --no-pager 2>/dev/null")
+		logOut, _ := runSSH(conn, "journalctl -u sdk-ops-agent -n 5 --no-pager 2>/dev/null")
 		fmt.Printf("\n✅ Agent deployed on %s (status: active, systemd)\n", nodeIP)
 		fmt.Printf("   Logs:\n%s\n", strings.TrimSpace(logOut))
 	} else {
-		logOut, _, _ := runSSH(conn, "journalctl -u sdk-ops-agent -n 20 --no-pager 2>/dev/null")
+		logOut, _ := runSSH(conn, "journalctl -u sdk-ops-agent -n 20 --no-pager 2>/dev/null")
 		return fmt.Errorf("agent status: %s\nlogs:\n%s", status, logOut)
 	}
 	return nil
@@ -539,10 +564,18 @@ echo "done"`, unitContent)
 
 func installAgentDocker(conn *goss.Client, nodeIP string) error {
 	// Clean up systemd service first
-	runSSH(conn, "systemctl stop sdk-ops-agent 2>/dev/null || true")
-	runSSH(conn, "systemctl disable sdk-ops-agent 2>/dev/null || true")
-	runSSH(conn, "rm -f /etc/systemd/system/sdk-ops-agent.service")
-	runSSH(conn, "systemctl daemon-reload 2>/dev/null || true")
+	if _, err := runSSH(conn, "systemctl stop sdk-ops-agent 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	if _, err := runSSH(conn, "systemctl disable sdk-ops-agent 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	if _, err := runSSH(conn, "rm -f /etc/systemd/system/sdk-ops-agent.service"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	if _, err := runSSH(conn, "systemctl daemon-reload 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
 
 	binaryPath, err := buildAgentBinary()
 	if err != nil {
@@ -560,8 +593,8 @@ ENTRYPOINT ["sdk-ops-agent"]`
 	fmt.Println("  → Uploading agent...")
 	dfData := []byte(dockerfile)
 	// Create a combined upload with both binary and Dockerfile
-	binData, _ := os.ReadFile(binaryPath)
-	if _, _, err := runSSH(conn, "mkdir -p /opt/sdk-ops/agent"); err != nil {
+	binData, _ := os.ReadFile(filepath.Clean(binaryPath))
+	if _, err := runSSH(conn, "mkdir -p /opt/sdk-ops/agent"); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
 	sess, err := conn.NewSession()
@@ -594,29 +627,31 @@ ENTRYPOINT ["sdk-ops-agent"]`
 	}
 
 	fmt.Println("  → Building Docker image...")
-	if out, _, err := runSSH(conn, "cd /opt/sdk-ops/agent && docker build -t sdk-ops-agent:latest . 2>&1"); err != nil {
+	if out, err := runSSH(conn, "cd /opt/sdk-ops/agent && docker build -t sdk-ops-agent:latest . 2>&1"); err != nil {
 		return fmt.Errorf("docker build: %w\n%s", err, out)
 	}
 
 	fmt.Println("  → Starting container...")
-	runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true")
+	if _, err := runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
 	volumes := "-v /var/run/docker.sock:/var/run/docker.sock -v /opt/sdk-ops:/opt/sdk-ops:ro"
 	notifyEnvs := collectNotifyEnvVars()
-	envFlags := ""
+	var envFlags strings.Builder
 	for _, e := range notifyEnvs {
-		envFlags += fmt.Sprintf(" -e '%s'", e)
+		fmt.Fprintf(&envFlags, " -e '%s'", e)
 	}
-	runCmd := fmt.Sprintf("docker run -d --name sdk-ops-agent --restart unless-stopped %s %s -v sdk-ops-agent-data:/data sdk-ops-agent:latest", volumes, envFlags)
-	if out, _, err := runSSH(conn, runCmd); err != nil {
+	runCmd := fmt.Sprintf("docker run -d --name sdk-ops-agent --restart unless-stopped %s %s -v sdk-ops-agent-data:/data sdk-ops-agent:latest", volumes, envFlags.String())
+	if out, err := runSSH(conn, runCmd); err != nil {
 		return fmt.Errorf("docker run: %w\n%s", err, out)
 	}
 
 	time.Sleep(3 * time.Second)
-	status, _, _ := runSSH(conn, `docker inspect sdk-ops-agent --format='{{.State.Status}}'`)
+	status, _ := runSSH(conn, `docker inspect sdk-ops-agent --format='{{.State.Status}}'`)
 	if strings.TrimSpace(status) == "running" {
 		fmt.Printf("\n✅ Agent deployed on %s (status: running, Docker)\n", nodeIP)
 	} else {
-		logOut, _, _ := runSSH(conn, "docker logs --tail 20 sdk-ops-agent 2>&1")
+		logOut, _ := runSSH(conn, "docker logs --tail 20 sdk-ops-agent 2>&1")
 		return fmt.Errorf("agent status: %s\n%s", status, logOut)
 	}
 	return nil
@@ -635,10 +670,10 @@ func rebuildAgent(conn *goss.Client, nodeIP string) error {
 	}
 
 	// Try systemd restart, fallback to Docker
-	out, _, _ := runSSH(conn, "systemctl restart sdk-ops-agent 2>&1 && echo 'systemd-ok' || echo 'systemd-fail'")
+	out, _ := runSSH(conn, "systemctl restart sdk-ops-agent 2>&1 && echo 'systemd-ok' || echo 'systemd-fail'")
 	if strings.Contains(out, "systemd-ok") {
 		time.Sleep(2 * time.Second)
-		status, _, _ := runSSH(conn, "systemctl is-active sdk-ops-agent 2>/dev/null")
+		status, _ := runSSH(conn, "systemctl is-active sdk-ops-agent 2>/dev/null")
 		if strings.TrimSpace(status) == "active" {
 			fmt.Printf("✅ Agent updated on %s (systemd)\n", nodeIP)
 			return nil
@@ -648,14 +683,20 @@ func rebuildAgent(conn *goss.Client, nodeIP string) error {
 
 	// Docker fallback: rebuild image and restart
 	fmt.Println("  → Rebuilding Docker image...")
-	runSSH(conn, "cd /opt/sdk-ops/agent && docker build -t sdk-ops-agent:latest . 2>&1 || true")
-	runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true")
-	volumes := "-v /var/run/docker.sock:/var/run/docker.sock -v /opt/sdk-ops:/opt/sdk-ops:ro"
-	envFlags := ""
-	for _, e := range collectNotifyEnvVars() {
-		envFlags += fmt.Sprintf(" -e '%s'", e)
+	if _, err := runSSH(conn, "cd /opt/sdk-ops/agent && docker build -t sdk-ops-agent:latest . 2>&1 || true"); err != nil {
+		log.Printf("ssh: %v", err)
 	}
-	runSSH(conn, fmt.Sprintf("docker run -d --name sdk-ops-agent --restart unless-stopped %s %s -v sdk-ops-agent-data:/data sdk-ops-agent:latest", volumes, envFlags))
+	if _, err := runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	volumes := "-v /var/run/docker.sock:/var/run/docker.sock -v /opt/sdk-ops:/opt/sdk-ops:ro"
+	var envFlags strings.Builder
+	for _, e := range collectNotifyEnvVars() {
+		fmt.Fprintf(&envFlags, " -e '%s'", e)
+	}
+	if _, err := runSSH(conn, fmt.Sprintf("docker run -d --name sdk-ops-agent --restart unless-stopped %s %s -v sdk-ops-agent-data:/data sdk-ops-agent:latest", volumes, envFlags.String())); err != nil {
+		log.Printf("ssh: %v", err)
+	}
 	time.Sleep(3 * time.Second)
 	fmt.Printf("✅ Agent updated on %s (Docker)\n", nodeIP)
 	return nil
@@ -675,14 +716,14 @@ func collectNotifyEnvVars() []string {
 	return envs
 }
 
-func runSSH(conn *goss.Client, cmd string) (string, string, error) {
+func runSSH(conn *goss.Client, cmd string) (string, error) {
 	sess, err := conn.NewSession()
 	if err != nil {
-		return "", "", fmt.Errorf("session: %w", err)
+		return "", fmt.Errorf("session: %w", err)
 	}
 	defer sess.Close()
 	out, err := sess.CombinedOutput(cmd)
-	return string(out), "", err
+	return string(out), err
 }
 
 func streamSSH(conn *goss.Client, cmd string) error {

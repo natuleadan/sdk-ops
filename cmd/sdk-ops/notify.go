@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -86,56 +84,4 @@ func newNotifyCmd() *cobra.Command {
 	return cmd
 }
 
-func getEnv(key string) string {
-	return os.Getenv(key)
-}
 
-func getEnvInt(key string) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return 0
-	}
-	var n int
-	fmt.Sscanf(v, "%d", &n)
-	return n
-}
-
-func configFromEnvNotify() notify.Config {
-	cfg := notify.Config{}
-
-	if v := getEnv("SDK_OPS_SLACK_WEBHOOK"); v != "" {
-		cfg.SlackWebhook = v
-	}
-	if v := getEnv("SDK_OPS_DISCORD_WEBHOOK"); v != "" {
-		cfg.DiscordWebhook = v
-	}
-	if v := getEnv("SDK_OPS_TELEGRAM_TOKEN"); v != "" {
-		cfg.TelegramToken = v
-	}
-	if v := getEnv("SDK_OPS_TELEGRAM_CHAT_ID"); v != "" {
-		cfg.TelegramChatID = v
-	}
-	if v := getEnv("SDK_OPS_SMTP_HOST"); v != "" {
-		cfg.SMTPHost = v
-	}
-	if v := getEnvInt("SDK_OPS_SMTP_PORT"); v != 0 {
-		cfg.SMTPPort = v
-	}
-	if v := getEnv("SDK_OPS_SMTP_USER"); v != "" {
-		cfg.SMTPUser = v
-	}
-	if v := getEnv("SDK_OPS_SMTP_PASS"); v != "" {
-		cfg.SMTPPass = v
-	}
-	if v := getEnv("SDK_OPS_SMTP_FROM"); v != "" {
-		cfg.SMTPFrom = v
-	}
-	if v := getEnv("SDK_OPS_SMTP_TO"); v != "" {
-		cfg.SMTPTo = strings.Split(v, ",")
-	}
-	if v := getEnv("SDK_OPS_WEBHOOK_URL"); v != "" {
-		cfg.WebhookURL = v
-	}
-
-	return cfg
-}

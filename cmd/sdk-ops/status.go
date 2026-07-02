@@ -147,11 +147,12 @@ Examples:
 
 					agentOut, _, _ := ssh.Run(conn, `curl -s --max-time 3 http://localhost:9000/health 2>/dev/null || echo 'unreachable'`)
 					agentOut = strings.TrimSpace(agentOut)
-					if strings.Contains(agentOut, `"status":"ok"`) {
+					switch {
+					case strings.Contains(agentOut, `"status":"ok"`):
 						r.agent = "healthy"
-					} else if agentOut == "unreachable" {
+					case agentOut == "unreachable":
 						r.agent = "offline"
-					} else {
+					default:
 						r.agent = "unknown"
 					}
 				}(n)
@@ -183,11 +184,12 @@ Examples:
 				}
 				runtimeLabel := ""
 				if r.rt != nil {
-					if r.rt.DockerOK == "yes" && r.rt.K3sRunning == "yes" {
+					switch {
+					case r.rt.DockerOK == "yes" && r.rt.K3sRunning == "yes":
 						runtimeLabel = "docker+k3s"
-					} else if r.rt.K3sRunning == "yes" {
+					case r.rt.K3sRunning == "yes":
 						runtimeLabel = "k3s"
-					} else if r.rt.DockerOK == "yes" {
+					case r.rt.DockerOK == "yes":
 						runtimeLabel = "docker"
 					}
 				}

@@ -78,14 +78,13 @@ func (c *Client) GetVPS(ctx context.Context, id string) (*providers.VPS, error) 
 	if err != nil {
 		return nil, fmt.Errorf("aws get instance: %w", err)
 	}
-	for _, r := range result.Reservations {
-		for _, inst := range r.Instances {
-			v := &providers.VPS{ID: aws.ToString(inst.InstanceId)}
-			if inst.PublicIpAddress != nil {
-				v.IP = *inst.PublicIpAddress
-			}
-			return v, nil
+	if len(result.Reservations) > 0 && len(result.Reservations[0].Instances) > 0 {
+		inst := result.Reservations[0].Instances[0]
+		v := &providers.VPS{ID: aws.ToString(inst.InstanceId)}
+		if inst.PublicIpAddress != nil {
+			v.IP = *inst.PublicIpAddress
 		}
+		return v, nil
 	}
 	return nil, fmt.Errorf("aws instance %s not found", id)
 }

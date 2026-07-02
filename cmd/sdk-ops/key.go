@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 )
@@ -41,7 +44,13 @@ func newKeyCmd() *cobra.Command {
 			}
 
 			argsCmd := []string{"-t", keyType, "-f", privPath, "-N", "", "-C", "sdk-ops " + name}
-			cmdExec := exec.Command("ssh-keygen", argsCmd...)
+			if !validateKeyType(keyType) {
+				return fmt.Errorf("unsupported key type: %q (use: ed25519, rsa, ecdsa)", keyType)
+			}
+			if !validateFileName(name) {
+				return fmt.Errorf("invalid key name: %q", name)
+			}
+			cmdExec := exec.CommandContext(context.Background(), "ssh-keygen", argsCmd...)
 			if out, err := cmdExec.CombinedOutput(); err != nil {
 				return fmt.Errorf("ssh-keygen: %w\n%s", err, string(out))
 			}
@@ -112,7 +121,7 @@ func newKeyCmd() *cobra.Command {
 			}
 
 			pubPath := filepath.Join(keyDir, name+".pub")
-			pubData, err := os.ReadFile(pubPath)
+			pubData, err := os.ReadFile(filepath.Clean(pubPath))
 			if err != nil {
 				return fmt.Errorf("read public key: %w", err)
 			}
@@ -145,6 +154,26 @@ func newKeyCmd() *cobra.Command {
 	cmd.AddCommand(listCmd)
 	cmd.AddCommand(deployCmd)
 	return cmd
+}
+
+func validateKeyType(t string) bool {
+	switch t {
+	case "ed25519", "rsa", "ecdsa", "ecdsa-sk", "ed25519-sk", "dsa":
+		return true
+	}
+	return false
+}
+
+func validateFileName(name string) bool {
+	if name == "" || strings.ContainsAny(name, "/\\;|&`$(){}<>! '\"") {
+		return false
+	}
+	for _, r := range name {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' && r != '_' && r != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 func splitAtLast(s, sep string) []string {

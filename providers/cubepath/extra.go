@@ -35,7 +35,7 @@ func (c *Client) CreateBareMetal(ctx context.Context, cfg providers.BareMetalCre
 	}
 
 	path := fmt.Sprintf("/baremetal/deploy/%d", c.projectID)
-	respBody, err := c.do("POST", path, body)
+	respBody, err := c.do(ctx, "POST", path, body)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath deploy baremetal: %w", err)
 	}
@@ -65,11 +65,11 @@ func (c *Client) CreateBareMetal(ctx context.Context, cfg providers.BareMetalCre
 }
 
 func (c *Client) DeleteBareMetal(ctx context.Context, id string) error {
-	return fmt.Errorf("cubepath: bare metal cannot be destroyed via API (physical hardware). Contact support.")
+	return fmt.Errorf("cubepath: bare metal cannot be destroyed via API (physical hardware). Contact support")
 }
 
 func (c *Client) ListBareMetal(ctx context.Context) ([]providers.BareMetal, error) {
-	respBody, err := c.do("GET", "/baremetal/", nil)
+	respBody, err := c.do(ctx, "GET", "/baremetal/", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath list baremetal: %w", err)
 	}

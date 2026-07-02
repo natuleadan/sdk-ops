@@ -44,7 +44,7 @@ func (c *Client) CreateVPS(ctx context.Context, cfg providers.VPSCreateConfig) (
 	}
 
 	path := fmt.Sprintf("/vps/create/%d", c.projectID)
-	respBody, err := c.do("POST", path, body)
+	respBody, err := c.do(ctx, "POST", path, body)
 	if err != nil {
 		return nil, fmt.Errorf("create vps: %w", err)
 	}
@@ -76,7 +76,7 @@ func (c *Client) CreateVPS(ctx context.Context, cfg providers.VPSCreateConfig) (
 
 	// Wait for VPS to become active
 	fmt.Printf("  Waiting for VPS %s to become active (current: %s)...\n", vps.ID, vps.Status)
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		time.Sleep(5 * time.Second)
 		current, err := c.GetVPS(ctx, vps.ID)
 		if err == nil && current.Status == "active" {
@@ -94,7 +94,7 @@ func (c *Client) CreateVPS(ctx context.Context, cfg providers.VPSCreateConfig) (
 }
 
 func (c *Client) DeleteVPS(ctx context.Context, id string) error {
-	_, err := c.do("POST", "/vps/destroy/"+id, nil)
+	_, err := c.do(ctx, "POST", "/vps/destroy/"+id, nil)
 	if err != nil {
 		return fmt.Errorf("delete vps: %w", err)
 	}
@@ -102,7 +102,7 @@ func (c *Client) DeleteVPS(ctx context.Context, id string) error {
 }
 
 func (c *Client) ListVPS(ctx context.Context) ([]providers.VPS, error) {
-	respBody, err := c.do("GET", "/projects/", nil)
+	respBody, err := c.do(ctx, "GET", "/projects/", nil)
 	if err != nil {
 		return nil, fmt.Errorf("list vps: %w", err)
 	}

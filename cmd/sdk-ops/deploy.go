@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,10 +21,6 @@ import (
 	"github.com/natuleadan/sdk-ops/ssh"
 	"github.com/natuleadan/sdk-ops/templates"
 )
-
-func RunCommand(name string, arg ...string) *exec.Cmd {
-	return exec.Command(name, arg...)
-}
 
 func newDeployCmd() *cobra.Command {
 	var cmd = &cobra.Command{
@@ -72,7 +69,7 @@ Examples:
 				}
 				cloneArgs = append(cloneArgs, gitURL, tmpDir)
 
-				cloneCmd := RunCommand("git", cloneArgs...)
+				cloneCmd := exec.CommandContext(context.Background(), "git", cloneArgs...)
 				if gitSSHKey != "" {
 					cloneCmd.Env = append(os.Environ(),
 						fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=no", gitSSHKey))
@@ -307,11 +304,8 @@ Examples:
 				}
 				stopSpinner("Deployed v" + result.Version)
 
-				if runtimeMode == "k3s" {
-					domain := deployDomain
-					if domain == "" {
-						domain = name + ".local"
-					}
+				switch runtimeMode {
+				case "k3s":
 					versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
 					if err := deploy.DeployK3sFromCompose(conn, name, versionDir, imageRef); err != nil {
 						return fmt.Errorf("k3s deploy: %w", err)
@@ -319,23 +313,24 @@ Examples:
 					if deployDomain != "" {
 						fmt.Printf("  → Access at http://%s/\n", deployDomain)
 					}
-				} else if runtimeMode == "swarm" {
+				case "swarm":
 					versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
 					if err := deploy.DeploySwarm(conn, name, versionDir, imageRef); err != nil {
 						return fmt.Errorf("swarm deploy: %w", err)
 					}
-				} else if runtimeMode == "bare" {
+				case "bare":
 					versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
 					if err := deploy.DeployBare(conn, name, versionDir); err != nil {
 						return fmt.Errorf("bare deploy: %w", err)
 					}
-				} else if zeroDowntime {
-					serviceDir := fmt.Sprintf("/opt/sdk-ops/services/%s", name)
-					if err := deploy.DeployBlueGreen(conn, name, serviceDir, result.Version); err != nil {
-						return fmt.Errorf("blue/green: %w", err)
-					}
-				} else {
-					svcCfg := deploy.ServiceConfig{
+				default:
+					if zeroDowntime {
+						serviceDir := fmt.Sprintf("/opt/sdk-ops/services/%s", name)
+						if err := deploy.DeployBlueGreen(conn, name, serviceDir, result.Version); err != nil {
+							return fmt.Errorf("blue/green: %w", err)
+						}
+					} else {
+						svcCfg := deploy.ServiceConfig{
 						Name:          name,
 						HealthURL:     healthURL,
 						HealthTimeout: healthTimeout,
@@ -353,6 +348,7 @@ Examples:
 						return fmt.Errorf("health check failed on %s, rolled back", nip)
 					}
 				}
+			}
 
 				// Run post-deploy hooks
 				hooks.Run(conn, "post-deploy", map[string]string{

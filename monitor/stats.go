@@ -65,7 +65,7 @@ echo "NET_OUT=$(cat /proc/net/dev | awk '/eth0/ {print $10}' || cat /proc/net/de
 	}
 
 	stats := &NodeStats{}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.Contains(line, "=") {
 			continue
@@ -130,7 +130,7 @@ echo "DOCKER_OK=$DOCKER_OK"
 echo "POD_COUNT=$POD_COUNT"
 `
 	out, _, _ := ssh.Run(client, script)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.Contains(line, "=") {
 			continue
@@ -164,7 +164,7 @@ func GetTopProcesses(client *goss.Client, count int) ([]Process, error) {
 	}
 
 	var procs []Process
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -200,10 +200,7 @@ func RunInteractive(client *goss.Client, cmd string) error {
 }
 
 func bar(pct int, width int) string {
-	filled := pct * width / 100
-	if filled > width {
-		filled = width
-	}
+	filled := min(pct*width/100, width)
 	if filled < 0 {
 		filled = 0
 	}
@@ -228,23 +225,23 @@ func FormatStats(stats *NodeStats, runtime *RuntimeStatus, procs []Process) stri
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("\n  ┌─ Node: %s (%s)\n", stats.Hostname, stats.Kernel))
-	b.WriteString(fmt.Sprintf("  ├─ Uptime: %s\n", stats.Uptime))
-	b.WriteString(fmt.Sprintf("  ├─ CPU:    %s %3s  (%d cores, load: %s)\n", bar(memPct, 20), stats.Memory, stats.CPUCores, stats.CPULoad))
-	b.WriteString(fmt.Sprintf("  ├─ RAM:    %s %3s  (%s / %s)\n", bar(memPct, 20), stats.Memory, stats.MemUsed, stats.MemTotal))
-	b.WriteString(fmt.Sprintf("  ├─ DISK:   %s %3s  (%s / %s)\n", bar(diskPct, 20), stats.Disk, stats.DiskUsed, stats.DiskSize))
-	b.WriteString(fmt.Sprintf("  ├─ NET:    ↑ %s  ↓ %s\n", stats.NetOut, stats.NetIn))
+	fmt.Fprintf(&b, "\n  ┌─ Node: %s (%s)\n", stats.Hostname, stats.Kernel)
+	fmt.Fprintf(&b, "  ├─ Uptime: %s\n", stats.Uptime)
+	fmt.Fprintf(&b, "  ├─ CPU:    %s %3s  (%d cores, load: %s)\n", bar(memPct, 20), stats.Memory, stats.CPUCores, stats.CPULoad)
+	fmt.Fprintf(&b, "  ├─ RAM:    %s %3s  (%s / %s)\n", bar(memPct, 20), stats.Memory, stats.MemUsed, stats.MemTotal)
+	fmt.Fprintf(&b, "  ├─ DISK:   %s %3s  (%s / %s)\n", bar(diskPct, 20), stats.Disk, stats.DiskUsed, stats.DiskSize)
+	fmt.Fprintf(&b, "  ├─ NET:    ↑ %s  ↓ %s\n", stats.NetOut, stats.NetIn)
 
 	// Runtime services
 	if runtime != nil {
 		if runtime.K3sVersion != "" {
-			b.WriteString(fmt.Sprintf("  ├─ K3s:    %s v%s  (%s)\n", statusIcon(runtime.K3sRunning), runtime.K3sVersion, runtime.K3sRunning))
+			fmt.Fprintf(&b, "  ├─ K3s:    %s v%s  (%s)\n", statusIcon(runtime.K3sRunning), runtime.K3sVersion, runtime.K3sRunning)
 		}
 		if runtime.DockerVer != "" {
-			b.WriteString(fmt.Sprintf("  ├─ Docker: %s v%s  (%s)\n", statusIcon(runtime.DockerOK), runtime.DockerVer, runtime.DockerOK))
+			fmt.Fprintf(&b, "  ├─ Docker: %s v%s  (%s)\n", statusIcon(runtime.DockerOK), runtime.DockerVer, runtime.DockerOK)
 		}
 		if runtime.K3sRunning == "active" {
-			b.WriteString(fmt.Sprintf("  ├─ Pods:   %s running\n", runtime.PodCount))
+			fmt.Fprintf(&b, "  ├─ Pods:   %s running\n", runtime.PodCount)
 		}
 	}
 
@@ -252,7 +249,7 @@ func FormatStats(stats *NodeStats, runtime *RuntimeStatus, procs []Process) stri
 		b.WriteString("  └─ Top processes:\n")
 		b.WriteString("       PID    CPU%   MEM%  USER       COMMAND\n")
 		for _, p := range procs {
-			b.WriteString(fmt.Sprintf("       %-5d  %5.1f  %5.1f  %-10s %s\n", p.PID, p.CPU, p.MEM, p.User, p.Cmd))
+			fmt.Fprintf(&b, "       %-5d  %5.1f  %5.1f  %-10s %s\n", p.PID, p.CPU, p.MEM, p.User, p.Cmd)
 		}
 	}
 	b.WriteString("\n")

@@ -28,7 +28,7 @@ type RootConfig struct {
 
 func configDir() string {
 	dir := os.ExpandEnv("$HOME/.sdk-ops")
-	os.MkdirAll(dir, 0700)
+	func() { if err := os.MkdirAll(dir, 0700); err != nil { fmt.Fprintf(os.Stderr, "mkdir: %v\n", err) } }()
 	return dir
 }
 
@@ -157,10 +157,6 @@ func newConfigCmd() *cobra.Command {
 				return nil
 			}
 			for _, n := range cfg.Nodes {
-				host := n.Hostname
-				if host == "" {
-					host = "-"
-				}
 				fmt.Printf("  %s  user=%s  port=%d  mode=%s\n", n.IP, n.User, n.Port, n.Mode)
 			}
 			return nil

@@ -1,10 +1,10 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -39,7 +39,7 @@ func (s *Scheduler) stop() {
 }
 
 func (s *Scheduler) loadSchedules() {
-	rows, err := s.db.Query(`SELECT id, name, cron_expr, task_type, task_config, notify_on FROM schedules WHERE enabled = 1`)
+	rows, err := s.db.QueryContext(context.Background(), `SELECT id, name, cron_expr, task_type, task_config, notify_on FROM schedules WHERE enabled = 1`)
 	if err != nil {
 		log.Printf("scheduler: load schedules: %v", err)
 		return
@@ -162,7 +162,4 @@ func runShellCommand(cmdStr string) (string, string) {
 	return "ok", string(out)
 }
 
-func envBool(key string) bool {
-	v := os.Getenv(key)
-	return v == "1" || v == "true" || v == "yes"
-}
+

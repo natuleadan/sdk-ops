@@ -99,22 +99,6 @@ func stateRecord(resType, name, nodeIP, version, runtime, status string, meta ma
 	saveState(s)
 }
 
-func stateRemove(resType, name, nodeIP string) {
-	s, err := loadState()
-	if err != nil {
-		return
-	}
-	id := fmt.Sprintf("%s/%s/%s", nodeIP, resType, name)
-	var updated []Resource
-	for _, r := range s.Resources {
-		if r.ID != id {
-			updated = append(updated, r)
-		}
-	}
-	s.Resources = updated
-	saveState(s)
-}
-
 func newStateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "state",
@@ -165,11 +149,12 @@ func newStateCmd() *cobra.Command {
 			fmt.Println(strings.Repeat("  ", 1) + strings.Repeat("─", 75))
 			for _, r := range rows {
 				statusColor := colorGreen
-				if r.Status == "unhealthy" || r.Status == "error" {
-					statusColor = colorRed
-				} else if r.Status == "warning" {
-					statusColor = colorYellow
-				}
+			switch r.Status {
+			case "unhealthy", "error":
+				statusColor = colorRed
+			case "warning":
+				statusColor = colorYellow
+			}
 				ver := r.Version
 				if ver == "" {
 					ver = "-"
@@ -292,7 +277,7 @@ databases, and backup schedules, updating the state file.`,
 
 					// Running containers (possible databases)
 					dbContainers, _, _ := ssh.Run(conn, `docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null | grep -E '(postgres|mysql|redis|mongo)' || true`)
-					for _, line := range strings.Split(dbContainers, "\n") {
+					for line := range strings.SplitSeq(dbContainers, "\n") {
 						line = strings.TrimSpace(line)
 						if line == "" {
 							continue
@@ -302,13 +287,7 @@ databases, and backup schedules, updating the state file.`,
 							name := parts[0]
 							img := parts[1]
 							dbType := "database"
-							if strings.Contains(img, "postgres") {
-								dbType = "database"
-							} else if strings.Contains(img, "mysql") || strings.Contains(img, "mariadb") {
-								dbType = "database"
-							} else if strings.Contains(img, "redis") {
-								dbType = "database"
-							} else if strings.Contains(img, "mongo") {
+							if strings.Contains(img, "postgres") || strings.Contains(img, "mysql") || strings.Contains(img, "mariadb") || strings.Contains(img, "redis") || strings.Contains(img, "mongo") {
 								dbType = "database"
 							}
 							mu.Lock()

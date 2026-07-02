@@ -2,6 +2,7 @@ package notify
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,14 +17,19 @@ func NewDiscord(webhookURL string) *Discord {
 }
 
 func (d *Discord) Send(title, message string) error {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"content": fmt.Sprintf("**%s**\n%s", title, message),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("discord marshal: %w", err)
 	}
-	resp, err := http.Post(d.webhookURL, "application/json", bytes.NewReader(body))
+	req, reqErr := http.NewRequestWithContext(context.Background(), "POST", d.webhookURL, bytes.NewReader(body))
+	if reqErr != nil {
+		return fmt.Errorf("discord request: %w", reqErr)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("discord post: %w", err)
 	}

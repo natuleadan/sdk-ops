@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"os"
+	"slices"
 	"testing"
 	"time"
 )
@@ -16,7 +18,7 @@ func TestInitDB(t *testing.T) {
 
 	// Verify tables exist
 	var tables []string
-	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+	rows, err := db.QueryContext(context.Background(), "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
 	if err != nil {
 		t.Fatalf("query tables: %v", err)
 	}
@@ -31,13 +33,7 @@ func TestInitDB(t *testing.T) {
 
 	expected := []string{"audit", "metrics", "schedules"}
 	for _, e := range expected {
-		found := false
-		for _, tt := range tables {
-			if tt == e {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(tables, e)
 		if !found {
 			t.Errorf("table %q not found in %v", e, tables)
 		}

@@ -1,0 +1,39 @@
+version: "2"
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - bodyclose
+    - noctx
+    - sqlclosecheck
+    - gocritic
+    - gocyclo
+    - misspell
+    - unconvert
+    - unparam
+
+  settings:
+    gosec:
+      severity: medium
+      confidence: high
+    gocyclo:
+      min-complexity: 15
+
+  exclusions:
+    paths:
+      - .*\.pb\.go
+      - internal/mock/
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - bodyclose

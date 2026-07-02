@@ -116,7 +116,7 @@ func TestRunDockerCleanup(t *testing.T) {
 	_ = message
 }
 
-func TestRunBackupServicesNoDir(t *testing.T) {
+func TestRunBackupServicesNoDir(_ *testing.T) {
 	// Without /opt/sdk-ops/services, this should still not panic
 	status, message := runBackupServices()
 	// tar will fail because /opt/sdk-ops doesn't exist in test env
@@ -136,14 +136,14 @@ func TestSchedulerConcurrentAccess(t *testing.T) {
 
 	// Access entryIDs from multiple goroutines
 	done := make(chan bool, 10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			s.loadSchedules()
 			done <- true
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }

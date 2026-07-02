@@ -26,7 +26,7 @@ func (c *Client) CreateLB(ctx context.Context, cfg providers.LBCreateConfig) (*p
 		"load_balancer_type": cfg.Plan,
 		"location":          cfg.Location,
 	}
-	resp, err := c.raw().do("POST", "/load_balancers", body)
+	resp, err := c.raw().do(ctx, "POST", "/load_balancers", body)
 	if err != nil {
 		return nil, fmt.Errorf("hetzner create lb: %w", err)
 	}
@@ -44,12 +44,12 @@ func (c *Client) CreateLB(ctx context.Context, cfg providers.LBCreateConfig) (*p
 }
 
 func (c *Client) DeleteLB(ctx context.Context, id string) error {
-	_, err := c.raw().do("DELETE", "/load_balancers/"+id, nil)
+	_, err := c.raw().do(ctx, "DELETE", "/load_balancers/"+id, nil)
 	return err
 }
 
 func (c *Client) ListLB(ctx context.Context) ([]providers.LoadBalancer, error) {
-	resp, err := c.raw().do("GET", "/load_balancers", nil)
+	resp, err := c.raw().do(ctx, "GET", "/load_balancers", nil)
 	if err != nil {
 		return nil, fmt.Errorf("hetzner list lb: %w", err)
 	}
@@ -73,7 +73,7 @@ func (c *Client) ListDNSZones(ctx context.Context) ([]providers.DNSZone, error) 
 		baseURL: "https://dns.hetzner.com/api/v1",
 		http:    c.raw().http,
 	}
-	resp, err := hc.do("GET", "/zones", nil)
+	resp, err := hc.do(ctx, "GET", "/zones", nil)
 	if err != nil {
 		return nil, fmt.Errorf("hetzner dns list zones: %w", err)
 	}
@@ -106,7 +106,7 @@ func (c *Client) CreateDNSRecord(ctx context.Context, zoneID string, r providers
 		"value":   r.Value,
 		"ttl":     r.TTL,
 	}
-	_, err := hc.do("POST", "/records", body)
+	_, err := hc.do(ctx, "POST", "/records", body)
 	return err
 }
 
@@ -116,7 +116,7 @@ func (c *Client) DeleteDNSRecord(ctx context.Context, zoneID, recordID string) e
 		baseURL: "https://dns.hetzner.com/api/v1",
 		http:    c.raw().http,
 	}
-	_, err := hc.do("DELETE", "/records/"+recordID, nil)
+	_, err := hc.do(ctx, "DELETE", "/records/"+recordID, nil)
 	return err
 }
 

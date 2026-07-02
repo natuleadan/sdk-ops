@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -113,7 +114,7 @@ func UploadAndDeploy(client *goss.Client, cfg UploadConfig) (*DeployResult, erro
 			return err
 		}
 		if !info.IsDir() {
-			f, err := os.Open(path)
+			f, err := os.Open(filepath.Clean(path))
 			if err != nil {
 				return err
 			}
@@ -241,6 +242,12 @@ type RegistryConfig struct {
 	Password string
 }
 
+func (r RegistryConfig) Valid() bool {
+	return r.Server != "" && !strings.ContainsAny(r.Server, " \t\n\r;|&") &&
+		r.Username != "" && !strings.ContainsAny(r.Username, " \t\n\r;|&") &&
+		r.Password != ""
+}
+
 func DefaultRegistry() RegistryConfig {
 	return RegistryConfig{
 		Server:   os.Getenv("REGISTRY_SERVER"),
@@ -256,16 +263,16 @@ func GenerateCompose(imageRef, serviceName string, port int, hasDB bool) []byte 
 		port = 8080
 	}
 
-	buf.WriteString(fmt.Sprintf(`services:
+	fmt.Fprintf(&buf, `services:
   %[1]s:
     image: %[2]s
     ports:
       - "%[3]d:%[3]d"
     working_dir: /app
-`, serviceName, imageRef, port))
+`, serviceName, imageRef, port)
 
 	if hasDB {
-		buf.WriteString(fmt.Sprintf(`    volumes:
+		fmt.Fprintf(&buf, `    volumes:
       - ./service.yaml:/app/service.yaml
     depends_on:
       %[1]s-db:
@@ -284,10 +291,10 @@ func GenerateCompose(imageRef, serviceName string, port int, hasDB bool) []byte 
       timeout: 5s
       retries: 5
     restart: unless-stopped
-`, serviceName))
+`, serviceName)
 	} else {
-		buf.WriteString(fmt.Sprintf(`    restart: unless-stopped
-`))
+		buf.WriteString(`    restart: unless-stopped
+`)
 	}
 
 	return buf.Bytes()
@@ -331,13 +338,13 @@ CMD ["/healthz-svc"]
 `, binaryName)
 
 	dockerfilePath := filepath.Join(dir, "Dockerfile.deploy")
-	if err := os.WriteFile(dockerfilePath, []byte(dockerfileContent), 0644); err != nil {
+	if err := os.WriteFile(dockerfilePath, []byte(dockerfileContent), 0600); err != nil {
 		return "", fmt.Errorf("write Dockerfile: %w", err)
 	}
 
 	// Step 3: Login to registry
 	fmt.Printf("  → Logging in to %s...\n", reg.Server)
-	login := exec.Command("docker", "login", reg.Server,
+	login := exec.CommandContext(context.Background(), "docker", "login", reg.Server,
 		"-u", reg.Username,
 		"-p", reg.Password)
 	login.Stdout = os.Stdout

@@ -151,13 +151,14 @@ Examples:
 
 				var nodes []NodeConfig
 				for _, n := range cfg.Nodes {
-					if runAll {
+					switch {
+					case runAll:
 						nodes = append(nodes, n)
-					} else if runServers && runAgents {
+					case runServers && runAgents:
 						nodes = append(nodes, n)
-					} else if runServers && n.Role == "server" {
+					case runServers && n.Role == "server":
 						nodes = append(nodes, n)
-					} else if runAgents && n.Role == "agent" {
+					case runAgents && n.Role == "agent":
 						nodes = append(nodes, n)
 					}
 				}

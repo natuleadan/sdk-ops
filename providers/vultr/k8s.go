@@ -10,7 +10,7 @@ import (
 )
 
 func (c *Client) CreateK8s(ctx context.Context, cfg providers.K8sCreateConfig) (*providers.K8sCluster, error) {
-	cluster, _, err := c.client.Kubernetes.CreateCluster(ctx, &govultr.ClusterReq{
+	cluster, resp, err := c.client.Kubernetes.CreateCluster(ctx, &govultr.ClusterReq{
 		Label:   cfg.Name,
 		Region:  cfg.Location,
 		Version: cfg.Version,
@@ -20,6 +20,9 @@ func (c *Client) CreateK8s(ctx context.Context, cfg providers.K8sCreateConfig) (
 			Label:        "default",
 		}},
 	})
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create k8s: %w", err)
 	}
@@ -39,7 +42,10 @@ func (c *Client) DeleteK8s(ctx context.Context, id string) error {
 }
 
 func (c *Client) ListK8s(ctx context.Context) ([]providers.K8sCluster, error) {
-	clusters, meta, _, err := c.client.Kubernetes.ListClusters(ctx, &govultr.ListOptions{})
+	clusters, meta, resp, err := c.client.Kubernetes.ListClusters(ctx, &govultr.ListOptions{})
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list k8s: %w", err)
 	}
@@ -54,7 +60,10 @@ func (c *Client) ListK8s(ctx context.Context) ([]providers.K8sCluster, error) {
 }
 
 func (c *Client) GetK8s(ctx context.Context, id string) (*providers.K8sCluster, error) {
-	cl, _, err := c.client.Kubernetes.GetCluster(ctx, id)
+	cl, resp, err := c.client.Kubernetes.GetCluster(ctx, id)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr get k8s: %w", err)
 	}
@@ -62,7 +71,10 @@ func (c *Client) GetK8s(ctx context.Context, id string) (*providers.K8sCluster, 
 }
 
 func (c *Client) GetKubeconfig(ctx context.Context, id string) (string, error) {
-	kc, _, err := c.client.Kubernetes.GetKubeConfig(ctx, id)
+	kc, resp, err := c.client.Kubernetes.GetKubeConfig(ctx, id)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return "", fmt.Errorf("vultr kubeconfig: %w", err)
 	}

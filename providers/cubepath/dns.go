@@ -16,7 +16,7 @@ type dnsRecordReq struct {
 }
 
 func (c *Client) ListDNSZones(ctx context.Context) ([]providers.DNSZone, error) {
-	resp, err := c.do("GET", "/dns/zones", nil)
+	resp, err := c.do(ctx, "GET", "/dns/zones", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath list dns zones: %w", err)
 	}
@@ -41,11 +41,11 @@ func (c *Client) CreateDNSRecord(ctx context.Context, zoneID string, r providers
 		Content: r.Value,
 		TTL:     r.TTL,
 	}
-	_, err := c.do("POST", fmt.Sprintf("/dns/zones/%s/records", zoneID), body)
+	_, err := c.do(ctx, "POST", fmt.Sprintf("/dns/zones/%s/records", zoneID), body)
 	return err
 }
 
 func (c *Client) DeleteDNSRecord(ctx context.Context, zoneID, recordID string) error {
-	_, err := c.do("DELETE", fmt.Sprintf("/dns/zones/%s/records/%s", zoneID, recordID), nil)
+	_, err := c.do(ctx, "DELETE", fmt.Sprintf("/dns/zones/%s/records/%s", zoneID, recordID), nil)
 	return err
 }

@@ -24,7 +24,7 @@ func (c *Client) CreateLB(ctx context.Context, cfg providers.LBCreateConfig) (*p
 		Location:  cfg.Location,
 		ProjectID: c.projectID,
 	}
-	resp, err := c.do("POST", "/loadbalancer/", body)
+	resp, err := c.do(ctx, "POST", "/loadbalancer/", body)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath create lb: %w", err)
 	}
@@ -40,12 +40,12 @@ func (c *Client) CreateLB(ctx context.Context, cfg providers.LBCreateConfig) (*p
 }
 
 func (c *Client) DeleteLB(ctx context.Context, id string) error {
-	_, err := c.do("DELETE", "/loadbalancer/"+id, nil)
+	_, err := c.do(ctx, "DELETE", "/loadbalancer/"+id, nil)
 	return err
 }
 
 func (c *Client) ListLB(ctx context.Context) ([]providers.LoadBalancer, error) {
-	resp, err := c.do("GET", "/loadbalancer/", nil)
+	resp, err := c.do(ctx, "GET", "/loadbalancer/", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath list lb: %w", err)
 	}
@@ -72,7 +72,7 @@ type lbListenerRequest struct {
 
 func (c *Client) CreateLBListener(ctx context.Context, lbID string, cfg providers.LBListenerConfig) (*providers.LBListener, error) {
 	body := lbListenerRequest{Port: cfg.Port, TargetPort: cfg.TargetPort, Protocol: cfg.Protocol}
-	resp, err := c.do("POST", "/loadbalancer/"+lbID+"/listeners", body)
+	resp, err := c.do(ctx, "POST", "/loadbalancer/"+lbID+"/listeners", body)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath create listener: %w", err)
 	}
@@ -87,7 +87,7 @@ func (c *Client) CreateLBListener(ctx context.Context, lbID string, cfg provider
 
 func (c *Client) UpdateLBListener(ctx context.Context, lbID, listenerID string, cfg providers.LBListenerConfig) (*providers.LBListener, error) {
 	body := lbListenerRequest{Port: cfg.Port, TargetPort: cfg.TargetPort, Protocol: cfg.Protocol}
-	resp, err := c.do("PATCH", "/loadbalancer/"+lbID+"/listeners/"+listenerID, body)
+	resp, err := c.do(ctx, "PATCH", "/loadbalancer/"+lbID+"/listeners/"+listenerID, body)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath update listener: %w", err)
 	}
@@ -99,12 +99,12 @@ func (c *Client) UpdateLBListener(ctx context.Context, lbID, listenerID string, 
 }
 
 func (c *Client) DeleteLBListener(ctx context.Context, lbID, listenerID string) error {
-	_, err := c.do("DELETE", "/loadbalancer/"+lbID+"/listeners/"+listenerID, nil)
+	_, err := c.do(ctx, "DELETE", "/loadbalancer/"+lbID+"/listeners/"+listenerID, nil)
 	return err
 }
 
 func (c *Client) SetLBHealthCheck(ctx context.Context, lbID, listenerID string, cfg providers.LBHealthCheckConfig) error {
-	_, err := c.do("PUT", fmt.Sprintf("/loadbalancer/%s/listeners/%s/health-check", lbID, listenerID), cfg)
+	_, err := c.do(ctx, "PUT", fmt.Sprintf("/loadbalancer/%s/listeners/%s/health-check", lbID, listenerID), cfg)
 	return err
 }
 
@@ -117,7 +117,7 @@ type lbTargetRequest struct {
 
 func (c *Client) AddLBTarget(ctx context.Context, lbID, listenerID string, cfg providers.LBTargetConfig) (*providers.LBTarget, error) {
 	body := lbTargetRequest{Type: cfg.Type, TargetID: cfg.TargetID, Port: cfg.Port, Weight: cfg.Weight}
-	resp, err := c.do("POST", fmt.Sprintf("/loadbalancer/%s/listeners/%s/targets", lbID, listenerID), body)
+	resp, err := c.do(ctx, "POST", fmt.Sprintf("/loadbalancer/%s/listeners/%s/targets", lbID, listenerID), body)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath add target: %w", err)
 	}
@@ -129,7 +129,7 @@ func (c *Client) AddLBTarget(ctx context.Context, lbID, listenerID string, cfg p
 }
 
 func (c *Client) ListLBTargets(ctx context.Context, lbID, listenerID string) ([]providers.LBTarget, error) {
-	resp, err := c.do("GET", fmt.Sprintf("/loadbalancer/%s/listeners/%s/targets", lbID, listenerID), nil)
+	resp, err := c.do(ctx, "GET", fmt.Sprintf("/loadbalancer/%s/listeners/%s/targets", lbID, listenerID), nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath list targets: %w", err)
 	}
@@ -149,12 +149,12 @@ func (c *Client) ListLBTargets(ctx context.Context, lbID, listenerID string) ([]
 }
 
 func (c *Client) DrainLBTarget(ctx context.Context, lbID, listenerID, targetID string) error {
-	_, err := c.do("POST", fmt.Sprintf("/loadbalancer/%s/listeners/%s/targets/%s/drain", lbID, listenerID, targetID), nil)
+	_, err := c.do(ctx, "POST", fmt.Sprintf("/loadbalancer/%s/listeners/%s/targets/%s/drain", lbID, listenerID, targetID), nil)
 	return err
 }
 
 func (c *Client) ResizeLB(ctx context.Context, lbID, plan string) (*providers.LoadBalancer, error) {
-	resp, err := c.do("POST", "/loadbalancer/"+lbID+"/resize", map[string]string{"plan": plan})
+	resp, err := c.do(ctx, "POST", "/loadbalancer/"+lbID+"/resize", map[string]string{"plan": plan})
 	if err != nil {
 		return nil, fmt.Errorf("cubepath resize lb: %w", err)
 	}
@@ -166,7 +166,7 @@ func (c *Client) ResizeLB(ctx context.Context, lbID, plan string) (*providers.Lo
 }
 
 func (c *Client) GetLBMetrics(ctx context.Context, lbID string) (string, error) {
-	resp, err := c.do("GET", "/loadbalancer/"+lbID+"/metrics", nil)
+	resp, err := c.do(ctx, "GET", "/loadbalancer/"+lbID+"/metrics", nil)
 	if err != nil {
 		return "", fmt.Errorf("cubepath lb metrics: %w", err)
 	}
@@ -174,7 +174,7 @@ func (c *Client) GetLBMetrics(ctx context.Context, lbID string) (string, error) 
 }
 
 func (c *Client) ToggleLBProtection(ctx context.Context, lbID string) (*providers.LoadBalancer, error) {
-	_, err := c.do("POST", "/loadbalancer/"+lbID+"/protection", nil)
+	_, err := c.do(ctx, "POST", "/loadbalancer/"+lbID+"/protection", nil)
 	if err != nil {
 		return nil, fmt.Errorf("cubepath toggle lb protection: %w", err)
 	}

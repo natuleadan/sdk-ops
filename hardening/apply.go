@@ -2,6 +2,7 @@ package hardening
 
 import (
 	"fmt"
+	"strings"
 
 	goss "golang.org/x/crypto/ssh"
 
@@ -10,12 +11,12 @@ import (
 
 type Config struct {
 	User          string
-	SSHPort       int    // 0 = don't migrate, >0 = migrate SSH to this port (e.g. 2222)
+	SSHPort       int // 0 = don't migrate, >0 = migrate SSH to this port (e.g. 2222)
 	EnableMonitor bool
-	LockRoot      bool   // lock root password after creating sdkops user
-	EnableAuditd  bool   // install auditd
-	EnableLynis   bool   // install Lynis security auditor
-	EnableUSG     bool   // install Ubuntu Security Guide
+	LockRoot      bool // lock root password after creating sdkops user
+	EnableAuditd  bool // install auditd
+	EnableLynis   bool // install Lynis security auditor
+	EnableUSG     bool // install Ubuntu Security Guide
 }
 
 func DefaultConfig() Config {
@@ -79,11 +80,11 @@ func Check(client *goss.Client) (string, error) {
 		"command -v lynis &>/dev/null && echo 'lynis: OK' || echo 'lynis: MISSING'",
 		"command -v usg &>/dev/null && echo 'usg: OK' || echo 'usg: MISSING'",
 	}
-	cmd := ""
+	var cmd strings.Builder
 	for _, c := range checks {
-		cmd += c + "; "
+		cmd.WriteString(c + "; ")
 	}
-	out, _, err := ssh.Run(client, cmd)
+	out, _, err := ssh.Run(client, cmd.String())
 	if err != nil {
 		return "", fmt.Errorf("check: %w", err)
 	}

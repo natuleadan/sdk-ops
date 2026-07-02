@@ -70,6 +70,9 @@ func detectRuntime(client *goss.Client, dir, preferred string) string {
 func runDockerCompose(client *goss.Client, dir string) error {
 	out, _, err := ssh.Run(client, fmt.Sprintf(
 		`test -f "%s/docker-compose.yml" -o -f "%s/docker-compose.yaml" && echo yes || echo no`, dir, dir))
+	if err != nil {
+		return fmt.Errorf("check compose file on remote: %w", err)
+	}
 	if strings.TrimSpace(out) != "yes" {
 		fmt.Println("  → No docker-compose file, checking for Dockerfile...")
 		return buildAndRun(client, dir)
@@ -85,6 +88,9 @@ func runDockerCompose(client *goss.Client, dir string) error {
 func buildAndRun(client *goss.Client, dir string) error {
 	out, _, err := ssh.Run(client, fmt.Sprintf(
 		`test -f "%s/Dockerfile" && echo yes || echo no`, dir))
+	if err != nil {
+		fmt.Printf("  ⚠ Could not check for Dockerfile: %v\n", err)
+	}
 	if strings.TrimSpace(out) != "yes" {
 		fmt.Println("  → No Dockerfile found, skipping build")
 		return nil
@@ -106,8 +112,8 @@ func runKubectl(client *goss.Client, dir string) error {
 		fmt.Println("  → No k8s YAML files, skipping")
 		return nil
 	}
-	files := strings.Fields(out)
-	for _, f := range files {
+	files := strings.FieldsSeq(out)
+	for f := range files {
 		base := filepath.Base(f)
 		if base == "docker-compose.yml" || base == "docker-compose.yaml" || base == "service.yaml" {
 			continue
@@ -126,6 +132,9 @@ func runSystemd(client *goss.Client, name, dir string) error {
 	binaryOut, _, err := ssh.Run(client, fmt.Sprintf(
 		`F=$(ls "%s/sdk-ops-%s-amd64" 2>/dev/null); if [ -n "$F" ]; then echo "$F"; else ls "%s/run.sh" "%s/%s" 2>/dev/null | head -1 || echo "none"; fi`,
 		dir, name, dir, dir, name))
+	if err != nil {
+		fmt.Printf("  ⚠ Could not find binary: %v\n", err)
+	}
 	binaryPath := strings.TrimSpace(binaryOut)
 	execStart := binaryPath
 	if strings.Contains(binaryPath, "run.sh") {

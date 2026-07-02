@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	gossh "golang.org/x/crypto/ssh"
@@ -494,11 +495,11 @@ func (c *ClusterClient) Logs(pod string, follow bool) (string, error) {
 }
 
 func (c *ClusterClient) Exec(pod string, cmdArgs []string) (string, error) {
-	args := ""
+	var args strings.Builder
 	for _, a := range cmdArgs {
-		args += " " + a
+		args.WriteString(" " + a)
 	}
-	return c.exec("exec -it " + pod + " --" + args)
+	return c.exec("exec -it " + pod + " --" + args.String())
 }
 
 func (c *ClusterClient) Scale(resource string, replicas int32) (string, error) {

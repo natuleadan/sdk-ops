@@ -3,6 +3,7 @@ package compose
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"gopkg.in/yaml.v3"
@@ -20,7 +21,7 @@ type Service struct {
 
 type File struct {
 	Services map[string]*Service `yaml:"services" json:"services"`
-	Volumes  map[string]interface{} `yaml:"volumes,omitempty" json:"volumes,omitempty"`
+	Volumes  map[string]any      `yaml:"volumes,omitempty" json:"volumes,omitempty"`
 }
 
 func Init(path, name string) error {
@@ -40,7 +41,7 @@ func Init(path, name string) error {
 }
 
 func Read(path string) (*File, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
@@ -59,7 +60,7 @@ func Write(path string, f *File) error {
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(filepath.Clean(path), data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
@@ -136,7 +137,7 @@ func ListServices(filePath string) ([]string, error) {
 }
 
 func Validate(filePath string) error {
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		return fmt.Errorf("read: %w", err)
 	}

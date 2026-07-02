@@ -2,6 +2,7 @@ package notify
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,7 +19,7 @@ func NewTelegram(token, chatID string) *Telegram {
 
 func (t *Telegram) Send(title, message string) error {
 	text := fmt.Sprintf("*%s*\n%s", title, message)
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"chat_id":    t.chatID,
 		"text":       text,
 		"parse_mode": "Markdown",
@@ -28,7 +29,12 @@ func (t *Telegram) Send(title, message string) error {
 		return fmt.Errorf("telegram marshal: %w", err)
 	}
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", t.token)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	req, reqErr := http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewReader(body))
+	if reqErr != nil {
+		return fmt.Errorf("telegram request: %w", reqErr)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("telegram post: %w", err)
 	}

@@ -15,7 +15,7 @@ func (c *Client) CreateBareMetal(ctx context.Context, cfg providers.BareMetalCre
 		label = cfg.Hostname
 	}
 
-	bm, _, err := c.client.BareMetalServer.Create(ctx, &govultr.BareMetalCreate{
+	bm, resp, err := c.client.BareMetalServer.Create(ctx, &govultr.BareMetalCreate{
 		Region:   cfg.Location,
 		Plan:     cfg.Plan,
 		Label:    label,
@@ -23,6 +23,9 @@ func (c *Client) CreateBareMetal(ctx context.Context, cfg providers.BareMetalCre
 		ImageID:  cfg.Template,
 		UserData: cfg.UserData,
 	})
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create baremetal: %w", err)
 	}
@@ -43,7 +46,10 @@ func (c *Client) DeleteBareMetal(ctx context.Context, id string) error {
 }
 
 func (c *Client) ListBareMetal(ctx context.Context) ([]providers.BareMetal, error) {
-	bms, _, _, err := c.client.BareMetalServer.List(ctx, &govultr.ListOptions{})
+	bms, _, resp, err := c.client.BareMetalServer.List(ctx, &govultr.ListOptions{})
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list baremetal: %w", err)
 	}
@@ -58,11 +64,14 @@ func (c *Client) ListBareMetal(ctx context.Context) ([]providers.BareMetal, erro
 }
 
 func (c *Client) CreateLB(ctx context.Context, cfg providers.LBCreateConfig) (*providers.LoadBalancer, error) {
-	lb, _, err := c.client.LoadBalancer.Create(ctx, &govultr.LoadBalancerReq{
+	lb, resp, err := c.client.LoadBalancer.Create(ctx, &govultr.LoadBalancerReq{
 		Label:              cfg.Name,
 		Region:             cfg.Location,
 		BalancingAlgorithm: cfg.Algorithm,
 	})
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create lb: %w", err)
 	}
@@ -79,7 +88,10 @@ func (c *Client) DeleteLB(ctx context.Context, id string) error {
 }
 
 func (c *Client) ListLB(ctx context.Context) ([]providers.LoadBalancer, error) {
-	lbs, _, _, err := c.client.LoadBalancer.List(ctx, &govultr.ListOptions{})
+	lbs, _, resp, err := c.client.LoadBalancer.List(ctx, &govultr.ListOptions{})
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list lb: %w", err)
 	}
@@ -91,7 +103,10 @@ func (c *Client) ListLB(ctx context.Context) ([]providers.LoadBalancer, error) {
 }
 
 func (c *Client) ListDNSZones(ctx context.Context) ([]providers.DNSZone, error) {
-	domains, _, _, err := c.client.Domain.List(ctx, &govultr.ListOptions{})
+	domains, _, resp, err := c.client.Domain.List(ctx, &govultr.ListOptions{})
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list domains: %w", err)
 	}
@@ -112,7 +127,10 @@ func (c *Client) CreateDNSRecord(ctx context.Context, zoneID string, r providers
 		Data: r.Value,
 		TTL:  r.TTL,
 	}
-	_, _, err := c.client.DomainRecord.Create(ctx, zoneID, req)
+	_, resp, err := c.client.DomainRecord.Create(ctx, zoneID, req)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	return err
 }
 

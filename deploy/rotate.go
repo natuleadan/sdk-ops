@@ -14,7 +14,7 @@ import (
 func RotateDBPassword(client *goss.Client, dbType DBType, containerName, newPass string) (string, error) {
 	if newPass == "" {
 		var err error
-		newPass, err = genPassword(24)
+		newPass, err = genPassword()
 		if err != nil {
 			return "", fmt.Errorf("generate password: %w", err)
 		}

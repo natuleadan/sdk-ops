@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -43,7 +44,7 @@ func (b *DockerfileBuilder) Build(dir, name string, reg RegistryConfig) (string,
 		binaryPath := filepath.Join(dir, binaryName)
 
 		fmt.Printf("  → Building Go binary for linux/amd64...\n")
-		build := exec.Command("go", "build",
+		build := exec.CommandContext(context.Background(), "go", "build",
 			"-a", "-o", binaryPath,
 			"-ldflags=-s -w", ".")
 		build.Dir = dir
@@ -77,7 +78,7 @@ CMD ["/app"]
 
 func (b *DockerfileBuilder) buildAndPush(dir, name string, reg RegistryConfig, tag, dockerfilePath string) (string, error) {
 	fmt.Printf("  → Logging in to %s...\n", reg.Server)
-	login := exec.Command("docker", "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
+	login := exec.CommandContext(context.Background(), "docker", "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
 	login.Stdout = os.Stdout
 	login.Stderr = os.Stderr
 	if err := login.Run(); err != nil {
@@ -88,7 +89,7 @@ func (b *DockerfileBuilder) buildAndPush(dir, name string, reg RegistryConfig, t
 	buildID := fmt.Sprintf("%d", time.Now().UnixNano())
 
 	fmt.Printf("  → Building + pushing %s...\n", tag)
-	push := exec.Command("docker", "buildx", "build",
+	push := exec.CommandContext(context.Background(), "docker", "buildx", "build",
 		"--platform", "linux/amd64",
 		"--build-arg", fmt.Sprintf("CACHEBUST=%s", buildID),
 		"-f", dockerfilePath,

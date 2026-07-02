@@ -8,10 +8,8 @@ import (
 )
 
 func TestCollectMetrics(t *testing.T) {
-	m, err := collectMetrics()
-	if err != nil {
-		t.Fatalf("collectMetrics: %v", err)
-	}
+	m := collectMetrics()
+
 
 	if m.Timestamp.IsZero() {
 		t.Error("Timestamp should not be zero")
@@ -34,19 +32,13 @@ func TestCollectMetrics(t *testing.T) {
 }
 
 func TestCollectMetricsTypes(t *testing.T) {
-	m, err := collectMetrics()
-	if err != nil {
-		t.Fatalf("collectMetrics: %v", err)
-	}
+	m := collectMetrics()
+
 
 	// Verify types
-	_ = float64(m.CPUPercent)
-	_ = uint64(m.MemoryTotal)
-	_ = uint64(m.MemoryUsed)
-	_ = uint64(m.DiskTotal)
-	_ = uint64(m.DiskUsed)
-	_ = uint64(m.NetRx)
-	_ = uint64(m.NetTx)
+	if m.CPUPercent < 0 || m.CPUPercent > 100 {
+		t.Errorf("CPUPercent out of range: %f", m.CPUPercent)
+	}
 }
 
 func TestGetHostInfo(t *testing.T) {
@@ -89,14 +81,14 @@ func TestGetLocalIP(t *testing.T) {
 func TestConcurrentMetrics(t *testing.T) {
 	// Collect metrics concurrently to check for race conditions
 	results := make(chan MetricRow, 5)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		go func() {
-			m, _ := collectMetrics()
+			m := collectMetrics()
 			results <- m
 		}()
 	}
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		m := <-results
 		if m.Timestamp.IsZero() {
 			t.Error("concurrent metric has zero timestamp")
@@ -105,10 +97,8 @@ func TestConcurrentMetrics(t *testing.T) {
 }
 
 func TestMetricFieldsConsistency(t *testing.T) {
-	m, err := collectMetrics()
-	if err != nil {
-		t.Fatalf("collectMetrics: %v", err)
-	}
+	m := collectMetrics()
+
 
 	// Memory used should be <= total (within reasonable bounds)
 	if m.MemoryTotal > 0 && m.MemoryUsed > m.MemoryTotal {
@@ -122,17 +112,9 @@ func TestMetricFieldsConsistency(t *testing.T) {
 }
 
 func TestCollectMetricsIdempotent(t *testing.T) {
-	m1, err := collectMetrics()
-	if err != nil {
-		t.Fatalf("first collect: %v", err)
-	}
+	m1 := collectMetrics()
+	m2 := collectMetrics()
 
-	m2, err := collectMetrics()
-	if err != nil {
-		t.Fatalf("second collect: %v", err)
-	}
-
-	// CPU can vary, but the function should not panic or error
 	t.Logf("CPU 1: %f, CPU 2: %f", m1.CPUPercent, m2.CPUPercent)
 }
 

@@ -21,18 +21,19 @@ func Run(client *goss.Client, phase string, vars map[string]string) error {
 		return nil
 	}
 
-	scripts := strings.Fields(strings.TrimSpace(out))
-	for _, script := range scripts {
+	scripts := strings.FieldsSeq(strings.TrimSpace(out))
+	for script := range scripts {
 		name := filepath.Base(script)
 		fmt.Printf("  → Hook [%s] running %s...\n", phase, name)
 
 		// Build env vars
-		envVars := fmt.Sprintf("SDK_OPS_PHASE=%s", phase)
+		var envVars strings.Builder
+		fmt.Fprintf(&envVars, "SDK_OPS_PHASE=%s", phase)
 		for k, v := range vars {
-			envVars += fmt.Sprintf(" SDK_OPS_%s=%s", k, v)
+			fmt.Fprintf(&envVars, " SDK_OPS_%s=%s", k, v)
 		}
 
-		hookOut, _, err := ssh.Run(client, fmt.Sprintf("sudo -E %s %s", envVars, script))
+		hookOut, _, err := ssh.Run(client, fmt.Sprintf("sudo -E %s %s", envVars.String(), script))
 		if err != nil {
 			fmt.Printf("  ✗ Hook %s failed: %v\n", name, err)
 			fmt.Printf("    Output: %s\n", strings.TrimSpace(hookOut))
@@ -65,8 +66,8 @@ func CreateHookLocal(name, phase, content string) error {
 		return err
 	}
 	hookPath := filepath.Join(home, ".sdk-ops", "hooks", phase, name)
-	os.MkdirAll(filepath.Dir(hookPath), 0755)
-	if err := os.WriteFile(hookPath, []byte(content), 0755); err != nil {
+	os.MkdirAll(filepath.Dir(hookPath), 0750)
+	if err := os.WriteFile(filepath.Clean(hookPath), []byte(content), 0600); err != nil {
 		return fmt.Errorf("create hook: %w", err)
 	}
 	return nil
