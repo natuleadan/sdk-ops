@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,7 +70,7 @@ func BackupServices(client *goss.Client, destDir string) (string, error) {
 		return "", fmt.Errorf("write backup: %w", err)
 	}
 
-	ssh.Run(client, fmt.Sprintf("rm -f %s", remotePath))
+	if _, _, err := ssh.Run(client, fmt.Sprintf("rm -f %s", remotePath)); err != nil { log.Printf("backup: cleanup error: %v", err) }
 
 	fmt.Printf("  → Backup saved: %s (%d bytes)\n", localPath, len(outBytes))
 	return localPath, nil
@@ -120,7 +121,7 @@ func BackupDatabase(client *goss.Client, dbType DBType, dbName, containerName st
 		return "", fmt.Errorf("write db backup: %w", err)
 	}
 
-	ssh.Run(client, fmt.Sprintf("rm -f %s", remotePath))
+	if _, _, err := ssh.Run(client, fmt.Sprintf("rm -f %s", remotePath)); err != nil { log.Printf("backup: cleanup error: %v", err) }
 	fmt.Printf("  → Database backup saved: %s (%d bytes)\n", localPath, len(catBytes))
 	return localPath, nil
 }
@@ -148,7 +149,7 @@ func UploadToS3(localPath string, cfg S3Config) error {
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
 	}
-	defer file.Close()
+	defer func() { if err := file.Close(); err != nil { log.Printf("backup: file close error: %v", err) } }()
 
 	fileInfo, _ := file.Stat()
 	key := localPath
@@ -297,7 +298,7 @@ func RestoreServices(client *goss.Client, backupPath string) error {
 	if err != nil {
 		return fmt.Errorf("session: %w", err)
 	}
-	defer session.Close()
+	defer func() { if err := session.Close(); err != nil { log.Printf("backup: session close error: %v", err) } }()
 
 	restoreCmd := `sudo tar xzf - -C / && echo "restore_ok"`
 	session.Stdin = bytes.NewReader(data)
@@ -306,9 +307,9 @@ func RestoreServices(client *goss.Client, backupPath string) error {
 		return fmt.Errorf("restore failed: %w\n%s", err, string(out))
 	}
 
-	ssh.Run(client, `for d in /opt/sdk-ops/services/*/; do
+	if _, _, err := ssh.Run(client, `for d in /opt/sdk-ops/services/*/; do
 		[ -d "$d/current" ] && (cd "$d/current" && docker compose up -d 2>/dev/null || true)
-	done`)
+	done`); err != nil { log.Printf("backup: restart error: %v", err) }
 
 	fmt.Printf("  → Services restored from %s\n", backupPath)
 	return nil

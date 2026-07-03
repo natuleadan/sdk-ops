@@ -47,7 +47,7 @@ Flags:
   -u, --user string       SSH user (default "root")
   -k, --key string        SSH private key path
   -p, --port int          SSH port (default 22)
-  --insecure              Skip SSH host key verification
+  --insecure              Skip SSH host key verification (env: SDK_OPS_SSH_STRICT_HOST_KEY=true|1 for strict known_hosts enforcement)
   --ssh-port int          Migrate SSH to custom port (0 = keep port 22)
   --lock-root             Lock root password after creating sdkops user
   --monitor               Install Prometheus node_exporter (port 9100)

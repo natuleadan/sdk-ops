@@ -43,8 +43,8 @@ type Process struct {
 	User string
 }
 
-func GetStats(client *goss.Client) (*NodeStats, error) {
-	script := `#!/bin/bash
+func getStatsScript() string {
+	return `#!/bin/bash
 echo "HOSTNAME=$(hostname)"
 echo "KERNEL=$(uname -r)"
 echo "UPTIME=$(uptime -p | sed 's/up //')"
@@ -59,11 +59,65 @@ echo "DISK_PCT=$(df -h / | awk 'NR==2 {print $5}' | tr -d '%')"
 echo "NET_IN=$(cat /proc/net/dev | awk '/eth0/ {print $2}' || cat /proc/net/dev | awk '/ens/ {print $2}' || echo 0)"
 echo "NET_OUT=$(cat /proc/net/dev | awk '/eth0/ {print $10}' || cat /proc/net/dev | awk '/ens/ {print $10}' || echo 0)"
 `
-	out, _, err := ssh.Run(client, script)
-	if err != nil {
-		return nil, fmt.Errorf("get stats: %w", err)
-	}
+}
 
+func setStatPct(s *NodeStats, val string) {
+	if pct, err := strconv.Atoi(val); err == nil {
+		s.Memory = fmt.Sprintf("%d%%", pct)
+	}
+}
+
+func setStatDiskPct(s *NodeStats, val string) {
+	if pct, err := strconv.Atoi(val); err == nil {
+		s.Disk = fmt.Sprintf("%d%%", pct)
+	}
+}
+
+func setStatNet(s *NodeStats, key, val string) {
+	b, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		return
+	}
+	switch key {
+	case "NET_IN":
+		s.NetIn = formatBytes(b)
+	case "NET_OUT":
+		s.NetOut = formatBytes(b)
+	}
+}
+
+func setStatField(s *NodeStats, key, val string) {
+	switch key {
+	case "HOSTNAME":
+		s.Hostname = val
+	case "KERNEL":
+		s.Kernel = val
+	case "UPTIME":
+		s.Uptime = val
+	case "CPUS":
+		s.CPUCores, _ = strconv.Atoi(val)
+	case "LOAD":
+		s.CPULoad = val
+	case "MEM_TOTAL":
+		s.MemTotal = val
+	case "MEM_USED":
+		s.MemUsed = val
+	case "MEM_PCT":
+		setStatPct(s, val)
+	case "DISK_TOTAL":
+		s.DiskSize = val
+	case "DISK_USED":
+		s.DiskUsed = val
+	case "DISK_PCT":
+		setStatDiskPct(s, val)
+	case "NET_IN":
+		setStatNet(s, key, val)
+	case "NET_OUT":
+		setStatNet(s, key, val)
+	}
+}
+
+func parseStatsOutput(out string) *NodeStats {
 	stats := &NodeStats{}
 	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -74,50 +128,21 @@ echo "NET_OUT=$(cat /proc/net/dev | awk '/eth0/ {print $10}' || cat /proc/net/de
 		if len(parts) != 2 {
 			continue
 		}
-		val := strings.TrimSpace(parts[1])
-		switch strings.TrimSpace(parts[0]) {
-		case "HOSTNAME":
-			stats.Hostname = val
-		case "KERNEL":
-			stats.Kernel = val
-		case "UPTIME":
-			stats.Uptime = val
-		case "CPUS":
-			stats.CPUCores, _ = strconv.Atoi(val)
-		case "LOAD":
-			stats.CPULoad = val
-		case "MEM_TOTAL":
-			stats.MemTotal = val
-		case "MEM_USED":
-			stats.MemUsed = val
-		case "MEM_PCT":
-			if pct, err := strconv.Atoi(val); err == nil {
-				stats.Memory = fmt.Sprintf("%d%%", pct)
-			}
-		case "DISK_TOTAL":
-			stats.DiskSize = val
-		case "DISK_USED":
-			stats.DiskUsed = val
-		case "DISK_PCT":
-			if pct, err := strconv.Atoi(val); err == nil {
-				stats.Disk = fmt.Sprintf("%d%%", pct)
-			}
-		case "NET_IN":
-			if b, err := strconv.ParseInt(val, 10, 64); err == nil {
-				stats.NetIn = formatBytes(b)
-			}
-		case "NET_OUT":
-			if b, err := strconv.ParseInt(val, 10, 64); err == nil {
-				stats.NetOut = formatBytes(b)
-			}
-		}
+		setStatField(stats, strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
 	}
-	return stats, nil
+	return stats
 }
 
-func GetRuntimeStatus(client *goss.Client) *RuntimeStatus {
-	rs := &RuntimeStatus{}
-	script := `
+func GetStats(client *goss.Client) (*NodeStats, error) {
+	out, _, err := ssh.Run(client, getStatsScript())
+	if err != nil {
+		return nil, fmt.Errorf("get stats: %w", err)
+	}
+	return parseStatsOutput(out), nil
+}
+
+func getRuntimeScript() string {
+	return `
 K3S_VER=$(k3s --version 2>/dev/null | head -1 | awk '{print $3}' | sed 's/^v//' || echo "")
 K3S_OK=$(systemctl is-active k3s 2>/dev/null || echo "inactive")
 DOCKER_VER=$(docker --version 2>/dev/null | awk '{print $3}' | tr -d , || echo "")
@@ -129,7 +154,10 @@ echo "DOCKER_VER=$DOCKER_VER"
 echo "DOCKER_OK=$DOCKER_OK"
 echo "POD_COUNT=$POD_COUNT"
 `
-	out, _, _ := ssh.Run(client, script)
+}
+
+func parseRuntimeOutput(out string) *RuntimeStatus {
+	rs := &RuntimeStatus{}
 	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.Contains(line, "=") {
@@ -154,6 +182,11 @@ echo "POD_COUNT=$POD_COUNT"
 		}
 	}
 	return rs
+}
+
+func GetRuntimeStatus(client *goss.Client) *RuntimeStatus {
+	out, _, _ := ssh.Run(client, getRuntimeScript())
+	return parseRuntimeOutput(out)
 }
 
 func GetTopProcesses(client *goss.Client, count int) ([]Process, error) {
@@ -200,10 +233,7 @@ func RunInteractive(client *goss.Client, cmd string) error {
 }
 
 func bar(pct int, width int) string {
-	filled := min(pct*width/100, width)
-	if filled < 0 {
-		filled = 0
-	}
+	filled := max(min(pct*width/100, width), 0)
 	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 }
 
@@ -232,7 +262,6 @@ func FormatStats(stats *NodeStats, runtime *RuntimeStatus, procs []Process) stri
 	fmt.Fprintf(&b, "  ├─ DISK:   %s %3s  (%s / %s)\n", bar(diskPct, 20), stats.Disk, stats.DiskUsed, stats.DiskSize)
 	fmt.Fprintf(&b, "  ├─ NET:    ↑ %s  ↓ %s\n", stats.NetOut, stats.NetIn)
 
-	// Runtime services
 	if runtime != nil {
 		if runtime.K3sVersion != "" {
 			fmt.Fprintf(&b, "  ├─ K3s:    %s v%s  (%s)\n", statusIcon(runtime.K3sRunning), runtime.K3sVersion, runtime.K3sRunning)

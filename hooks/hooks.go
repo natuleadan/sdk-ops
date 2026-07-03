@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +67,7 @@ func CreateHookLocal(name, phase, content string) error {
 		return err
 	}
 	hookPath := filepath.Join(home, ".sdk-ops", "hooks", phase, name)
-	os.MkdirAll(filepath.Dir(hookPath), 0750)
+	if err := os.MkdirAll(filepath.Dir(hookPath), 0750); err != nil { log.Printf("hooks: mkdir error: %v", err) }
 	if err := os.WriteFile(filepath.Clean(hookPath), []byte(content), 0600); err != nil {
 		return fmt.Errorf("create hook: %w", err)
 	}
@@ -75,7 +76,7 @@ func CreateHookLocal(name, phase, content string) error {
 
 func InstallHook(client *goss.Client, name, phase string, content []byte) error {
 	hookDir := fmt.Sprintf("/opt/sdk-ops/hooks/%s", phase)
-	ssh.Run(client, fmt.Sprintf("sudo mkdir -p %s", hookDir))
+	if _, _, err := ssh.Run(client, fmt.Sprintf("sudo mkdir -p %s", hookDir)); err != nil { log.Printf("hooks: mkdir error: %v", err) }
 
 	tmpFile := fmt.Sprintf("/tmp/sdk-hook-%s", name)
 	uploadCmd := fmt.Sprintf("sudo sh -c 'cat > %s' && sudo chmod +x %s && sudo mv %s %s/", tmpFile, tmpFile, tmpFile, hookDir)
@@ -84,15 +85,15 @@ func InstallHook(client *goss.Client, name, phase string, content []byte) error 
 	if err != nil {
 		return fmt.Errorf("ssh session: %w", err)
 	}
-	defer sess.Close()
+	defer func() { if err := sess.Close(); err != nil { log.Printf("hooks: session close error: %v", err) } }()
 
 	stdin, err := sess.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
 	}
 	go func() {
-		defer stdin.Close()
-		stdin.Write(content)
+		defer func() { if err := stdin.Close(); err != nil { log.Printf("hooks: stdin close error: %v", err) } }()
+		if _, err := stdin.Write(content); err != nil { log.Printf("hooks: stdin write error: %v", err) }
 	}()
 	if out, err := sess.CombinedOutput(uploadCmd); err != nil {
 		return fmt.Errorf("upload hook: %w\n%s", err, string(out))

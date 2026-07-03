@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -45,7 +46,7 @@ func (c *rawClient) do(ctx context.Context, method, path string, body any) ([]by
 	if err != nil {
 		return nil, fmt.Errorf("do: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { if err := resp.Body.Close(); err != nil { log.Printf("hetzner: body close error: %v", err) } }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 )
 
@@ -38,7 +39,7 @@ func (t *Telegram) Send(title, message string) error {
 	if err != nil {
 		return fmt.Errorf("telegram post: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { if err := resp.Body.Close(); err != nil { log.Printf("telegram: body close error: %v", err) } }()
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("telegram: HTTP %d", resp.StatusCode)
 	}

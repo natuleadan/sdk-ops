@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,30 +31,96 @@ type DeployResult struct {
 	ServicePath string
 }
 
-func UploadAndDeploy(client *goss.Client, cfg UploadConfig) (*DeployResult, error) {
-	serviceDir := fmt.Sprintf("/opt/sdk-ops/services/%s", cfg.ServiceName)
-
-	// Ensure service directory on VPS
-	ssh.Run(client, fmt.Sprintf("sudo mkdir -p %s", serviceDir))
-	ssh.Run(client, fmt.Sprintf("sudo chown -R $(whoami) /opt/sdk-ops 2>/dev/null || true"))
-
-	// Determine next version number
+func nextVersion(client *goss.Client, serviceDir string) string {
 	verOut, _, err := ssh.Run(client, fmt.Sprintf(`
 		ls -d %s/v* 2>/dev/null | sed 's/.*v//' | sort -n | tail -1
 	`, serviceDir))
 	if err != nil {
-		return nil, fmt.Errorf("get version: %w", err)
+		return "1"
 	}
 	verOut = strings.TrimSpace(verOut)
-	nextVer := "1"
-	if verOut != "" {
-		fmt.Sscanf(verOut, "%d", &nextVer)
-		nextVer = fmt.Sprintf("%d", atoi(nextVer)+1)
+	if verOut == "" {
+		return "1"
+	}
+	var n int
+	if _, err := fmt.Sscanf(verOut, "%d", &n); err != nil {
+		return "1"
+	}
+	return fmt.Sprintf("%d", n+1)
+}
+
+func shouldSkipFile(rel string, info os.FileInfo, cfg UploadConfig) (bool, error) {
+	if rel == "." {
+		return true, nil
+	}
+	if strings.HasPrefix(rel, ".") {
+		if info.IsDir() {
+			return true, filepath.SkipDir
+		}
+		return true, nil
+	}
+	for _, excl := range cfg.Exclude {
+		if matched, _ := filepath.Match(excl, rel); matched {
+			if info.IsDir() {
+				return true, filepath.SkipDir
+			}
+			return true, nil
+		}
+	}
+	if len(cfg.Files) > 0 {
+		for _, f := range cfg.Files {
+			if rel == f || strings.HasPrefix(rel, f+"/") {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func addToTar(path string, info os.FileInfo, cfg UploadConfig, tw *tar.Writer) error {
+	rel, err := filepath.Rel(cfg.SourceDir, path)
+	if err != nil {
+		return err
+	}
+	skip, err := shouldSkipFile(rel, info, cfg)
+	if err != nil {
+		return err
+	}
+	if skip {
+		return nil
 	}
 
-	versionDir := fmt.Sprintf("%s/v%s", serviceDir, nextVer)
+	header, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		return err
+	}
+	header.Name = rel
+	if info.IsDir() {
+		header.Name += "/"
+	}
 
-	// Create tar.gz in memory
+	if err := tw.WriteHeader(header); err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		f, err := os.Open(filepath.Clean(path))
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := f.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "close file %s: %v\n", path, err)
+			}
+		}()
+		if _, err := io.Copy(tw, f); err != nil {
+			fmt.Fprintf(os.Stderr, "copy %s to tar: %v\n", path, err)
+		}
+	}
+	return nil
+}
+
+func createTarArchive(cfg UploadConfig) (*bytes.Buffer, error) {
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gw)
@@ -62,66 +129,7 @@ func UploadAndDeploy(client *goss.Client, cfg UploadConfig) (*DeployResult, erro
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(cfg.SourceDir, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		if strings.HasPrefix(rel, ".") {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// Check exclude
-		for _, excl := range cfg.Exclude {
-			if matched, _ := filepath.Match(excl, rel); matched {
-				if info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-		}
-		// Filter specific files
-		if len(cfg.Files) > 0 {
-			found := false
-			for _, f := range cfg.Files {
-				if rel == f || strings.HasPrefix(rel, f+"/") {
-					found = true
-					break
-				}
-			}
-			if !found {
-				if info.IsDir() {
-					return nil
-				}
-				return nil
-			}
-		}
-
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-		header.Name = rel
-		if info.IsDir() {
-			header.Name += "/"
-		}
-
-		if err := tw.WriteHeader(header); err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			f, err := os.Open(filepath.Clean(path))
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-			io.Copy(tw, f)
-		}
-		return nil
+		return addToTar(path, info, cfg, tw)
 	}
 
 	if err := filepath.Walk(cfg.SourceDir, walkFn); err != nil {
@@ -135,29 +143,60 @@ func UploadAndDeploy(client *goss.Client, cfg UploadConfig) (*DeployResult, erro
 		return nil, err
 	}
 
+	return &buf, nil
+}
+
+func UploadAndDeploy(client *goss.Client, cfg UploadConfig) (*DeployResult, error) {
+	serviceDir := fmt.Sprintf("/opt/sdk-ops/services/%s", cfg.ServiceName)
+
+	// Ensure service directory on VPS
+	if _, _, err := ssh.Run(client, fmt.Sprintf("sudo mkdir -p %s", serviceDir)); err != nil {
+		fmt.Fprintf(os.Stderr, "mkdir %s: %v\n", serviceDir, err)
+	}
+	if _, _, err := 	ssh.Run(client, "sudo chown -R $(whoami) /opt/sdk-ops 2>/dev/null || true"); err != nil {
+		fmt.Fprintf(os.Stderr, "chown /opt/sdk-ops: %v\n", err)
+	}
+
+	// Determine next version number
+	nextVer := nextVersion(client, serviceDir)
+
+	versionDir := fmt.Sprintf("%s/v%s", serviceDir, nextVer)
+
+	// Create tar.gz in memory
+	buf, err := createTarArchive(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	// Upload tar.gz via SSH
 	fmt.Printf("  → Uploading %d bytes...\n", buf.Len())
 	session, err := client.NewSession()
 	if err != nil {
 		return nil, fmt.Errorf("ssh session: %w", err)
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close deploy session: %v\n", err)
+		}
+	}()
 
 	extractCmd := fmt.Sprintf("sudo mkdir -p %s && sudo tar xzf - -C %s && sudo chown -R $(whoami) %s", versionDir, versionDir, versionDir)
-	session.Stdin = &buf
+	session.Stdin = buf
 	out, err := session.CombinedOutput(extractCmd)
 	if err != nil {
 		return nil, fmt.Errorf("extract failed: %w\n%s", err, string(out))
 	}
 
 	// Update symlinks
-	ssh.Run(client, fmt.Sprintf(
+	if _, _, err := ssh.Run(client, fmt.Sprintf(
 		`sudo ln -sfn %s %s/previous 2>/dev/null; sudo ln -sfn %s %s/current; echo "deployed"`,
 		fmt.Sprintf("%s/current", serviceDir),
 		serviceDir,
 		versionDir,
 		serviceDir,
-	))
+	)); err != nil {
+		log.Printf("symlink update: %v", err)
+	}
 
 	fmt.Printf("  → Deployed v%s to %s\n", nextVer, versionDir)
 	return &DeployResult{Version: nextVer, ServicePath: versionDir}, nil
@@ -315,11 +354,8 @@ func BuildAndPushImage(dir, name string, reg RegistryConfig) (string, error) {
 
 	// Step 1: Build Go binary for linux/amd64
 	fmt.Printf("  → Building Go binary for linux/amd64...\n")
-	build := exec.Command("go", "build",
-		"-a", // force rebuild of all dependencies
-		"-o", binaryPath,
-		"-ldflags=-s -w",
-		".")
+	build := exec.CommandContext(context.Background(), "go", "build")
+	build.Args = append(build.Args, "-a", "-o", binaryPath, "-ldflags=-s -w", ".")
 	build.Dir = dir
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
@@ -344,9 +380,8 @@ CMD ["/healthz-svc"]
 
 	// Step 3: Login to registry
 	fmt.Printf("  → Logging in to %s...\n", reg.Server)
-	login := exec.CommandContext(context.Background(), "docker", "login", reg.Server,
-		"-u", reg.Username,
-		"-p", reg.Password)
+	login := exec.CommandContext(context.Background(), "docker", "login")
+	login.Args = append(login.Args, reg.Server, "-u", reg.Username, "-p", reg.Password)
 	login.Stdout = os.Stdout
 	login.Stderr = os.Stderr
 	if err := login.Run(); err != nil {
@@ -356,14 +391,16 @@ CMD ["/healthz-svc"]
 	// Step 4: Build and push for linux/amd64
 	fmt.Printf("  → Building + pushing %s...\n", tag)
 	buildID := fmt.Sprintf("%d", time.Now().UnixNano())
-	push := exec.Command("docker", "buildx", "build",
+	push := exec.CommandContext(context.Background(), "docker", "buildx", "build")
+	push.Args = append(push.Args,
 		"--platform", "linux/amd64",
 		"--build-arg", fmt.Sprintf("CACHEBUST=%s", buildID),
 		"-f", dockerfilePath,
 		"-t", tag,
 		"-t", versionTag,
 		"--push",
-		dir)
+		dir,
+	)
 	push.Stdout = os.Stdout
 	push.Stderr = os.Stderr
 	if err := push.Run(); err != nil {
@@ -371,8 +408,12 @@ CMD ["/healthz-svc"]
 	}
 
 	// Cleanup
-	os.Remove(dockerfilePath)
-	os.Remove(binaryPath)
+	if err := os.Remove(dockerfilePath); err != nil {
+		log.Printf("cleanup dockerfile: %v", err)
+	}
+	if err := os.Remove(binaryPath); err != nil {
+		log.Printf("cleanup binary: %v", err)
+	}
 
 	fmt.Printf("  → Image pushed: %s\n", tag)
 	return tag, nil
@@ -381,13 +422,17 @@ CMD ["/healthz-svc"]
 // UploadImage uploads a Docker image tar.gz to the VPS and loads it
 func UploadImage(client *goss.Client, serviceName, version string, imageTar []byte) (string, error) {
 	remotePath := fmt.Sprintf("/opt/sdk-ops/services/%s/v%s/image.tar.gz", serviceName, version)
-	
+
 	// Upload via SSH pipe
 	session, err := client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("session: %w", err)
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close upload session: %v\n", err)
+		}
+	}()
 
 	fmt.Printf("  → Uploading Docker image (%d bytes)...\n", len(imageTar))
 	loadCmd := fmt.Sprintf("sudo tee %s > /dev/null && sudo docker load < %s && echo 'image_loaded'", remotePath, remotePath)
@@ -402,6 +447,10 @@ func UploadImage(client *goss.Client, serviceName, version string, imageTar []by
 
 func atoi(s string) int {
 	var n int
-	fmt.Sscanf(s, "%d", &n)
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
+		return 0
+	}
 	return n
 }
+
+

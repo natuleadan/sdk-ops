@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -9,15 +10,31 @@ import (
 )
 
 func newDbCmd() *cobra.Command {
-	var user, key string
-	var port int
-
 	cmd := &cobra.Command{
 		Use:   "db",
 		Short: "Provision and manage databases on nodes",
 	}
 
-	createCmd := &cobra.Command{
+	cmd.AddCommand(newDbCreateCmd())
+	cmd.AddCommand(newDbListCmd())
+	cmd.AddCommand(newDbRemoveCmd())
+
+	return cmd
+}
+
+func nodeFromConfig() (ip, user, key string, port int) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return "", "", "", 0
+	}
+	if len(cfg.Nodes) == 0 {
+		return "", "", "", 0
+	}
+	return cfg.Nodes[0].IP, cfg.Nodes[0].User, cfg.Nodes[0].Key, cfg.Nodes[0].Port
+}
+
+func newDbCreateCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "create <type> [--name name] [--port N] [--version X] [--node IP]",
 		Short: "Create a database (postgres, mysql, redis, mongodb)",
 		Args:  cobra.ExactArgs(1),
@@ -34,112 +51,121 @@ Examples:
   sdk-ops db create redis --db-port 6379
   sdk-ops db create mysql --version 8.0 --db-port 3306
   sdk-ops db create mongodb --db-port 27017`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			dbType := deploy.DBType(args[0])
-			name, _ := cmd.Flags().GetString("name")
-			version, _ := cmd.Flags().GetString("version")
-			exposePort, _ := cmd.Flags().GetInt("db-port")
-			nodeIP, _ := cmd.Flags().GetString("node")
-			dbUser, _ := cmd.Flags().GetString("db-user")
-			dbPass, _ := cmd.Flags().GetString("db-pass")
-			user, _ = cmd.Flags().GetString("user")
-			key, _ = cmd.Flags().GetString("key")
-			port, _ = cmd.Flags().GetInt("port")
-
-			if nodeIP == "" {
-				cfg, err := loadConfig()
-				if err != nil {
-					return fmt.Errorf("load config: %w. Use --node <ip>", err)
-				}
-				if len(cfg.Nodes) == 0 {
-					return fmt.Errorf("no nodes registered. Use --node <ip>")
-				}
-				nodeIP = cfg.Nodes[0].IP
-				if user == "" {
-					user = cfg.Nodes[0].User
-				}
-				if key == "" {
-					key = cfg.Nodes[0].Key
-				}
-				if port == 0 {
-					port = cfg.Nodes[0].Port
-				}
-				fmt.Printf("  Using first registered node: %s\n", nodeIP)
-			}
-
-			client := newSSHClient(nodeIP, user, port, key)
-			conn, err := client.Connect()
-			if err != nil {
-				return fmt.Errorf("ssh connect: %w", err)
-			}
-			defer conn.Close()
-
-			cfg := deploy.DBConfig{
-				Type:    dbType,
-				Name:    name,
-				Version: version,
-				Port:    exposePort,
-				User:    dbUser,
-				Pass:    dbPass,
-			}
-
-			result, err := deploy.ProvisionDatabase(conn, cfg)
-			if err != nil {
-				return fmt.Errorf("provision database: %w", err)
-			}
-
-			fmt.Println()
-			fmt.Printf("  ✅ %s database ready\n", result.Image)
-			fmt.Printf("     Container: %s\n", result.ContainerName)
-			fmt.Printf("     Connection: %s\n", result.ConnString)
-			if result.ExposedPort > 0 {
-				fmt.Printf("     Port:      %d\n", result.ExposedPort)
-			} else {
-				fmt.Printf("     Port:      internal only (Docker networking)\n")
-			}
-			// Record in state
-			stateRecord("database", result.ContainerName, nodeIP, result.Image, "docker", "ok", map[string]string{
-				"type":    string(dbType),
-				"port":    fmt.Sprintf("%d", result.ExposedPort),
-				"connstr": result.ConnString,
-			})
-
-			fmt.Println()
-			fmt.Printf("  To connect from another container on the same node:\n")
-			fmt.Printf("    docker run --rm --link %s alpine env\n", result.ContainerName)
-			fmt.Println()
-			fmt.Printf("  Connection string (copy-paste):\n")
-			fmt.Printf("    %s\n", result.ConnString)
-
-			return nil
-		},
+		RunE: dbCreateRunE,
 	}
 
-	listCmd := &cobra.Command{
+	cmd.Flags().String("name", "", "Database name (default: type name)")
+	cmd.Flags().String("version", "", "Database version (e.g., 17-alpine, 8.0)")
+	cmd.Flags().Int("db-port", 0, "Expose on external port (0 = internal only)")
+	cmd.Flags().String("db-user", "", "Database user (generated if empty)")
+	cmd.Flags().String("db-pass", "", "Database password (generated if empty)")
+	cmd.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
+	cmd.Flags().StringP("user", "u", "root", "SSH user")
+	cmd.Flags().StringP("key", "k", "", "SSH private key path")
+	cmd.Flags().IntP("port", "p", 22, "SSH port")
+	return cmd
+}
+
+func dbCreateRunE(cmd *cobra.Command, args []string) error {
+	dbType := deploy.DBType(args[0])
+	name, _ := cmd.Flags().GetString("name")
+	version, _ := cmd.Flags().GetString("version")
+	exposePort, _ := cmd.Flags().GetInt("db-port")
+	nodeIP, _ := cmd.Flags().GetString("node")
+	dbUser, _ := cmd.Flags().GetString("db-user")
+	dbPass, _ := cmd.Flags().GetString("db-pass")
+	user, _ := cmd.Flags().GetString("user")
+	key, _ := cmd.Flags().GetString("key")
+	port, _ := cmd.Flags().GetInt("port")
+
+	if nodeIP == "" {
+		nip, nu, nk, np := nodeFromConfig()
+		if nip == "" {
+			return fmt.Errorf("no nodes registered. Use --node <ip>")
+		}
+		nodeIP = nip
+		if user == "" {
+			user = nu
+		}
+		if key == "" {
+			key = nk
+		}
+		if port == 0 {
+			port = np
+		}
+		fmt.Printf("  Using first registered node: %s\n", nodeIP)
+	}
+
+	client := newSSHClient(nodeIP, user, port, key)
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("ssh connect: %w", err)
+	}
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "db: conn close error: %v\n", err) } }()
+
+	cfg := deploy.DBConfig{
+		Type:    dbType,
+		Name:    name,
+		Version: version,
+		Port:    exposePort,
+		User:    dbUser,
+		Pass:    dbPass,
+	}
+
+	result, err := deploy.ProvisionDatabase(conn, cfg)
+	if err != nil {
+		return fmt.Errorf("provision database: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("  ✅ %s database ready\n", result.Image)
+	fmt.Printf("     Container: %s\n", result.ContainerName)
+	fmt.Printf("     Connection: %s\n", result.ConnString)
+	if result.ExposedPort > 0 {
+		fmt.Printf("     Port:      %d\n", result.ExposedPort)
+	} else {
+		fmt.Printf("     Port:      internal only (Docker networking)\n")
+	}
+	stateRecord("database", result.ContainerName, nodeIP, result.Image, "docker", "ok", map[string]string{
+		"type":    string(dbType),
+		"port":    fmt.Sprintf("%d", result.ExposedPort),
+		"connstr": result.ConnString,
+	})
+
+	fmt.Println()
+	fmt.Println("  To connect from another container on the same node:")
+	fmt.Printf("    docker run --rm --link %s alpine env\n", result.ContainerName)
+	fmt.Println()
+	fmt.Printf("  Connection string (copy-paste):\n")
+	fmt.Printf("    %s\n", result.ConnString)
+
+	return nil
+}
+
+func newDbListCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "list [--node IP]",
 		Short: "List databases on a node",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nodeIP, _ := cmd.Flags().GetString("node")
-			user, _ = cmd.Flags().GetString("user")
-			key, _ = cmd.Flags().GetString("key")
-			port, _ = cmd.Flags().GetInt("port")
+			user, _ := cmd.Flags().GetString("user")
+			key, _ := cmd.Flags().GetString("key")
+			port, _ := cmd.Flags().GetInt("port")
+
 			if nodeIP == "" {
-				cfg, err := loadConfig()
-				if err != nil {
-					return fmt.Errorf("load config: %w. Use --node <ip>", err)
-				}
-				if len(cfg.Nodes) == 0 {
+				nip, nu, nk, np := nodeFromConfig()
+				if nip == "" {
 					return fmt.Errorf("no nodes registered")
 				}
-				nodeIP = cfg.Nodes[0].IP
+				nodeIP = nip
 				if user == "" {
-					user = cfg.Nodes[0].User
+					user = nu
 				}
 				if key == "" {
-					key = cfg.Nodes[0].Key
+					key = nk
 				}
 				if port == 0 {
-					port = cfg.Nodes[0].Port
+					port = np
 				}
 			}
 			if port == 0 {
@@ -151,7 +177,7 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("ssh connect: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "db: conn close error: %v\n", err) } }()
 
 			dbs, err := deploy.ListDatabases(conn)
 			if err != nil {
@@ -169,33 +195,39 @@ Examples:
 		},
 	}
 
-	removeCmd := &cobra.Command{
+	cmd.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
+	cmd.Flags().StringP("user", "u", "root", "SSH user")
+	cmd.Flags().StringP("key", "k", "", "SSH private key path")
+	cmd.Flags().IntP("port", "p", 22, "SSH port")
+	return cmd
+}
+
+func newDbRemoveCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "remove <name> [--node IP]",
 		Short: "Remove a database",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			nodeIP, _ := cmd.Flags().GetString("node")
-			user, _ = cmd.Flags().GetString("user")
-			key, _ = cmd.Flags().GetString("key")
-			port, _ = cmd.Flags().GetInt("port")
+			user, _ := cmd.Flags().GetString("user")
+			key, _ := cmd.Flags().GetString("key")
+			port, _ := cmd.Flags().GetInt("port")
+
 			if nodeIP == "" {
-				cfg, err := loadConfig()
-				if err != nil {
-					return fmt.Errorf("load config: %w. Use --node <ip>", err)
-				}
-				if len(cfg.Nodes) == 0 {
+				nip, nu, nk, np := nodeFromConfig()
+				if nip == "" {
 					return fmt.Errorf("no nodes registered")
 				}
-				nodeIP = cfg.Nodes[0].IP
+				nodeIP = nip
 				if user == "" {
-					user = cfg.Nodes[0].User
+					user = nu
 				}
 				if key == "" {
-					key = cfg.Nodes[0].Key
+					key = nk
 				}
 				if port == 0 {
-					port = cfg.Nodes[0].Port
+					port = np
 				}
 			}
 			if port == 0 {
@@ -207,7 +239,7 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("ssh connect: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "db: conn close error: %v\n", err) } }()
 
 			if err := deploy.RemoveDatabase(conn, name); err != nil {
 				return err
@@ -217,25 +249,9 @@ Examples:
 		},
 	}
 
-	createCmd.Flags().String("name", "", "Database name (default: type name)")
-	createCmd.Flags().String("version", "", "Database version (e.g., 17-alpine, 8.0)")
-	createCmd.Flags().Int("db-port", 0, "Expose on external port (0 = internal only)")
-	createCmd.Flags().String("db-user", "", "Database user (generated if empty)")
-	createCmd.Flags().String("db-pass", "", "Database password (generated if empty)")
-	createCmd.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
-	createCmd.Flags().StringP("user", "u", "root", "SSH user")
-	createCmd.Flags().StringP("key", "k", "", "SSH private key path")
-	createCmd.Flags().IntP("port", "p", 22, "SSH port")
-
-	for _, sc := range []*cobra.Command{listCmd, removeCmd} {
-		sc.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
-		sc.Flags().StringP("user", "u", "root", "SSH user")
-		sc.Flags().StringP("key", "k", "", "SSH private key path")
-		sc.Flags().IntP("port", "p", 22, "SSH port")
-	}
-
-	cmd.AddCommand(createCmd)
-	cmd.AddCommand(listCmd)
-	cmd.AddCommand(removeCmd)
+	cmd.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
+	cmd.Flags().StringP("user", "u", "root", "SSH user")
+	cmd.Flags().StringP("key", "k", "", "SSH private key path")
+	cmd.Flags().IntP("port", "p", 22, "SSH port")
 	return cmd
 }

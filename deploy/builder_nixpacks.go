@@ -54,7 +54,8 @@ func (b *NixpacksBuilder) Build(dir, name string, reg RegistryConfig) (string, e
 
 	// Login to registry
 	fmt.Printf("  → Logging in to %s...\n", reg.Server)
-	login := exec.CommandContext(context.Background(), "docker", "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
+	login := exec.CommandContext(context.Background(), "docker")
+	login.Args = append(login.Args, "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
 	login.Stdout = os.Stdout
 	login.Stderr = os.Stderr
 	if err := login.Run(); err != nil {
@@ -69,7 +70,8 @@ func (b *NixpacksBuilder) Build(dir, name string, reg RegistryConfig) (string, e
 		"--push",
 	}
 
-	cmd := exec.CommandContext(context.Background(), "nixpacks", args...)
+	cmd := exec.CommandContext(context.Background(), "nixpacks")
+	cmd.Args = append(cmd.Args, args...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

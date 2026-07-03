@@ -116,6 +116,7 @@ Full reference: `docs/commands.md`. Categories:
 | `--lynis` | false | Install Lynis security auditor |
 | `--usg` | false | Install Ubuntu Security Guide (CIS) |
 | `--crowdsec` | false | Install CrowdSec WAF/IPS |
+| `--insecure` | false | Skip SSH host key verification (env: `SDK_OPS_SSH_STRICT_HOST_KEY=true` for strict) |
 | `--lock-root` | false | Lock root password |
 | `--logs` | "" | Install Promtail to Loki URL |
 | `--alerts` | "" | Install Alertmanager (Slack webhook) |
@@ -256,6 +257,7 @@ Local (Mac ARM)                        VPS (x86_64)
 
 ```bash
 make test    # go test -race -count=1 ./...
+make lint    # golangci-lint run --timeout=5m ./... + go vet ./...
 make build   # go build -o sdk-ops ./cmd/sdk-ops/
 ```
 
@@ -274,3 +276,7 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
 - **PermitRootLogin no** after hardening — SSH as root is blocked. Use `--user sdkops` to connect.
 - **CIS hardening flags** (`--cis-*`) run post-install and may restart k3s (audit-log, tls-ciphers).
 - **etcd-snapshot** requires k3s with embedded etcd (default). Fails with "etcd datastore disabled" if using sqlite.
+- **SSH host key strict mode**: set `SDK_OPS_SSH_STRICT_HOST_KEY=true` to enforce `known_hosts` check. Default is `InsecureIgnoreHostKey` (backward compat).
+- **File permissions**: project enforces `0600` for files and `0750` for directories — never `0644`/`0755`.
+- **Path sanitization**: all file operations use `filepath.Clean` — never pass user input directly to `os.ReadFile`/`os.WriteFile`.
+- **Context propagation**: all HTTP/DB/exec calls use `context.Context` — never bare `exec.Command` or `http.NewRequest`.

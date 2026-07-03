@@ -3,6 +3,7 @@ package vultr
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/vultr/govultr/v3"
 
@@ -18,7 +19,7 @@ func (c *Client) CreateVPS(ctx context.Context, cfg providers.VPSCreateConfig) (
 		UserData: cfg.UserData,
 	})
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create instance: %w", err)
@@ -41,14 +42,13 @@ func (c *Client) DeleteVPS(ctx context.Context, id string) error {
 }
 
 func (c *Client) ListVPS(ctx context.Context) ([]providers.VPS, error) {
-	instances, meta, resp, err := c.client.Instance.List(ctx, &govultr.ListOptions{})
+	instances, _, resp, err := c.client.Instance.List(ctx, &govultr.ListOptions{})
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list instances: %w", err)
 	}
-	_ = meta
 	var result []providers.VPS
 	for _, inst := range instances {
 		result = append(result, providers.VPS{
@@ -61,7 +61,7 @@ func (c *Client) ListVPS(ctx context.Context) ([]providers.VPS, error) {
 func (c *Client) GetVPS(ctx context.Context, id string) (*providers.VPS, error) {
 	inst, resp, err := c.client.Instance.Get(ctx, id)
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr get instance: %w", err)

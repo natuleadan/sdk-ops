@@ -44,7 +44,7 @@ func (s *Scheduler) loadSchedules() {
 		log.Printf("scheduler: load schedules: %v", err)
 		return
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("scheduler: rows close error: %v", err) } }()
 
 	for rows.Next() {
 		var id int
@@ -58,7 +58,7 @@ func (s *Scheduler) loadSchedules() {
 			continue
 		}
 
-		s.addSchedule(id, name, cronExpr, taskType, taskConfig, notifyOn)
+		if err := s.addSchedule(id, name, cronExpr, taskType, taskConfig, notifyOn); err != nil { log.Printf("scheduler: add schedule error: %v", err) }
 	}
 }
 
@@ -105,7 +105,7 @@ func (s *Scheduler) executeTask(id int, name, taskType, taskConfig, notifyOn str
 
 	duration := time.Since(start).Milliseconds()
 
-	s.db.Exec(`UPDATE schedules SET last_run = ? WHERE id = ?`, time.Now().Format(time.RFC3339), id)
+	if _, err := 	s.db.ExecContext(context.Background(), `UPDATE schedules SET last_run = ? WHERE id = ?`, time.Now().Format(time.RFC3339), id); err != nil { log.Printf("scheduler: update last_run error: %v", err) }
 
 	auditEntry := AuditRow{
 		Timestamp:  time.Now(),
@@ -114,7 +114,7 @@ func (s *Scheduler) executeTask(id int, name, taskType, taskConfig, notifyOn str
 		Message:    fmt.Sprintf("%s: %s", name, message),
 		DurationMs: duration,
 	}
-	insertAudit(s.db, auditEntry)
+	if err := insertAudit(s.db, auditEntry); err != nil { log.Printf("scheduler: audit error: %v", err) }
 
 	// Notify on failure or always
 	if notifyOn == "always" || (notifyOn == "failure" && status != "ok") || (notifyOn == "success" && status == "ok") {
@@ -127,7 +127,8 @@ func (s *Scheduler) executeTask(id int, name, taskType, taskConfig, notifyOn str
 func runBackupServices() (string, string) {
 	timestamp := time.Now().Format("20060102-150405")
 	filename := fmt.Sprintf("/tmp/sdk-ops-backup-%s.tar.gz", timestamp)
-	cmd := exec.Command("tar", "czf", filename, "-C", "/opt/sdk-ops", "services")
+	cmd := exec.CommandContext(context.Background(), "tar")
+	cmd.Args = append(cmd.Args, "czf", filename, "-C", "/opt/sdk-ops", "services")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "failed", fmt.Sprintf("tar: %s", string(out))
@@ -146,7 +147,8 @@ func runDockerCleanup() (string, string) {
 	}
 	var output []string
 	for _, c := range cmds {
-		cmd := exec.Command("sh", "-c", c)
+		cmd := exec.CommandContext(context.Background(), "sh")
+		cmd.Args = append(cmd.Args, "-c", c)
 		out, _ := cmd.CombinedOutput()
 		output = append(output, string(out))
 	}
@@ -154,7 +156,8 @@ func runDockerCleanup() (string, string) {
 }
 
 func runShellCommand(cmdStr string) (string, string) {
-	cmd := exec.Command("sh", "-c", cmdStr)
+	cmd := exec.CommandContext(context.Background(), "sh")
+	cmd.Args = append(cmd.Args, "-c", cmdStr)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "failed", fmt.Sprintf("exit: %v\n%s", err, string(out))

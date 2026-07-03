@@ -26,7 +26,37 @@ func newAgentCmd() *cobra.Command {
 		Short: "Manage the sdk-ops agent on nodes",
 	}
 
-	installCmd := &cobra.Command{
+	installCmd := newAgentInstallCmd(&user, &key, &port)
+	statusCmd := newAgentStatusCmd(&user, &key, &port)
+	logsCmd := newAgentLogsCmd(&user, &key, &port)
+	updateCmd := newAgentUpdateCmd(&user, &key, &port)
+	uninstallCmd := newAgentUninstallCmd(&user, &key, &port)
+	scheduleCmd := newAgentScheduleCmd(&user, &key, &port)
+
+	for _, sc := range []*cobra.Command{installCmd, statusCmd, logsCmd, uninstallCmd, updateCmd} {
+		sc.Flags().StringP("node", "n", "", "Target node IP")
+		sc.Flags().StringVarP(&user, "user", "u", "root", "SSH user")
+		sc.Flags().StringVarP(&key, "key", "k", "", "SSH private key path")
+		sc.Flags().IntVarP(&port, "port", "p", 22, "SSH port")
+	}
+	logsCmd.Flags().IntP("tail", "t", 100, "Number of lines")
+	logsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
+	updateCmd.Flags().BoolP("force", "f", false, "Force rebuild even if up to date")
+	installCmd.Flags().String("runtime", "", "Runtime: bare (default, systemd) or docker")
+	uninstallCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	uninstallCmd.Flags().Bool("purge", false, "Also remove agent data (audit logs, metrics)")
+
+	cmd.AddCommand(installCmd)
+	cmd.AddCommand(statusCmd)
+	cmd.AddCommand(logsCmd)
+	cmd.AddCommand(uninstallCmd)
+	cmd.AddCommand(updateCmd)
+	cmd.AddCommand(scheduleCmd)
+	return cmd
+}
+
+func newAgentInstallCmd(user, key *string, port *int) *cobra.Command {
+	return &cobra.Command{
 		Use:   "install --node <ip>",
 		Short: "Build and deploy the agent as a systemd service (default) or Docker container",
 		Long: `Build the agent, upload to the node, and run it.
@@ -58,20 +88,20 @@ Examples:
 				}
 				if len(cfg.Nodes) > 0 {
 					nodeIP = cfg.Nodes[0].IP
-					user = cfg.Nodes[0].User
-					key = cfg.Nodes[0].Key
-					port = cfg.Nodes[0].Port
+					*user = cfg.Nodes[0].User
+					*key = cfg.Nodes[0].Key
+					*port = cfg.Nodes[0].Port
 				}
 			}
 			if nodeIP == "" {
 				return fmt.Errorf("--node is required")
 			}
 
-			conn, err := sshConnect(nodeIP, user, key, port)
+			conn, err := sshConnect(nodeIP, *user, *key, *port)
 			if err != nil {
 				return err
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: conn close error: %v\n", err) } }()
 
 			if runtimeMode == "docker" {
 				return installAgentDocker(conn, nodeIP)
@@ -79,8 +109,10 @@ Examples:
 			return installAgentBare(conn, nodeIP)
 		},
 	}
+}
 
-	statusCmd := &cobra.Command{
+func newAgentStatusCmd(user, key *string, port *int) *cobra.Command {
+	return &cobra.Command{
 		Use:   "status [--node ip]",
 		Short: "Check agent health on a node",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -89,14 +121,13 @@ Examples:
 				return fmt.Errorf("--node is required")
 			}
 
-			client := newSSHClient(nodeIP, user, port, key)
+			client := newSSHClient(nodeIP, *user, *port, *key)
 			conn, err := client.Connect()
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: conn close error: %v\n", err) } }()
 
-			// Check systemd first, fallback to Docker
 			status, src := checkAgentStatus(conn)
 			if status == "" {
 				fmt.Printf("  ⚠️  Agent not found on %s\n", nodeIP)
@@ -115,8 +146,10 @@ Examples:
 			return nil
 		},
 	}
+}
 
-	logsCmd := &cobra.Command{
+func newAgentLogsCmd(user, key *string, port *int) *cobra.Command {
+	return &cobra.Command{
 		Use:   "logs [--node ip] [--tail N] [--follow]",
 		Short: "Show agent logs (journalctl for systemd, docker logs for Docker)",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -128,18 +161,17 @@ Examples:
 				return fmt.Errorf("--node is required")
 			}
 
-			client := newSSHClient(nodeIP, user, port, key)
+			client := newSSHClient(nodeIP, *user, *port, *key)
 			conn, err := client.Connect()
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: conn close error: %v\n", err) } }()
 
 			fl := ""
 			if follow {
 				fl = "-f"
 			}
-			// Try systemd first, fallback to Docker
 			logCmd := fmt.Sprintf("journalctl -u sdk-ops-agent -n %d --no-pager %s 2>/dev/null || docker logs %s --tail %d sdk-ops-agent 2>&1", tail, fl, fl, tail)
 			if err := streamSSH(conn, logCmd); err != nil {
 				return fmt.Errorf("logs: %w", err)
@@ -147,115 +179,10 @@ Examples:
 			return nil
 		},
 	}
+}
 
-	scheduleCmd := &cobra.Command{
-		Use:   "schedule",
-		Short: "Manage scheduled tasks via the agent",
-	}
-
-	scheduleAddCmd := &cobra.Command{
-		Use:   "add <name> --cron <expr> --task <type> [--notify failure|always|never] [--node ip]",
-		Short: "Add a scheduled task to the agent",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			cronExpr, _ := cmd.Flags().GetString("cron")
-			taskType, _ := cmd.Flags().GetString("task")
-			taskConfig, _ := cmd.Flags().GetString("config")
-			notifyOn, _ := cmd.Flags().GetString("notify")
-			nodeIP, _ := cmd.Flags().GetString("node")
-
-			if nodeIP == "" || cronExpr == "" || taskType == "" {
-				return fmt.Errorf("--node, --cron, and --task are required")
-			}
-
-			client := newSSHClient(nodeIP, user, port, key)
-			conn, err := client.Connect()
-			if err != nil {
-				return fmt.Errorf("ssh: %w", err)
-			}
-			defer conn.Close()
-
-			payload := fmt.Sprintf(`{"name":"%s","cron_expr":"%s","task_type":"%s","task_config":"%s","notify_on":"%s"}`,
-				name, cronExpr, taskType, taskConfig, notifyOn)
-			cmdStr := agentAPICmd(fmt.Sprintf("wget -qO- --post-data='%s' --header='Content-Type: application/json' http://localhost:9000/schedules", payload))
-			_, rErr := runSSH(conn, cmdStr)
-			if rErr != nil {
-				return fmt.Errorf("agent unreachable on %s: %v", nodeIP, rErr)
-			}
-			fmt.Printf("  ✅ Schedule %q added to agent\n", name)
-			return nil
-		},
-	}
-
-	scheduleListCmd := &cobra.Command{
-		Use:   "list [--node ip]",
-		Short: "List scheduled tasks from the agent",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			nodeIP, _ := cmd.Flags().GetString("node")
-			if nodeIP == "" {
-				return fmt.Errorf("--node is required")
-			}
-
-			client := newSSHClient(nodeIP, user, port, key)
-			conn, err := client.Connect()
-			if err != nil {
-				return fmt.Errorf("ssh: %w", err)
-			}
-			defer conn.Close()
-
-			out, lErr := runSSH(conn, agentAPICmd("wget -qO- http://localhost:9000/schedules")+" || echo 'agent-unreachable'")
-			if lErr != nil || strings.Contains(out, "agent-unreachable") {
-				return fmt.Errorf("agent unreachable on %s", nodeIP)
-			}
-			fmt.Println(strings.TrimSpace(out))
-			return nil
-		},
-	}
-
-	scheduleRemoveCmd := &cobra.Command{
-		Use:   "rm <id> [--node ip]",
-		Short: "Remove a scheduled task from the agent",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			nodeIP, _ := cmd.Flags().GetString("node")
-			if nodeIP == "" {
-				return fmt.Errorf("--node is required")
-			}
-
-			client := newSSHClient(nodeIP, user, port, key)
-			conn, err := client.Connect()
-			if err != nil {
-				return fmt.Errorf("ssh: %w", err)
-			}
-			defer conn.Close()
-
-			cmdStr := agentAPICmd(fmt.Sprintf("wget -qO- 'http://localhost:9000/schedules/remove?id=%s'", id))
-			resp, rErr := runSSH(conn, cmdStr)
-			if rErr != nil {
-				return fmt.Errorf("agent unreachable on %s: %v", nodeIP, rErr)
-			}
-			fmt.Printf("  ✅ Schedule %s removed\n%s", id, resp)
-			return nil
-		},
-	}
-
-	for _, sc := range []*cobra.Command{scheduleAddCmd, scheduleListCmd, scheduleRemoveCmd} {
-		sc.Flags().StringP("node", "n", "", "Target node IP")
-		sc.Flags().StringVarP(&user, "user", "u", "root", "SSH user")
-		sc.Flags().StringVarP(&key, "key", "k", "", "SSH private key path")
-		sc.Flags().IntVarP(&port, "port", "p", 22, "SSH port")
-	}
-	scheduleAddCmd.Flags().String("cron", "", "Cron expression (e.g., '0 3 * * *')")
-	scheduleAddCmd.Flags().String("task", "", "Task type: backup-services, backup-database, docker-cleanup, shell")
-	scheduleAddCmd.Flags().String("config", "", "Task config (e.g., container name for backup-database)")
-	scheduleAddCmd.Flags().String("notify", "failure", "Notify on: failure, always, never")
-	scheduleCmd.AddCommand(scheduleAddCmd)
-	scheduleCmd.AddCommand(scheduleListCmd)
-	scheduleCmd.AddCommand(scheduleRemoveCmd)
-
-	updateCmd := &cobra.Command{
+func newAgentUpdateCmd(user, key *string, port *int) *cobra.Command {
+	return &cobra.Command{
 		Use:   "update --node <ip> [--force]",
 		Short: "Check and apply agent updates",
 		Long: `Check the agent's current version against GitHub releases.
@@ -268,12 +195,12 @@ If a newer version is available, rebuild and restart the agent.`,
 				return fmt.Errorf("--node is required")
 			}
 
-			client := newSSHClient(nodeIP, user, port, key)
+			client := newSSHClient(nodeIP, *user, *port, *key)
 			conn, err := client.Connect()
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: conn close error: %v\n", err) } }()
 
 			vOut, vErr := runSSH(conn, agentAPICmd("wget -qO- http://localhost:9000/version")+" 2>/dev/null || echo '{\"current\":\"unknown\"}'")
 			if vErr != nil {
@@ -291,8 +218,10 @@ If a newer version is available, rebuild and restart the agent.`,
 			return rebuildAgent(conn, nodeIP)
 		},
 	}
+}
 
-	uninstallCmd := &cobra.Command{
+func newAgentUninstallCmd(user, key *string, port *int) *cobra.Command {
+	return &cobra.Command{
 		Use:   "uninstall --node <ip> [--yes] [--purge]",
 		Short: "Remove the agent from a node",
 		Long: `Remove the agent (systemd service or Docker container).
@@ -315,7 +244,6 @@ Examples:
 				return fmt.Errorf("--node is required")
 			}
 
-			// Confirmation prompt
 			if !yes {
 				fmt.Printf("  This will remove the agent from %s.\n", nodeIP)
 				if purge {
@@ -333,88 +261,194 @@ Examples:
 				}
 			}
 
-			client := newSSHClient(nodeIP, user, port, key)
+			client := newSSHClient(nodeIP, *user, *port, *key)
 			conn, err := client.Connect()
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: conn close error: %v\n", err) } }()
 
-			// Stop systemd (if exists) or Docker container
-			if _, err := runSSH(conn, "systemctl stop sdk-ops-agent 2>/dev/null || true"); err != nil {
-				log.Printf("ssh: %v", err)
-			}
-			if _, err := runSSH(conn, "systemctl disable sdk-ops-agent 2>/dev/null || true"); err != nil {
-				log.Printf("ssh: %v", err)
-			}
-			if _, err := runSSH(conn, "rm -f /etc/systemd/system/sdk-ops-agent.service"); err != nil {
-				log.Printf("ssh: %v", err)
-			}
-			if _, err := runSSH(conn, "systemctl daemon-reload 2>/dev/null || true"); err != nil {
-				log.Printf("ssh: %v", err)
-			}
-			if _, err := runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true"); err != nil {
-				log.Printf("ssh: %v", err)
-			}
-			if _, err := runSSH(conn, "docker rmi sdk-ops-agent:latest 2>/dev/null || true"); err != nil {
-				log.Printf("ssh: %v", err)
-			}
-
-			// Remove binary
-			if _, err := runSSH(conn, "rm -rf /opt/sdk-ops/agent"); err != nil {
-				log.Printf("ssh: %v", err)
-			}
-
-			// Remove data if --purge
-			if purge {
-				if _, err := runSSH(conn, "rm -rf /opt/sdk-ops/agent-data"); err != nil {
-					log.Printf("ssh: %v", err)
-				}
-				if _, err := runSSH(conn, "docker volume rm sdk-ops-agent-data 2>/dev/null || true"); err != nil {
-					log.Printf("ssh: %v", err)
-				}
-				fmt.Printf("  ✅ Agent removed from %s (data purged)\n", nodeIP)
-			} else {
-				fmt.Printf("  ✅ Agent removed from %s (data kept at /opt/sdk-ops/agent-data)\n", nodeIP)
-			}
+			uninstallAgentFromConn(conn, nodeIP, purge)
 			return nil
 		},
 	}
+}
 
-	for _, sc := range []*cobra.Command{installCmd, statusCmd, logsCmd, uninstallCmd, updateCmd} {
-		sc.Flags().StringP("node", "n", "", "Target node IP")
-		sc.Flags().StringVarP(&user, "user", "u", "root", "SSH user")
-		sc.Flags().StringVarP(&key, "key", "k", "", "SSH private key path")
-		sc.Flags().IntVarP(&port, "port", "p", 22, "SSH port")
+func uninstallAgentFromConn(conn *goss.Client, nodeIP string, purge bool) {
+	if _, err := runSSH(conn, "systemctl stop sdk-ops-agent 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
 	}
-	logsCmd.Flags().IntP("tail", "t", 100, "Number of lines")
-	logsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
-	updateCmd.Flags().BoolP("force", "f", false, "Force rebuild even if up to date")
-	installCmd.Flags().String("runtime", "", "Runtime: bare (default, systemd) or docker")
-	uninstallCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-	uninstallCmd.Flags().Bool("purge", false, "Also remove agent data (audit logs, metrics)")
+	if _, err := runSSH(conn, "systemctl disable sdk-ops-agent 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	if _, err := runSSH(conn, "rm -f /etc/systemd/system/sdk-ops-agent.service"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	if _, err := runSSH(conn, "systemctl daemon-reload 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	if _, err := runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	if _, err := runSSH(conn, "docker rmi sdk-ops-agent:latest 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	if _, err := runSSH(conn, "rm -rf /opt/sdk-ops/agent"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
 
-	cmd.AddCommand(installCmd)
-	cmd.AddCommand(statusCmd)
-	cmd.AddCommand(logsCmd)
-	cmd.AddCommand(uninstallCmd)
-	cmd.AddCommand(updateCmd)
-	cmd.AddCommand(scheduleCmd)
+	if purge {
+		if _, err := runSSH(conn, "rm -rf /opt/sdk-ops/agent-data"); err != nil {
+			log.Printf("ssh: %v", err)
+		}
+		if _, err := runSSH(conn, "docker volume rm sdk-ops-agent-data 2>/dev/null || true"); err != nil {
+			log.Printf("ssh: %v", err)
+		}
+		fmt.Printf("  ✅ Agent removed from %s (data purged)\n", nodeIP)
+	} else {
+		fmt.Printf("  ✅ Agent removed from %s (data kept at /opt/sdk-ops/agent-data)\n", nodeIP)
+	}
+}
+
+func newAgentScheduleCmd(user, key *string, port *int) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "schedule",
+		Short: "Manage scheduled tasks via the agent",
+	}
+
+	addCmd := newAgentScheduleAddCmd(user, key, port)
+	listCmd := newAgentScheduleListCmd(user, key, port)
+	rmCmd := newAgentScheduleRemoveCmd(user, key, port)
+
+	for _, sc := range []*cobra.Command{addCmd, listCmd, rmCmd} {
+		sc.Flags().StringP("node", "n", "", "Target node IP")
+		sc.Flags().StringVarP(user, "user", "u", "root", "SSH user")
+		sc.Flags().StringVarP(key, "key", "k", "", "SSH private key path")
+		sc.Flags().IntVarP(port, "port", "p", 22, "SSH port")
+	}
+
+	addCmd.Flags().String("cron", "", "Cron expression (e.g., '0 3 * * *')")
+	addCmd.Flags().String("task", "", "Task type: backup-services, backup-database, docker-cleanup, shell")
+	addCmd.Flags().String("config", "", "Task config (e.g., container name for backup-database)")
+	addCmd.Flags().String("notify", "failure", "Notify on: failure, always, never")
+
+	cmd.AddCommand(addCmd)
+	cmd.AddCommand(listCmd)
+	cmd.AddCommand(rmCmd)
 	return cmd
 }
 
-// agentAPICmd wraps a command to call the agent API (systemd: direct, Docker: docker exec).
+func newAgentScheduleAddCmd(user, key *string, port *int) *cobra.Command {
+	return &cobra.Command{
+		Use:   "add <name> --cron <expr> --task <type> [--notify failure|always|never] [--node ip]",
+		Short: "Add a scheduled task to the agent",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			cronExpr, _ := cmd.Flags().GetString("cron")
+			taskType, _ := cmd.Flags().GetString("task")
+			taskConfig, _ := cmd.Flags().GetString("config")
+			notifyOn, _ := cmd.Flags().GetString("notify")
+			nodeIP, _ := cmd.Flags().GetString("node")
+
+			if nodeIP == "" || cronExpr == "" || taskType == "" {
+				return fmt.Errorf("--node, --cron, and --task are required")
+			}
+
+			client := newSSHClient(nodeIP, *user, *port, *key)
+			conn, err := client.Connect()
+			if err != nil {
+				return fmt.Errorf("ssh: %w", err)
+			}
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: conn close error: %v\n", err) } }()
+
+			payload := fmt.Sprintf(`{"name":"%s","cron_expr":"%s","task_type":"%s","task_config":"%s","notify_on":"%s"}`,
+				name, cronExpr, taskType, taskConfig, notifyOn)
+			cmdStr := agentAPICmd(fmt.Sprintf("wget -qO- --post-data='%s' --header='Content-Type: application/json' http://localhost:9000/schedules", payload))
+			_, rErr := runSSH(conn, cmdStr)
+			if rErr != nil {
+				return fmt.Errorf("agent unreachable on %s: %v", nodeIP, rErr)
+			}
+			fmt.Printf("  ✅ Schedule %q added to agent\n", name)
+			return nil
+		},
+	}
+}
+
+func newAgentScheduleListCmd(user, key *string, port *int) *cobra.Command {
+	return &cobra.Command{
+		Use:   "list [--node ip]",
+		Short: "List scheduled tasks from the agent",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, _ := cmd.Flags().GetString("node")
+			if nodeIP == "" {
+				return fmt.Errorf("--node is required")
+			}
+
+			client := newSSHClient(nodeIP, *user, *port, *key)
+			conn, err := client.Connect()
+			if err != nil {
+				return fmt.Errorf("ssh: %w", err)
+			}
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: conn close error: %v\n", err) } }()
+
+			out, lErr := runSSH(conn, agentAPICmd("wget -qO- http://localhost:9000/schedules")+" || echo 'agent-unreachable'")
+			if lErr != nil || strings.Contains(out, "agent-unreachable") {
+				return fmt.Errorf("agent unreachable on %s", nodeIP)
+			}
+			fmt.Println(strings.TrimSpace(out))
+			return nil
+		},
+	}
+}
+
+func newAgentScheduleRemoveCmd(user, key *string, port *int) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rm <id> [--node ip]",
+		Short: "Remove a scheduled task from the agent",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			nodeIP, _ := cmd.Flags().GetString("node")
+			if nodeIP == "" {
+				return fmt.Errorf("--node is required")
+			}
+
+			client := newSSHClient(nodeIP, *user, *port, *key)
+			conn, err := client.Connect()
+			if err != nil {
+				return fmt.Errorf("ssh: %w", err)
+			}
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: conn close error: %v\n", err) } }()
+
+			cmdStr := agentAPICmd(fmt.Sprintf("wget -qO- 'http://localhost:9000/schedules/remove?id=%s'", id))
+			resp, rErr := runSSH(conn, cmdStr)
+			if rErr != nil {
+				return fmt.Errorf("agent unreachable on %s: %v", nodeIP, rErr)
+			}
+			fmt.Printf("  ✅ Schedule %s removed\n%s", id, resp)
+			return nil
+		},
+	}
+}
+
 func agentAPICmd(inner string) string {
 	return fmt.Sprintf("if systemctl -q is-active sdk-ops-agent 2>/dev/null; then %s; elif docker inspect sdk-ops-agent --format='{{.State.Status}}' 2>/dev/null | grep -q running; then docker exec sdk-ops-agent %s; else echo 'agent-unreachable'; fi", inner, inner)
 }
 
 func checkAgentStatus(conn *goss.Client) (status, src string) {
-	out, _ := runSSH(conn, "systemctl is-active sdk-ops-agent 2>/dev/null || echo inactive")
+	out, err := runSSH(conn, "systemctl is-active sdk-ops-agent 2>/dev/null || echo inactive")
+	if err != nil {
+		log.Printf("agent: check status error: %v", err)
+	}
 	status = strings.TrimSpace(out)
 	if status == "active" {
 		return "active", "systemd"
 	}
-	out, _ = runSSH(conn, `docker inspect sdk-ops-agent --format='{{.State.Status}}' 2>/dev/null || echo "not-found"`)
+	out, err = runSSH(conn, `docker inspect sdk-ops-agent --format='{{.State.Status}}' 2>/dev/null || echo "not-found"`)
+	if err != nil {
+		log.Printf("agent: docker inspect error: %v", err)
+	}
 	status = strings.TrimSpace(out)
 	if status != "" && status != "not-found" {
 		return status, "docker"
@@ -435,13 +469,13 @@ func uploadAgentBinary(conn *goss.Client, binaryPath string) error {
 	if err != nil {
 		return fmt.Errorf("session: %w", err)
 	}
-	defer sess.Close()
+	defer func() { if err := sess.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: session close error: %v\n", err) } }()
 
 	r, w, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("pipe: %w", err)
 	}
-	defer r.Close()
+	defer func() { if err := r.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: pipe close error: %v\n", err) } }()
 
 	sess.Stdin = r
 	errCh := make(chan error, 1)
@@ -462,9 +496,9 @@ func uploadAgentBinary(conn *goss.Client, binaryPath string) error {
 	if _, err := tw.Write(binData); err != nil {
 		return fmt.Errorf("tar write: %w", err)
 	}
-	tw.Close()
-	gw.Close()
-	w.Close()
+	if err := tw.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: tar close error: %v\n", err) }
+	if err := gw.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: gzip close error: %v\n", err) }
+	if err := w.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: pipe write close error: %v\n", err) }
 
 	return <-errCh
 }
@@ -488,7 +522,6 @@ func buildAgentBinary() (string, error) {
 }
 
 func installAgentBare(conn *goss.Client, nodeIP string) error {
-	// Clean up any Docker container first
 	if _, err := runSSH(conn, "docker rm -f sdk-ops-agent 2>/dev/null || true"); err != nil {
 		log.Printf("ssh: %v", err)
 	}
@@ -497,14 +530,13 @@ func installAgentBare(conn *goss.Client, nodeIP string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(binaryPath)
+	defer func() { if err := os.Remove(binaryPath); err != nil { fmt.Fprintf(os.Stderr, "agent: remove binary error: %v\n", err) } }()
 
 	fmt.Println("  → Uploading agent binary...")
 	if err := uploadAgentBinary(conn, binaryPath); err != nil {
 		return fmt.Errorf("upload: %w", err)
 	}
 
-	// Create systemd service
 	fmt.Println("  → Installing systemd service...")
 	dataDir := "/opt/sdk-ops/agent-data"
 	if _, err := runSSH(conn, fmt.Sprintf("mkdir -p %s", dataDir)); err != nil {
@@ -562,37 +594,15 @@ echo "done"`, unitContent)
 	return nil
 }
 
-func installAgentDocker(conn *goss.Client, nodeIP string) error {
-	// Clean up systemd service first
-	if _, err := runSSH(conn, "systemctl stop sdk-ops-agent 2>/dev/null || true"); err != nil {
-		log.Printf("ssh: %v", err)
-	}
-	if _, err := runSSH(conn, "systemctl disable sdk-ops-agent 2>/dev/null || true"); err != nil {
-		log.Printf("ssh: %v", err)
-	}
-	if _, err := runSSH(conn, "rm -f /etc/systemd/system/sdk-ops-agent.service"); err != nil {
-		log.Printf("ssh: %v", err)
-	}
-	if _, err := runSSH(conn, "systemctl daemon-reload 2>/dev/null || true"); err != nil {
-		log.Printf("ssh: %v", err)
-	}
-
-	binaryPath, err := buildAgentBinary()
-	if err != nil {
-		return err
-	}
-	defer os.Remove(binaryPath)
-
-	dockerfile := `FROM alpine:3.19
+func buildAgentDockerUpload(conn *goss.Client, binaryPath string) error {
+	fmt.Println("  → Uploading agent...")
+	dfData := []byte(`FROM alpine:3.19
 RUN apk add --no-cache ca-certificates tzdata docker-cli
 COPY sdk-ops-agent /usr/local/bin/
 EXPOSE 9000
 VOLUME /data
-ENTRYPOINT ["sdk-ops-agent"]`
+ENTRYPOINT ["sdk-ops-agent"]`)
 
-	fmt.Println("  → Uploading agent...")
-	dfData := []byte(dockerfile)
-	// Create a combined upload with both binary and Dockerfile
 	binData, _ := os.ReadFile(filepath.Clean(binaryPath))
 	if _, err := runSSH(conn, "mkdir -p /opt/sdk-ops/agent"); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
@@ -601,7 +611,7 @@ ENTRYPOINT ["sdk-ops-agent"]`
 	if err != nil {
 		return fmt.Errorf("session: %w", err)
 	}
-	defer sess.Close()
+	defer func() { if err := sess.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: session close error: %v\n", err) } }()
 	r, w, _ := os.Pipe()
 	sess.Stdin = r
 	errCh := make(chan error, 1)
@@ -615,17 +625,28 @@ ENTRYPOINT ["sdk-ops-agent"]`
 	}()
 	gw := gzip.NewWriter(w)
 	tw := tar.NewWriter(gw)
-	tw.WriteHeader(&tar.Header{Name: "sdk-ops-agent", Size: int64(len(binData)), Mode: 0755})
-	tw.Write(binData)
-	tw.WriteHeader(&tar.Header{Name: "Dockerfile", Size: int64(len(dfData)), Mode: 0644})
-	tw.Write(dfData)
-	tw.Close()
-	gw.Close()
-	w.Close()
+	if err := tw.WriteHeader(&tar.Header{Name: "sdk-ops-agent", Size: int64(len(binData)), Mode: 0755}); err != nil {
+		return fmt.Errorf("tar header: %w", err)
+	}
+	if _, err := tw.Write(binData); err != nil {
+		return fmt.Errorf("tar write: %w", err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "Dockerfile", Size: int64(len(dfData)), Mode: 0644}); err != nil {
+		return fmt.Errorf("tar header: %w", err)
+	}
+	if _, err := tw.Write(dfData); err != nil {
+		return fmt.Errorf("tar write: %w", err)
+	}
+	if err := tw.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: tar close error: %v\n", err) }
+	if err := gw.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: gzip close error: %v\n", err) }
+	if err := w.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: pipe write close error: %v\n", err) }
 	if err := <-errCh; err != nil {
 		return fmt.Errorf("upload: %w", err)
 	}
+	return nil
+}
 
+func startAgentDockerContainer(conn *goss.Client) error {
 	fmt.Println("  → Building Docker image...")
 	if out, err := runSSH(conn, "cd /opt/sdk-ops/agent && docker build -t sdk-ops-agent:latest . 2>&1"); err != nil {
 		return fmt.Errorf("docker build: %w\n%s", err, out)
@@ -647,6 +668,37 @@ ENTRYPOINT ["sdk-ops-agent"]`
 	}
 
 	time.Sleep(3 * time.Second)
+	return nil
+}
+
+func installAgentDocker(conn *goss.Client, nodeIP string) error {
+	if _, err := runSSH(conn, "systemctl stop sdk-ops-agent 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	if _, err := runSSH(conn, "systemctl disable sdk-ops-agent 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	if _, err := runSSH(conn, "rm -f /etc/systemd/system/sdk-ops-agent.service"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+	if _, err := runSSH(conn, "systemctl daemon-reload 2>/dev/null || true"); err != nil {
+		log.Printf("ssh: %v", err)
+	}
+
+	binaryPath, err := buildAgentBinary()
+	if err != nil {
+		return err
+	}
+	defer func() { if err := os.Remove(binaryPath); err != nil { fmt.Fprintf(os.Stderr, "agent: remove binary error: %v\n", err) } }()
+
+	if err := buildAgentDockerUpload(conn, binaryPath); err != nil {
+		return err
+	}
+
+	if err := startAgentDockerContainer(conn); err != nil {
+		return err
+	}
+
 	status, _ := runSSH(conn, `docker inspect sdk-ops-agent --format='{{.State.Status}}'`)
 	if strings.TrimSpace(status) == "running" {
 		fmt.Printf("\n✅ Agent deployed on %s (status: running, Docker)\n", nodeIP)
@@ -662,14 +714,13 @@ func rebuildAgent(conn *goss.Client, nodeIP string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(binaryPath)
+	defer func() { if err := os.Remove(binaryPath); err != nil { fmt.Fprintf(os.Stderr, "agent: remove binary error: %v\n", err) } }()
 
 	fmt.Println("  → Uploading agent binary...")
 	if err := uploadAgentBinary(conn, binaryPath); err != nil {
 		return fmt.Errorf("upload: %w", err)
 	}
 
-	// Try systemd restart, fallback to Docker
 	out, _ := runSSH(conn, "systemctl restart sdk-ops-agent 2>&1 && echo 'systemd-ok' || echo 'systemd-fail'")
 	if strings.Contains(out, "systemd-ok") {
 		time.Sleep(2 * time.Second)
@@ -681,7 +732,6 @@ func rebuildAgent(conn *goss.Client, nodeIP string) error {
 		return fmt.Errorf("agent not active after restart: %s", strings.TrimSpace(status))
 	}
 
-	// Docker fallback: rebuild image and restart
 	fmt.Println("  → Rebuilding Docker image...")
 	if _, err := runSSH(conn, "cd /opt/sdk-ops/agent && docker build -t sdk-ops-agent:latest . 2>&1 || true"); err != nil {
 		log.Printf("ssh: %v", err)
@@ -721,7 +771,7 @@ func runSSH(conn *goss.Client, cmd string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("session: %w", err)
 	}
-	defer sess.Close()
+	defer func() { if err := sess.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: session close error: %v\n", err) } }()
 	out, err := sess.CombinedOutput(cmd)
 	return string(out), err
 }
@@ -731,7 +781,7 @@ func streamSSH(conn *goss.Client, cmd string) error {
 	if err != nil {
 		return fmt.Errorf("session: %w", err)
 	}
-	defer sess.Close()
+	defer func() { if err := sess.Close(); err != nil { fmt.Fprintf(os.Stderr, "agent: session close error: %v\n", err) } }()
 	sess.Stdout = os.Stdout
 	sess.Stderr = os.Stderr
 	return sess.Run(cmd)

@@ -3,6 +3,7 @@ package ssh
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -39,17 +40,18 @@ func WithInsecure() Option {
 }
 
 func New(host, user string, opts ...Option) *Client {
+	homeDir, _ := os.UserHomeDir()
 	c := &Client{
 		host: host,
 		port: 22,
 		user: user,
-		key:  os.ExpandEnv("$HOME/.ssh/id_ed25519"),
+		key:  filepath.Join(homeDir, ".ssh", "id_ed25519"),
 	}
 	for _, o := range opts {
 		o(c)
 	}
 	if _, err := os.Stat(c.key); os.IsNotExist(err) {
-		c.key = os.ExpandEnv("$HOME/.ssh/id_rsa")
+		c.key = filepath.Join(homeDir, ".ssh", "id_rsa")
 	}
 	if _, err := os.Stat(c.key); os.IsNotExist(err) {
 		c.usePW = true
@@ -60,56 +62,75 @@ func New(host, user string, opts ...Option) *Client {
 func hostKeyCallback() (ssh.HostKeyCallback, error) {
 	isStrict := os.Getenv("SDK_OPS_SSH_STRICT_HOST_KEY") == "true" || os.Getenv("SDK_OPS_SSH_STRICT_HOST_KEY") == "1"
 	khPath := filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts")
-	if cb, err := knownhosts.New(khPath); err == nil {
-		if isStrict {
-			return cb, nil
-		}
+	cb, err := knownhosts.New(khPath)
+	if err == nil {
+		return cb, nil
 	}
 	if isStrict {
-		return nil, fmt.Errorf("known_hosts not available (set SDK_OPS_SSH_STRICT_HOST_KEY=false or create ~/.ssh/known_hosts)")
+		return nil, fmt.Errorf("known_hosts not available: %w (set SDK_OPS_SSH_STRICT_HOST_KEY=false to disable)", err)
 	}
-	return ssh.InsecureIgnoreHostKey(), nil
+	log.Printf("WARNING: unknown host key check skipped (add host to ~/.ssh/known_hosts to enable)")
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error { return nil }, nil
 }
 
-func (c *Client) authMethods() ([]ssh.AuthMethod, error) {
-	// Try SSH agent first
+func tryAgentAuth() []ssh.AuthMethod {
 	authSock := os.Getenv("SSH_AUTH_SOCK")
-	if authSock != "" && !strings.Contains(authSock, "..") {
-		sockPath := filepath.Clean(authSock)
-		if sockPath != "." && strings.HasPrefix(sockPath, "/") && !strings.Contains(sockPath, "..") {
-			fi, err := os.Stat(sockPath)
-			if err == nil && fi.Mode()&os.ModeSocket != 0 {
-				if conn, err := net.Dial("unix", sockPath); err == nil {
-					agentClient := agent.NewClient(conn)
-					signers, err := agentClient.Signers()
-					if err == nil && len(signers) > 0 {
-						return []ssh.AuthMethod{ssh.PublicKeys(signers...)}, nil
-					}
-					conn.Close()
-				}
-			}
-		}
+	if authSock == "" || strings.Contains(authSock, "..") {
+		return nil
 	}
-
-	if c.usePW {
-		fmt.Printf("🔑 Password for %s@%s: ", c.user, c.host)
-		pass, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Println()
-		if err != nil {
-			return nil, fmt.Errorf("read password: %w", err)
-		}
-		return []ssh.AuthMethod{ssh.Password(string(pass))}, nil
+	sockPath := filepath.Clean(authSock)
+	if sockPath == "." || !strings.HasPrefix(sockPath, "/") || strings.Contains(sockPath, "..") {
+		return nil
 	}
-
-	key, err := os.ReadFile(c.key)
+	fi, err := os.Stat(sockPath)
+	if err != nil || fi.Mode()&os.ModeSocket == 0 {
+		return nil
+	}
+	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: sockPath, Net: "unix"})
 	if err != nil {
-		return nil, fmt.Errorf("read key %s: %w", c.key, err)
+		return nil
+	}
+	agentClient := agent.NewClient(conn)
+	signers, err := agentClient.Signers()
+	if err != nil || len(signers) == 0 {
+		if err := conn.Close(); err != nil {
+			log.Printf("ssh: close: %v", err)
+		}
+		return nil
+	}
+	return []ssh.AuthMethod{ssh.PublicKeys(signers...)}
+}
+
+func tryPasswordAuth(user, host string) ([]ssh.AuthMethod, error) {
+	fmt.Printf("🔑 Password for %s@%s: ", user, host)
+	pass, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println()
+	if err != nil {
+		return nil, fmt.Errorf("read password: %w", err)
+	}
+	return []ssh.AuthMethod{ssh.Password(string(pass))}, nil
+}
+
+func tryKeyAuth(keyPath string) ([]ssh.AuthMethod, error) {
+	key, err := os.ReadFile(filepath.Clean(keyPath))
+	if err != nil {
+		return nil, fmt.Errorf("read key %s: %w", keyPath, err)
 	}
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
-		return nil, fmt.Errorf("parse key %s: %w", c.key, err)
+		return nil, fmt.Errorf("parse key %s: %w", keyPath, err)
 	}
 	return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
+}
+
+func (c *Client) authMethods() ([]ssh.AuthMethod, error) {
+	if methods := tryAgentAuth(); methods != nil {
+		return methods, nil
+	}
+	if c.usePW {
+		return tryPasswordAuth(c.user, c.host)
+	}
+	return tryKeyAuth(c.key)
 }
 
 func (c *Client) Connect() (*ssh.Client, error) {
@@ -143,7 +164,7 @@ func Run(client *ssh.Client, cmd string) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("session: %w", err)
 	}
-	defer sess.Close()
+	defer func() { if err := sess.Close(); err != nil { log.Printf("ssh: close: %v", err) } }()
 
 	out, err := sess.CombinedOutput(cmd)
 	if err != nil {
@@ -157,7 +178,7 @@ func RunStream(client *ssh.Client, cmd string) error {
 	if err != nil {
 		return fmt.Errorf("session: %w", err)
 	}
-	defer sess.Close()
+	defer func() { if err := sess.Close(); err != nil { log.Printf("ssh: close: %v", err) } }()
 
 	outReader, err := sess.StdoutPipe()
 	if err != nil {
@@ -179,7 +200,7 @@ func RunStream(client *ssh.Client, cmd string) error {
 	}()
 
 	go func() {
-		io.Copy(os.Stderr, errReader)
+		if _, err := io.Copy(os.Stderr, errReader); err != nil { log.Printf("ssh: io copy error: %v", err) }
 	}()
 
 	if err := sess.Wait(); err != nil {
@@ -193,7 +214,7 @@ func RunPTY(client *ssh.Client, cmd string) error {
 	if err != nil {
 		return fmt.Errorf("session: %w", err)
 	}
-	defer sess.Close()
+	defer func() { if err := sess.Close(); err != nil { log.Printf("ssh: close: %v", err) } }()
 
 	sess.Stdout = os.Stdout
 	sess.Stderr = os.Stderr

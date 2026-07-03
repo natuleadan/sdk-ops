@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -155,6 +156,6 @@ echo "Alertmanager removed"
 
 func parseInt64(s string) int64 {
 	var n int64
-	fmt.Sscanf(s, "%d", &n)
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil { log.Printf("alerting: parse int error: %v", err) }
 	return n
 }

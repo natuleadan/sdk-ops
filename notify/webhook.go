@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 )
 
@@ -34,7 +35,7 @@ func (w *Webhook) Send(title, message string) error {
 	if err != nil {
 		return fmt.Errorf("webhook post: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { if err := resp.Body.Close(); err != nil { log.Printf("webhook: body close error: %v", err) } }()
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("webhook: HTTP %d", resp.StatusCode)
 	}

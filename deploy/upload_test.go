@@ -88,8 +88,8 @@ func TestAtoi(t *testing.T) {
 	}
 }
 
-func TestUploadAndDeploy_TarContent(t *testing.T) {
-	// Create a temp source directory with sample files
+func createTestSourceDir(t *testing.T) string {
+	t.Helper()
 	srcDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(srcDir, "main.go"), []byte("package main"), 0644); err != nil {
 		t.Fatal(err)
@@ -97,17 +97,19 @@ func TestUploadAndDeploy_TarContent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "service.yaml"), []byte("name: test"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// Hidden file should be excluded
 	if err := os.WriteFile(filepath.Join(srcDir, ".env"), []byte("secret"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	return srcDir
+}
 
-	// Test the walk function by directly building a tar
+func buildTestTar(t *testing.T, srcDir string) *bytes.Buffer {
+	t.Helper()
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gw)
 
-	walkFn := func(path string, info os.FileInfo, err error) error {
+	excludeHidden := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -129,9 +131,6 @@ func TestUploadAndDeploy_TarContent(t *testing.T) {
 			return err
 		}
 		header.Name = rel
-		if info.IsDir() {
-			header.Name += "/"
-		}
 		if err := tw.WriteHeader(header); err != nil {
 			return err
 		}
@@ -146,14 +145,17 @@ func TestUploadAndDeploy_TarContent(t *testing.T) {
 		return nil
 	}
 
-	if err := filepath.Walk(srcDir, walkFn); err != nil {
+	if err := filepath.Walk(srcDir, excludeHidden); err != nil {
 		t.Fatal(err)
 	}
 	tw.Close()
 	gw.Close()
+	return &buf
+}
 
-	// Read back the tar
-	gr, err := gzip.NewReader(&buf)
+func verifyTarContent(t *testing.T, buf *bytes.Buffer, expected ...string) {
+	t.Helper()
+	gr, err := gzip.NewReader(buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,18 +174,18 @@ func TestUploadAndDeploy_TarContent(t *testing.T) {
 		files = append(files, hdr.Name)
 	}
 
-	// Should include main.go and service.yaml, NOT .env
-	if !contains(files, "main.go") {
-		t.Error("tar missing main.go")
+	for _, exp := range expected {
+		if !slices.Contains(files, exp) {
+			t.Errorf("tar missing %s", exp)
+		}
 	}
-	if !contains(files, "service.yaml") {
-		t.Error("tar missing service.yaml")
-	}
-	if contains(files, ".env") {
+	if slices.Contains(files, ".env") {
 		t.Error("tar should not include .env")
 	}
 }
 
-func contains(slice []string, s string) bool {
-	return slices.Contains(slice, s)
+func TestUploadAndDeploy_TarContent(t *testing.T) {
+	srcDir := createTestSourceDir(t)
+	buf := buildTestTar(t, srcDir)
+	verifyTarContent(t, buf, "main.go", "service.yaml")
 }

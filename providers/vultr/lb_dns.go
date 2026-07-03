@@ -3,6 +3,7 @@ package vultr
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/vultr/govultr/v3"
 
@@ -24,7 +25,7 @@ func (c *Client) CreateBareMetal(ctx context.Context, cfg providers.BareMetalCre
 		UserData: cfg.UserData,
 	})
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create baremetal: %w", err)
@@ -48,7 +49,7 @@ func (c *Client) DeleteBareMetal(ctx context.Context, id string) error {
 func (c *Client) ListBareMetal(ctx context.Context) ([]providers.BareMetal, error) {
 	bms, _, resp, err := c.client.BareMetalServer.List(ctx, &govultr.ListOptions{})
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list baremetal: %w", err)
@@ -70,7 +71,7 @@ func (c *Client) CreateLB(ctx context.Context, cfg providers.LBCreateConfig) (*p
 		BalancingAlgorithm: cfg.Algorithm,
 	})
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create lb: %w", err)
@@ -90,7 +91,7 @@ func (c *Client) DeleteLB(ctx context.Context, id string) error {
 func (c *Client) ListLB(ctx context.Context) ([]providers.LoadBalancer, error) {
 	lbs, _, resp, err := c.client.LoadBalancer.List(ctx, &govultr.ListOptions{})
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list lb: %w", err)
@@ -105,7 +106,7 @@ func (c *Client) ListLB(ctx context.Context) ([]providers.LoadBalancer, error) {
 func (c *Client) ListDNSZones(ctx context.Context) ([]providers.DNSZone, error) {
 	domains, _, resp, err := c.client.Domain.List(ctx, &govultr.ListOptions{})
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list domains: %w", err)
@@ -129,7 +130,7 @@ func (c *Client) CreateDNSRecord(ctx context.Context, zoneID string, r providers
 	}
 	_, resp, err := c.client.DomainRecord.Create(ctx, zoneID, req)
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	return err
 }

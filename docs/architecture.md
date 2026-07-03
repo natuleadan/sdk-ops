@@ -85,7 +85,7 @@ terraform/           ← Terraform HCL export (provider vps export)
 secrets/             ← sops encryption/decryption helpers (deploy encrypt/decrypt)
 
 ssh/                 ← SSH client (connect, exec, stream, PTY, agent support)
-├── client.go        ← SSH Client + KnownHosts + agent auth + InsecureIgnoreHostKey
+├── client.go        ← SSH Client + KnownHosts + agent auth + configurable HostKeyCallback (env: SDK_OPS_SSH_STRICT_HOST_KEY)
 
 hardening/           ← Step-by-step server hardening (10 steps)
 ├── apply.go         ← Orchestrator (calls steps in order)

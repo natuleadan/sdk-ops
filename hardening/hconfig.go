@@ -2,6 +2,7 @@ package hardening
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -31,8 +32,9 @@ type HardeningLog struct {
 }
 
 func ConfigDir() string {
-	dir := filepath.Join(os.ExpandEnv("$HOME/.sdk-ops"), "servers")
-	os.MkdirAll(dir, 0700)
+	homeDir, _ := os.UserHomeDir()
+	dir := filepath.Join(homeDir, ".sdk-ops", "servers")
+	if err := os.MkdirAll(dir, 0700); err != nil { log.Printf("mkdir: %v", err) }
 	return dir
 }
 

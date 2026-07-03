@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,14 @@ func newDeployCmd() *cobra.Command {
 		Short: "Deploy and manage services on nodes",
 	}
 
+	cmd.AddCommand(newDeployPushCmd())
+	cmd.AddCommand(newDeployEncryptCmd())
+	cmd.AddCommand(newDeployDecryptCmd())
+	cmd.AddCommand(newDeployInitCmd())
+	return cmd
+}
+
+func newDeployPushCmd() *cobra.Command {
 	var deployCmd = &cobra.Command{
 		Use:   "push <dir> [--node ip]",
 		Short: "Upload and deploy a service to a node",
@@ -46,365 +55,7 @@ Examples:
   sdk-ops deploy push --git https://github.com/user/service.git --node 188.xxx.xxx.xxx
   sdk-ops deploy push ./my-service --all
   sdk-ops deploy push ./my-service --sops-key age1...`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			gitURL, _ := cmd.Flags().GetString("git")
-			gitBranch, _ := cmd.Flags().GetString("branch")
-			gitSSHKey, _ := cmd.Flags().GetString("ssh-key")
-
-			sourceDir := ""
-			if len(args) > 0 {
-				sourceDir = args[0]
-			}
-
-			if gitURL != "" {
-				tmpDir, err := os.MkdirTemp("", "sdk-deploy-*")
-				if err != nil {
-					return fmt.Errorf("create temp dir: %w", err)
-				}
-				defer os.RemoveAll(tmpDir)
-
-				cloneArgs := []string{"clone", "--depth=1"}
-				if gitBranch != "" {
-					cloneArgs = append(cloneArgs, "--branch", gitBranch)
-				}
-				cloneArgs = append(cloneArgs, gitURL, tmpDir)
-
-				cloneCmd := exec.CommandContext(context.Background(), "git", cloneArgs...)
-				if gitSSHKey != "" {
-					cloneCmd.Env = append(os.Environ(),
-						fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=no", gitSSHKey))
-				}
-
-				fmt.Printf("  → Cloning %s", gitURL)
-				if gitBranch != "" {
-					fmt.Printf(" (branch: %s)", gitBranch)
-				}
-				fmt.Println("...")
-				if err := cloneCmd.Run(); err != nil {
-					return fmt.Errorf("git clone: %w", err)
-				}
-
-				entries, _ := os.ReadDir(tmpDir)
-				if len(entries) == 1 && entries[0].IsDir() {
-					sourceDir = filepath.Join(tmpDir, entries[0].Name())
-				} else {
-					sourceDir = tmpDir
-				}
-			}
-
-			if sourceDir == "" {
-				return fmt.Errorf("provide a directory or use --git <url>")
-			}
-
-			nodeIP, _ := cmd.Flags().GetString("node")
-			name, _ := cmd.Flags().GetString("name")
-			user, _ := cmd.Flags().GetString("user")
-			key, _ := cmd.Flags().GetString("key")
-			port, _ := cmd.Flags().GetInt("port")
-			sopsKey, _ := cmd.Flags().GetString("sops-key")
-			runAll, _ := cmd.Flags().GetBool("all")
-			builderType, _ := cmd.Flags().GetString("builder")
-			zeroDowntime, _ := cmd.Flags().GetBool("zero-downtime")
-			runtimeMode, _ := cmd.Flags().GetString("runtime")
-			deployDomain, _ := cmd.Flags().GetString("domain")
-
-			if nodeIP != "" {
-				if n := lookupNode(nodeIP); n != nil {
-					if user == "" { user = n.User }
-					if key == ""  { key = n.Key }
-					if port == 0  { port = n.Port }
-				}
-			}
-
-			cfg, cfgErr := loadConfig()
-			if nodeIP == "" && !runAll {
-				if cfgErr != nil {
-					return fmt.Errorf("load config: %w", cfgErr)
-				}
-				if len(cfg.Nodes) == 0 {
-					return fmt.Errorf("no nodes registered. Use --node <ip> or --all")
-				}
-				nodeIP = cfg.Nodes[0].IP
-				user = cfg.Nodes[0].User
-				key = cfg.Nodes[0].Key
-				port = cfg.Nodes[0].Port
-				fmt.Printf("  Using first registered node: %s\n", nodeIP)
-			}
-
-			if name == "" {
-				name = strings.TrimSuffix(sourceDir, "/")
-				if idx := strings.LastIndex(name, "/"); idx >= 0 {
-					name = name[idx+1:]
-				}
-			}
-
-			svcYamlPath := filepath.Join(sourceDir, "service.yaml")
-
-			// Decrypt service.yaml if --sops-key
-			if sopsKey != "" {
-				if secrets.FileIsEncrypted(svcYamlPath) {
-					fmt.Println("  → Decrypting service.yaml...")
-					if err := secrets.DecryptFileInPlace(svcYamlPath); err != nil {
-						return fmt.Errorf("decrypt: %w", err)
-					}
-					defer func() {
-						fmt.Println("  → Re-encrypting service.yaml...")
-						secrets.EncryptFile(svcYamlPath, sopsKey)
-					}()
-				}
-			}
-
-			// Build and push image using selected builder
-			reg := deploy.DefaultRegistry()
-			var imageRef string
-			var buildErr error
-
-			if builderType != "" {
-				bt := deploy.BuilderType(builderType)
-				startSpinner("Building (" + builderType + ")...")
-				imageRef, buildErr = deploy.BuildImage(sourceDir, name, reg, bt)
-				if buildErr != nil {
-					stopSpinner("")
-					fmt.Printf("  %s⚠ Build failed: %v%s\n", colorYellow, buildErr, colorReset)
-				} else {
-					stopSpinner("Image pushed to registry via " + builderType)
-				}
-			} else {
-				detected := deploy.DetectBuilder(sourceDir)
-				if detected == "" {
-					fmt.Println("  → docker-compose detected, skipping build")
-				} else {
-					fmt.Printf("  → Detected builder: %s\n", detected)
-					startSpinner("Building...")
-					imageRef, buildErr = deploy.BuildImage(sourceDir, name, reg, detected)
-					if buildErr != nil {
-						stopSpinner("")
-						fmt.Printf("  %s⚠ Build failed: %v%s\n", colorYellow, buildErr, colorReset)
-					} else {
-					stopSpinner("Image pushed to registry via " + string(detected))
-					}
-				}
-			}
-
-			if imageRef != "" {
-				checkClient := newSSHClient(nodeIP, user, port, key)
-				if checkConn, err := checkClient.Connect(); err == nil {
-					dockerOut, _, _ := ssh.Run(checkConn, "command -v docker || echo 'no-docker'")
-					if strings.TrimSpace(dockerOut) == "no-docker" {
-						fmt.Println("  → Docker not found on node, installing...")
-						docker.Install(checkConn)
-					}
-					if reg.Username != "" && reg.Password != "" {
-						ssh.Run(checkConn, fmt.Sprintf("sudo docker login %s -u %s -p %s 2>/dev/null || true", reg.Server, reg.Username, reg.Password))
-					}
-					checkConn.Close()
-				}
-			}
-
-			// Detect hasDB, appPort, and health config from service.yaml
-			hasDB := false
-			appPort := 8080
-			healthURL := ""
-			healthTimeout := 30
-			if data, err := os.ReadFile(svcYamlPath); err == nil {
-				hasDB = strings.Contains(string(data), "database:") && strings.Contains(string(data), "url:")
-				inHealth := false
-				for _, line := range strings.Split(string(data), "\n") {
-					trimmed := strings.TrimSpace(line)
-					if strings.HasPrefix(trimmed, "port:") {
-						fmt.Sscanf(trimmed, "port: %d", &appPort)
-					}
-					if trimmed == "health:" {
-						inHealth = true
-						continue
-					}
-					if inHealth && (trimmed == "" || !strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "#") && strings.Contains(trimmed, ":")) {
-						if strings.HasPrefix(trimmed, "path:") || strings.HasPrefix(trimmed, "url:") {
-							var val string
-							fmt.Sscanf(trimmed, "%s %s", &val, &val)
-							if val != "" && !strings.HasPrefix(val, "#") && val != "path:" && val != "url:" {
-								port := appPort
-								if port == 0 {
-									port = 8080
-								}
-								if strings.HasPrefix(val, "/") {
-									healthURL = fmt.Sprintf("http://localhost:%d%s", port, val)
-								} else {
-									healthURL = val
-								}
-							}
-						}
-						if strings.HasPrefix(trimmed, "interval:") {
-							fmt.Sscanf(trimmed, "interval: %d", &healthTimeout)
-						}
-					} else if inHealth && !strings.HasPrefix(trimmed, " ") && !strings.HasPrefix(trimmed, "\t") && trimmed != "" {
-						inHealth = false
-					}
-					// Also support flat health_url:/health_timeout: top-level keys
-					if !inHealth {
-						if strings.HasPrefix(trimmed, "health_url:") {
-							fmt.Sscanf(trimmed, "health_url: %s", &healthURL)
-						}
-						if strings.HasPrefix(trimmed, "health_timeout:") {
-							fmt.Sscanf(trimmed, "health_timeout: %d", &healthTimeout)
-						}
-					}
-				}
-			}
-			if mainData, err := os.ReadFile(filepath.Join(sourceDir, "main.go")); err == nil {
-				re := regexp.MustCompile(`Port:\s*(\d+)`)
-				if matches := re.FindStringSubmatch(string(mainData)); len(matches) > 1 {
-					if p, err := strconv.Atoi(matches[1]); err == nil && p > 0 {
-						appPort = p
-					}
-				}
-			}
-
-			dockerComposePath := filepath.Join(sourceDir, "docker-compose.yml")
-			if imageRef != "" {
-				composeData := deploy.GenerateCompose(imageRef, name, appPort, hasDB)
-				os.WriteFile(dockerComposePath, composeData, 0644)
-				fmt.Printf("  → Generated docker-compose.yml (port %d, postgres: %v)\n", appPort, hasDB)
-
-				if hasDB {
-					if data, err := os.ReadFile(svcYamlPath); err == nil {
-						updated := strings.ReplaceAll(string(data), "@localhost:", fmt.Sprintf("@%s-db:", name))
-						updated = strings.ReplaceAll(updated, "@127.0.0.1:", fmt.Sprintf("@%s-db:", name))
-						os.WriteFile(svcYamlPath, []byte(updated), 0644)
-						fmt.Printf("  → Updated service.yaml to use %s-db hostname\n", name)
-					}
-				}
-			}
-
-			deployToOne := func(nip, nuser, nkey string, nport int) error {
-				client := newSSHClient(nip, nuser, nport, nkey)
-				conn, err := client.Connect()
-				if err != nil {
-					return fmt.Errorf("cannot connect to %s: %w\n  %sSuggestion: check that the server is reachable and port %d is open%s", nip, err, colorYellow, nport, colorReset)
-				}
-				defer conn.Close()
-
-				// Run pre-deploy hooks
-				hooks.Run(conn, "pre-deploy", map[string]string{
-					"APP":  name,
-					"NODE": nip,
-				})
-
-				uploadCfg := deploy.UploadConfig{
-					ServiceName: name,
-					SourceDir:   sourceDir,
-					Exclude:     []string{".git", "node_modules", ".env", ".DS_Store", ".dockerignore"},
-				}
-
-				startSpinner("Uploading " + name + "...")
-				result, err := deploy.UploadAndDeploy(conn, uploadCfg)
-				if err != nil {
-					stopSpinner("")
-					return fmt.Errorf("upload: %w", err)
-				}
-				stopSpinner("Deployed v" + result.Version)
-
-				switch runtimeMode {
-				case "k3s":
-					versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
-					if err := deploy.DeployK3sFromCompose(conn, name, versionDir, imageRef); err != nil {
-						return fmt.Errorf("k3s deploy: %w", err)
-					}
-					if deployDomain != "" {
-						fmt.Printf("  → Access at http://%s/\n", deployDomain)
-					}
-				case "swarm":
-					versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
-					if err := deploy.DeploySwarm(conn, name, versionDir, imageRef); err != nil {
-						return fmt.Errorf("swarm deploy: %w", err)
-					}
-				case "bare":
-					versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
-					if err := deploy.DeployBare(conn, name, versionDir); err != nil {
-						return fmt.Errorf("bare deploy: %w", err)
-					}
-				default:
-					if zeroDowntime {
-						serviceDir := fmt.Sprintf("/opt/sdk-ops/services/%s", name)
-						if err := deploy.DeployBlueGreen(conn, name, serviceDir, result.Version); err != nil {
-							return fmt.Errorf("blue/green: %w", err)
-						}
-					} else {
-						svcCfg := deploy.ServiceConfig{
-						Name:          name,
-						HealthURL:     healthURL,
-						HealthTimeout: healthTimeout,
-					}
-					if err := deploy.RunService(conn, svcCfg); err != nil {
-						return fmt.Errorf("deploy failed: %w", err)
-					}
-
-					if err := deploy.HealthCheck(conn, name, healthTimeout, healthURL); err != nil {
-						fmt.Printf("\n  ⚠️  Health check failed on %s, rolling back...\n", nip)
-						if rbErr := deploy.Rollback(conn, name, ""); rbErr != nil {
-							return fmt.Errorf("health: %v\nrollback also failed: %v", err, rbErr)
-						}
-						deploy.RunService(conn, svcCfg)
-						return fmt.Errorf("health check failed on %s, rolled back", nip)
-					}
-				}
-			}
-
-				// Run post-deploy hooks
-				hooks.Run(conn, "post-deploy", map[string]string{
-					"APP":     name,
-					"NODE":    nip,
-					"VERSION": result.Version,
-				})
-
-				// Detect actual runtime for state
-				detectedRT := runtimeMode
-				if detectedRT == "" {
-					if out, _, _ := ssh.Run(conn, "command -v k3s && echo k3s || (command -v docker && echo docker) || echo systemd"); out != "" {
-						detectedRT = strings.TrimSpace(out)
-					}
-				}
-				// Record in state
-				stateRecord("service", name, nip, result.Version, detectedRT, "ok", map[string]string{
-					"port": fmt.Sprintf("%d", appPort),
-				})
-
-				fmt.Printf("\n%s✅ %s deployed on %s (v%s)%s\n", colorGreen, name, nip, result.Version, colorReset)
-				return nil
-			}
-
-			if runAll {
-				if cfgErr != nil {
-					return fmt.Errorf("load config: %w", cfgErr)
-				}
-				if len(cfg.Nodes) == 0 {
-					return fmt.Errorf("no nodes registered")
-				}
-
-				fmt.Printf("  → Deploying %s to %d nodes...\n", name, len(cfg.Nodes))
-				var wg sync.WaitGroup
-				errs := make(chan error, len(cfg.Nodes))
-
-				for _, n := range cfg.Nodes {
-					wg.Add(1)
-					go func(node NodeConfig) {
-						defer wg.Done()
-						if err := deployToOne(node.IP, node.User, node.Key, node.Port); err != nil {
-							errs <- err
-						}
-					}(n)
-				}
-				wg.Wait()
-				close(errs)
-
-				for e := range errs {
-					fmt.Fprintf(os.Stderr, "error: %v\n", e)
-				}
-				return nil
-			}
-
-			return deployToOne(nodeIP, user, key, port)
-		},
+		RunE: runDeployPush,
 	}
 	deployCmd.Flags().StringP("node", "n", "", "Target node IP (default: first registered node)")
 	deployCmd.Flags().StringP("name", "N", "", "Service name (default: directory name)")
@@ -420,7 +71,556 @@ Examples:
 	deployCmd.Flags().Bool("zero-downtime", false, "Blue/green deploy with zero downtime")
 	deployCmd.Flags().String("runtime", "", "Runtime: docker (default), k3s, swarm, bare")
 	deployCmd.Flags().String("domain", "", "Domain for k3s Ingress (required with --runtime k3s)")
+	return deployCmd
+}
 
+type deployPushFlags struct {
+	nodeIP       string
+	name         string
+	user         string
+	key          string
+	port         int
+	sopsKey      string
+	runAll       bool
+	builderType  string
+	zeroDowntime bool
+	runtimeMode  string
+	deployDomain string
+}
+
+func parseDeployPushFlags(cmd *cobra.Command) deployPushFlags {
+	nodeIP, _ := cmd.Flags().GetString("node")
+	name, _ := cmd.Flags().GetString("name")
+	user, _ := cmd.Flags().GetString("user")
+	key, _ := cmd.Flags().GetString("key")
+	port, _ := cmd.Flags().GetInt("port")
+	sopsKey, _ := cmd.Flags().GetString("sops-key")
+	runAll, _ := cmd.Flags().GetBool("all")
+	builderType, _ := cmd.Flags().GetString("builder")
+	zeroDowntime, _ := cmd.Flags().GetBool("zero-downtime")
+	runtimeMode, _ := cmd.Flags().GetString("runtime")
+	deployDomain, _ := cmd.Flags().GetString("domain")
+	return deployPushFlags{
+		nodeIP: nodeIP, name: name, user: user, key: key, port: port,
+		sopsKey: sopsKey, runAll: runAll, builderType: builderType,
+		zeroDowntime: zeroDowntime, runtimeMode: runtimeMode, deployDomain: deployDomain,
+	}
+}
+
+func resolveDeployNode(flags *deployPushFlags) {
+	if flags.nodeIP == "" {
+		return
+	}
+	n := lookupNode(flags.nodeIP)
+	if n == nil {
+		return
+	}
+	if flags.user == "" {
+		flags.user = n.User
+	}
+	if flags.key == "" {
+		flags.key = n.Key
+	}
+	if flags.port == 0 {
+		flags.port = n.Port
+	}
+}
+
+func runDeployPush(cmd *cobra.Command, args []string) error {
+	sourceDir, cleanup, err := resolveSourceDir(cmd, args)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if sourceDir == "" {
+		return fmt.Errorf("provide a directory or use --git <url>")
+	}
+	sourceDir = sanitizeSourceDir(sourceDir)
+
+	flags := parseDeployPushFlags(cmd)
+	resolveDeployNode(&flags)
+	cfg, cfgErr := loadConfig()
+	if flags.nodeIP == "" && !flags.runAll {
+		if cfgErr != nil {
+			return fmt.Errorf("load config: %w", cfgErr)
+		}
+		if len(cfg.Nodes) == 0 {
+			return fmt.Errorf("no nodes registered. Use --node <ip> or --all")
+		}
+		flags.nodeIP = cfg.Nodes[0].IP
+		flags.user = cfg.Nodes[0].User
+		flags.key = cfg.Nodes[0].Key
+		flags.port = cfg.Nodes[0].Port
+		fmt.Printf("  Using first registered node: %s\n", flags.nodeIP)
+	}
+
+	flags.name = resolveServiceName(flags.name, sourceDir)
+
+	svcYamlPath := filepath.Join(sourceDir, "service.yaml")
+
+	reencrypt, err := decryptSecretsIfNeeded(svcYamlPath, flags.sopsKey)
+	if err != nil {
+		return err
+	}
+	defer reencrypt()
+
+	reg := deploy.DefaultRegistry()
+	imageRef := buildImage(sourceDir, flags.name, flags.builderType, reg)
+
+	if imageRef != "" {
+		ensureDockerOnNode(flags.nodeIP, flags.user, flags.key, flags.port, reg)
+	}
+
+	appPort, healthURL, healthTimeout, hasDB := parseServiceConfig(svcYamlPath, sourceDir)
+
+	if imageRef != "" {
+		if err := generateComposeAndServiceYaml(imageRef, flags.name, appPort, hasDB, sourceDir, svcYamlPath); err != nil {
+			return err
+		}
+	}
+
+	if flags.runAll {
+		if cfgErr != nil {
+			return fmt.Errorf("load config: %w", cfgErr)
+		}
+		if len(cfg.Nodes) == 0 {
+			return fmt.Errorf("no nodes registered")
+		}
+		deployToAllNodes(flags, cfg.Nodes, sourceDir, appPort, healthURL, healthTimeout, imageRef)
+		return nil
+	}
+
+	return deployToOne(flags.nodeIP, flags.user, flags.key, flags.port, flags.name, sourceDir, flags.runtimeMode, flags.deployDomain, healthURL, healthTimeout, imageRef, flags.zeroDowntime, appPort)
+}
+
+func resolveSourceDir(cmd *cobra.Command, args []string) (sourceDir string, cleanup func(), err error) {
+	cleanup = func() {}
+
+	gitURL, _ := cmd.Flags().GetString("git")
+	gitBranch, _ := cmd.Flags().GetString("branch")
+	gitSSHKey, _ := cmd.Flags().GetString("ssh-key")
+
+	if len(args) > 0 {
+		sourceDir = args[0]
+	}
+
+	if gitURL == "" {
+		return sourceDir, cleanup, nil
+	}
+
+	tmpDir, tmpErr := os.MkdirTemp("", "sdk-deploy-*")
+	if tmpErr != nil {
+		return "", nil, fmt.Errorf("create temp dir: %w", tmpErr)
+	}
+	cleanup = func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			log.Printf("deploy: remove tmp dir error: %v", err)
+		}
+	}
+
+	cloneArgs := []string{"clone", "--depth=1"}
+	if gitBranch != "" {
+		cloneArgs = append(cloneArgs, "--branch", gitBranch)
+	}
+	cloneArgs = append(cloneArgs, gitURL, tmpDir)
+
+	cloneCmd := exec.CommandContext(context.Background(), "git", cloneArgs...)
+	if gitSSHKey != "" {
+		cloneCmd.Env = append(os.Environ(),
+			fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=no", gitSSHKey))
+	}
+
+	fmt.Printf("  → Cloning %s", gitURL)
+	if gitBranch != "" {
+		fmt.Printf(" (branch: %s)", gitBranch)
+	}
+	fmt.Println("...")
+	if err := cloneCmd.Run(); err != nil {
+		return "", cleanup, fmt.Errorf("git clone: %w", err)
+	}
+
+	entries, _ := os.ReadDir(tmpDir)
+	if len(entries) == 1 && entries[0].IsDir() {
+		sourceDir = filepath.Join(tmpDir, entries[0].Name())
+	} else {
+		sourceDir = tmpDir
+	}
+	return sourceDir, cleanup, nil
+}
+
+func resolveServiceName(name, sourceDir string) string {
+	if name != "" {
+		return name
+	}
+	name = strings.TrimSuffix(sourceDir, "/")
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		return name[idx+1:]
+	}
+	return name
+}
+
+func decryptSecretsIfNeeded(svcYamlPath, sopsKey string) (reencrypt func(), err error) {
+	reencrypt = func() {}
+	if sopsKey == "" {
+		return
+	}
+	if !secrets.FileIsEncrypted(svcYamlPath) {
+		return
+	}
+	fmt.Println("  → Decrypting service.yaml...")
+	if err := secrets.DecryptFileInPlace(svcYamlPath); err != nil {
+		return nil, fmt.Errorf("decrypt: %w", err)
+	}
+	reencrypt = func() {
+		fmt.Println("  → Re-encrypting service.yaml...")
+		if err := secrets.EncryptFile(svcYamlPath, sopsKey); err != nil {
+			log.Printf("deploy: re-encrypt error: %v", err)
+		}
+	}
+	return
+}
+
+func buildImage(sourceDir, name, builderType string, reg deploy.RegistryConfig) string {
+	if builderType != "" {
+		bt := deploy.BuilderType(builderType)
+		startSpinner("Building (" + builderType + ")...")
+		imageRef, buildErr := deploy.BuildImage(sourceDir, name, reg, bt)
+		if buildErr != nil {
+			stopSpinner("")
+			fmt.Printf("  %s⚠ Build failed: %v%s\n", colorYellow, buildErr, colorReset)
+			return ""
+		}
+		stopSpinner("Image pushed to registry via " + builderType)
+		return imageRef
+	}
+
+	detected := deploy.DetectBuilder(sourceDir)
+	if detected == "" {
+		fmt.Println("  → docker-compose detected, skipping build")
+		return ""
+	}
+	fmt.Printf("  → Detected builder: %s\n", detected)
+	startSpinner("Building...")
+	imageRef, buildErr := deploy.BuildImage(sourceDir, name, reg, detected)
+	if buildErr != nil {
+		stopSpinner("")
+		fmt.Printf("  %s⚠ Build failed: %v%s\n", colorYellow, buildErr, colorReset)
+		return ""
+	}
+	stopSpinner("Image pushed to registry via " + string(detected))
+	return imageRef
+}
+
+func ensureDockerOnNode(nodeIP, user, key string, port int, reg deploy.RegistryConfig) {
+	checkClient := newSSHClient(nodeIP, user, port, key)
+	checkConn, err := checkClient.Connect()
+	if err != nil {
+		return
+	}
+	defer func() {
+		if err := checkConn.Close(); err != nil {
+			log.Printf("deploy: check conn close error: %v", err)
+		}
+	}()
+
+	dockerOut, _, _ := ssh.Run(checkConn, "command -v docker || echo 'no-docker'")
+	if strings.TrimSpace(dockerOut) == "no-docker" {
+		fmt.Println("  → Docker not found on node, installing...")
+		if err := docker.Install(checkConn); err != nil {
+			log.Printf("deploy: docker install error: %v", err)
+		}
+	}
+	if reg.Username != "" && reg.Password != "" {
+		if _, _, err := ssh.Run(checkConn, fmt.Sprintf("sudo docker login %s -u %s -p %s 2>/dev/null || true", reg.Server, reg.Username, reg.Password)); err != nil {
+			log.Printf("deploy: docker login error: %v", err)
+		}
+	}
+}
+
+func parseServiceConfig(svcYamlPath, sourceDir string) (appPort int, healthURL string, healthTimeout int, hasDB bool) {
+	appPort = 8080
+	healthTimeout = 30
+
+	hasDB, data, err := readServiceYamlData(svcYamlPath)
+	if err == nil && data != "" {
+		appPort, healthURL, healthTimeout = parseServiceYamlLines(data, appPort)
+	}
+	if p := parsePortFromMain(sourceDir); p > 0 {
+		appPort = p
+	}
+	return
+}
+
+func readServiceYamlData(svcYamlPath string) (hasDB bool, rawData string, err error) {
+	data, err := os.ReadFile(filepath.Clean(svcYamlPath))
+	if err != nil {
+		return false, "", err
+	}
+	hasDB = strings.Contains(string(data), "database:") && strings.Contains(string(data), "url:")
+	return hasDB, string(data), nil
+}
+
+func parseServiceYamlLines(data string, defaultPort int) (appPort int, healthURL string, healthTimeout int) {
+	appPort = defaultPort
+	healthTimeout = 30
+	inHealth := false
+	for line := range strings.SplitSeq(data, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "port:") {
+			parseYamlPortField(trimmed, &appPort)
+		}
+		if trimmed == "health:" {
+			inHealth = true
+			continue
+		}
+		if inHealth {
+			inHealth = handleHealthSectionLine(trimmed, &healthURL, &healthTimeout, appPort)
+		}
+		if !inHealth {
+			parseYamlFlatHealthField(trimmed, &healthURL, &healthTimeout)
+		}
+	}
+	return
+}
+
+func parseYamlPortField(trimmed string, appPort *int) {
+	if _, err := fmt.Sscanf(trimmed, "port: %d", appPort); err != nil {
+		log.Printf("deploy: parse port error: %v", err)
+	}
+}
+
+func handleHealthSectionLine(trimmed string, healthURL *string, healthTimeout *int, appPort int) bool {
+	if trimmed == "" || !strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "#") && strings.Contains(trimmed, ":") {
+		if strings.HasPrefix(trimmed, "path:") || strings.HasPrefix(trimmed, "url:") {
+			val := parseHealthURLField(trimmed)
+			if url := buildHealthURL(val, appPort); url != "" {
+				*healthURL = url
+			}
+		}
+		if strings.HasPrefix(trimmed, "interval:") {
+			if _, err := fmt.Sscanf(trimmed, "interval: %d", healthTimeout); err != nil {
+				log.Printf("deploy: parse interval error: %v", err)
+			}
+		}
+		return true
+	}
+	if !strings.HasPrefix(trimmed, " ") && !strings.HasPrefix(trimmed, "\t") && trimmed != "" {
+		return false
+	}
+	return true
+}
+
+func parseHealthURLField(trimmed string) string {
+	var val string
+	if _, err := fmt.Sscanf(trimmed, "%s %s", &val, &val); err != nil {
+		log.Printf("deploy: parse url error: %v", err)
+	}
+	return val
+}
+
+func buildHealthURL(val string, appPort int) string {
+	if val == "" || strings.HasPrefix(val, "#") || val == "path:" || val == "url:" {
+		return ""
+	}
+	port := appPort
+	if port == 0 {
+		port = 8080
+	}
+	if strings.HasPrefix(val, "/") {
+		return fmt.Sprintf("http://localhost:%d%s", port, val)
+	}
+	return val
+}
+
+func parseYamlFlatHealthField(trimmed string, healthURL *string, healthTimeout *int) {
+	if strings.HasPrefix(trimmed, "health_url:") {
+		if _, err := fmt.Sscanf(trimmed, "health_url: %s", healthURL); err != nil {
+			log.Printf("deploy: parse health url error: %v", err)
+		}
+	}
+	if strings.HasPrefix(trimmed, "health_timeout:") {
+		if _, err := fmt.Sscanf(trimmed, "health_timeout: %d", healthTimeout); err != nil {
+			log.Printf("deploy: parse health timeout error: %v", err)
+		}
+	}
+}
+
+func parsePortFromMain(sourceDir string) int {
+	mainData, err := os.ReadFile(filepath.Clean(filepath.Join(sourceDir, "main.go")))
+	if err != nil {
+		return 0
+	}
+	re := regexp.MustCompile(`Port:\s*(\d+)`)
+	matches := re.FindStringSubmatch(string(mainData))
+	if len(matches) > 1 {
+		if p, err := strconv.Atoi(matches[1]); err == nil && p > 0 {
+			return p
+		}
+	}
+	return 0
+}
+
+func generateComposeAndServiceYaml(imageRef, name string, appPort int, hasDB bool, sourceDir, svcYamlPath string) error {
+	composeData := deploy.GenerateCompose(imageRef, name, appPort, hasDB)
+	if err := os.WriteFile(filepath.Join(sourceDir, "docker-compose.yml"), composeData, 0600); err != nil {
+		return fmt.Errorf("write compose: %w", err)
+	}
+	fmt.Printf("  → Generated docker-compose.yml (port %d, postgres: %v)\n", appPort, hasDB)
+
+	if hasDB {
+		if data, err := os.ReadFile(filepath.Clean(svcYamlPath)); err == nil {
+			updated := strings.ReplaceAll(string(data), "@localhost:", fmt.Sprintf("@%s-db:", name))
+			updated = strings.ReplaceAll(updated, "@127.0.0.1:", fmt.Sprintf("@%s-db:", name))
+			if err := writeFileSafe(filepath.Join(sourceDir, "service.yaml"), []byte(updated), 0600); err != nil {
+				log.Printf("deploy: update service yaml error: %v", err)
+			}
+			fmt.Printf("  → Updated service.yaml to use %s-db hostname\n", name)
+		}
+	}
+	return nil
+}
+
+func deployToOne(nip, nuser, nkey string, nport int, name, sourceDir, runtimeMode, deployDomain, healthURL string, healthTimeout int, imageRef string, zeroDowntime bool, appPort int) error {
+	client := newSSHClient(nip, nuser, nport, nkey)
+	conn, err := client.Connect()
+	if err != nil {
+		return fmt.Errorf("cannot connect to %s: %w\n  %sSuggestion: check that the server is reachable and port %d is open%s", nip, err, colorYellow, nport, colorReset)
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "deploy: conn close error: %v\n", err)
+		}
+	}()
+
+	if err := hooks.Run(conn, "pre-deploy", map[string]string{
+		"APP":  name,
+		"NODE": nip,
+	}); err != nil {
+		log.Printf("deploy: hooks error: %v", err)
+	}
+
+	uploadCfg := deploy.UploadConfig{
+		ServiceName: name,
+		SourceDir:   sourceDir,
+		Exclude:     []string{".git", "node_modules", ".env", ".DS_Store", ".dockerignore"},
+	}
+
+	startSpinner("Uploading " + name + "...")
+	result, err := deploy.UploadAndDeploy(conn, uploadCfg)
+	if err != nil {
+		stopSpinner("")
+		return fmt.Errorf("upload: %w", err)
+	}
+	stopSpinner("Deployed v" + result.Version)
+
+	if err := deployRuntimeOnNode(conn, name, result, runtimeMode, deployDomain, healthURL, healthTimeout, imageRef, zeroDowntime, nip); err != nil {
+		return err
+	}
+
+	if err := hooks.Run(conn, "post-deploy", map[string]string{
+		"APP":     name,
+		"NODE":    nip,
+		"VERSION": result.Version,
+	}); err != nil {
+		log.Printf("deploy: hooks error: %v", err)
+	}
+
+	detectedRT := runtimeMode
+	if detectedRT == "" {
+		if out, _, _ := ssh.Run(conn, "command -v k3s && echo k3s || (command -v docker && echo docker) || echo systemd"); out != "" {
+			detectedRT = strings.TrimSpace(out)
+		}
+	}
+	stateRecord("service", name, nip, result.Version, detectedRT, "ok", map[string]string{
+		"port": fmt.Sprintf("%d", appPort),
+	})
+
+	fmt.Printf("\n%s✅ %s deployed on %s (v%s)%s\n", colorGreen, name, nip, result.Version, colorReset)
+	return nil
+}
+
+func deployRuntimeOnNode(conn *golang_ssh.Client, name string, result *deploy.DeployResult, runtimeMode, deployDomain, healthURL string, healthTimeout int, imageRef string, zeroDowntime bool, nip string) error {
+	switch runtimeMode {
+	case "k3s":
+		versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
+		if err := deploy.DeployK3sFromCompose(conn, name, versionDir, imageRef); err != nil {
+			return fmt.Errorf("k3s deploy: %w", err)
+		}
+		if deployDomain != "" {
+			fmt.Printf("  → Access at http://%s/\n", deployDomain)
+		}
+	case "swarm":
+		versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
+		if err := deploy.DeploySwarm(conn, name, versionDir, imageRef); err != nil {
+			return fmt.Errorf("swarm deploy: %w", err)
+		}
+	case "bare":
+		versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
+		if err := deploy.DeployBare(conn, name, versionDir); err != nil {
+			return fmt.Errorf("bare deploy: %w", err)
+		}
+	default:
+		return defaultDeploy(conn, name, healthURL, healthTimeout, result, zeroDowntime, nip)
+	}
+	return nil
+}
+
+func defaultDeploy(conn *golang_ssh.Client, name, healthURL string, healthTimeout int, result *deploy.DeployResult, zeroDowntime bool, nip string) error {
+	if zeroDowntime {
+		serviceDir := fmt.Sprintf("/opt/sdk-ops/services/%s", name)
+		if err := deploy.DeployBlueGreen(conn, name, serviceDir, result.Version); err != nil {
+			return fmt.Errorf("blue/green: %w", err)
+		}
+		return nil
+	}
+	return runServiceWithHealthCheck(conn, name, healthURL, healthTimeout, nip)
+}
+
+func runServiceWithHealthCheck(conn *golang_ssh.Client, name, healthURL string, healthTimeout int, nip string) error {
+	svcCfg := deploy.ServiceConfig{
+		Name:          name,
+		HealthURL:     healthURL,
+		HealthTimeout: healthTimeout,
+	}
+	if err := deploy.RunService(conn, svcCfg); err != nil {
+		return fmt.Errorf("deploy failed: %w", err)
+	}
+	if err := deploy.HealthCheck(conn, name, healthTimeout, healthURL); err != nil {
+		fmt.Printf("\n  ⚠️  Health check failed on %s, rolling back...\n", nip)
+		if rbErr := deploy.Rollback(conn, name, ""); rbErr != nil {
+			return fmt.Errorf("health: %v\nrollback also failed: %v", err, rbErr)
+		}
+		if err := deploy.RunService(conn, svcCfg); err != nil {
+			log.Printf("deploy: run service error: %v", err)
+		}
+		return fmt.Errorf("health check failed on %s, rolled back", nip)
+	}
+	return nil
+}
+
+func deployToAllNodes(flags deployPushFlags, nodes []NodeConfig, sourceDir string, appPort int, healthURL string, healthTimeout int, imageRef string) {
+	fmt.Printf("  → Deploying %s to %d nodes...\n", flags.name, len(nodes))
+	var wg sync.WaitGroup
+	errs := make(chan error, len(nodes))
+
+	for _, n := range nodes {
+		wg.Add(1)
+		go func(node NodeConfig) {
+			defer wg.Done()
+			if err := deployToOne(node.IP, node.User, node.Key, node.Port, flags.name, sourceDir, flags.runtimeMode, flags.deployDomain, healthURL, healthTimeout, imageRef, flags.zeroDowntime, appPort); err != nil {
+				errs <- err
+			}
+		}(n)
+	}
+	wg.Wait()
+	close(errs)
+
+	for e := range errs {
+		fmt.Fprintf(os.Stderr, "error: %v\n", e)
+	}
+}
+
+func newDeployEncryptCmd() *cobra.Command {
 	encryptCmd := &cobra.Command{
 		Use:   "encrypt <file>",
 		Short: "Encrypt a service.yaml with sops",
@@ -434,7 +634,10 @@ Examples:
 		},
 	}
 	encryptCmd.Flags().String("age-key", "", "Age public key for encryption")
+	return encryptCmd
+}
 
+func newDeployDecryptCmd() *cobra.Command {
 	decryptCmd := &cobra.Command{
 		Use:   "decrypt <file>",
 		Short: "Decrypt a sops-encrypted file",
@@ -448,7 +651,10 @@ Examples:
 			return nil
 		},
 	}
+	return decryptCmd
+}
 
+func newDeployInitCmd() *cobra.Command {
 	var initCmd = &cobra.Command{
 		Use:   "init <dir> --template <name>",
 		Short: "Scaffold a new service from a template",
@@ -480,7 +686,6 @@ Examples:
 
 			if tmpl == "" {
 				templates.List()
-				return nil
 			}
 
 			if err := templates.ValidateName(appName); err != nil {
@@ -492,7 +697,9 @@ Examples:
 				return fmt.Errorf("scaffold: %w", err)
 			}
 
-			templates.InitServiceYAML(dir, appName)
+			if err := templates.InitServiceYAML(dir, appName); err != nil {
+				log.Printf("deploy: init yaml error: %v", err)
+			}
 			if ciType != "" {
 				if err := templates.InitCICD(dir, ciType); err != nil {
 					return fmt.Errorf("ci init: %w", err)
@@ -508,12 +715,7 @@ Examples:
 	initCmd.Flags().String("template", "", "Template name (html, node, wordpress, go)")
 	initCmd.Flags().String("name", "app", "Service name")
 	initCmd.Flags().String("ci", "", "Generate CI/CD config (github, gitlab)")
-
-	cmd.AddCommand(initCmd)
-	cmd.AddCommand(deployCmd)
-	cmd.AddCommand(encryptCmd)
-	cmd.AddCommand(decryptCmd)
-	return cmd
+	return initCmd
 }
 
 func newServiceCmd() *cobra.Command {
@@ -627,7 +829,11 @@ Examples:
 			if err != nil {
 				return err
 			}
-			defer conn.Close()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "deploy: conn close error: %v\n", err)
+				}
+			}()
 
 			var dt deploy.DBType
 			switch dbType {
@@ -684,7 +890,11 @@ Examples:
 			if err != nil {
 				return err
 			}
-			defer conn.Close()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "deploy: conn close error: %v\n", err)
+				}
+			}()
 
 			startSpinner("Rotating " + envKey + "...")
 			if err := deploy.RotateServiceEnv(conn, serviceName, envKey, envValue); err != nil {
@@ -765,7 +975,11 @@ func runServiceStatus(ip, name, user, key string, port int) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "deploy: conn close error: %v\n", err)
+		}
+	}()
 
 	if name != "" {
 		out, err := deploy.ServiceStatus(conn, name)
@@ -786,10 +1000,10 @@ func runServiceStatus(ip, name, user, key string, port int) error {
 		for _, s := range services {
 			out, _ := deploy.ServiceStatus(conn, s)
 			status := "unknown"
-			for _, line := range strings.Split(out, "\n") {
+			for line := range strings.SplitSeq(out, "\n") {
 				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "type:") {
-					status = strings.TrimPrefix(line, "type:")
+				if after, ok := strings.CutPrefix(line, "type:"); ok {
+					status = after
 				}
 			}
 			fmt.Printf("    %-20s %s\n", s, status)
@@ -803,7 +1017,11 @@ func runServiceLogs(ip, name, user, key string, port int, tail int, follow bool)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "deploy: conn close error: %v\n", err)
+		}
+	}()
 	return deploy.ServiceLogs(conn, name, tail, follow)
 }
 
@@ -812,7 +1030,11 @@ func runServiceRestart(ip, name, user, key string, port int) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "deploy: conn close error: %v\n", err)
+		}
+	}()
 
 	fmt.Printf("  Restarting %s on %s...\n", name, ip)
 	return deploy.RunService(conn, deploy.ServiceConfig{Name: name})
@@ -823,7 +1045,11 @@ func runServiceRollback(ip, name, user, key string, port int, version string, sh
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "deploy: conn close error: %v\n", err)
+		}
+	}()
 
 	if showDiff {
 		// Show diff between current and target version
@@ -854,7 +1080,7 @@ func runServiceRollback(ip, name, user, key string, port int, version string, sh
 			return nil
 		}
 		fmt.Printf("  Changes (%s → %s):\n", current, target)
-		for _, line := range strings.Split(strings.TrimSpace(diff), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSpace(diff), "\n") {
 			fmt.Printf("    %s\n", line)
 		}
 		return nil
@@ -871,7 +1097,11 @@ func runServiceVersions(ip, name, user, key string, port int) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "deploy: conn close error: %v\n", err)
+		}
+	}()
 
 	versions, err := deploy.ListVersions(conn, name)
 	if err != nil {
@@ -884,6 +1114,47 @@ func runServiceVersions(ip, name, user, key string, port int) error {
 	fmt.Printf("  Versions of %s on %s:\n", name, ip)
 	for _, v := range versions {
 		fmt.Printf("    %s\n", v)
+	}
+	return nil
+}
+
+func sanitizeSourceDir(dir string) string {
+	if !filepath.IsAbs(dir) {
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			return ""
+		}
+		dir = absDir
+	}
+	return filepath.Clean(dir)
+}
+
+func writeFileSafe(path string, data []byte, perm os.FileMode) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("path must be absolute: %s", path)
+	}
+	root, err := os.OpenRoot("/")
+	if err != nil {
+		return fmt.Errorf("open root: %w", err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "root close: %v\n", err)
+		}
+	}()
+	relPath := strings.TrimPrefix(path, "/")
+	f, err := root.OpenFile(relPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return fmt.Errorf("open file: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		if err := f.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "file close: %v\n", err)
+		}
+		return fmt.Errorf("write: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close file: %w", err)
 	}
 	return nil
 }

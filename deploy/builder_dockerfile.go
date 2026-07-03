@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,9 +45,8 @@ func (b *DockerfileBuilder) Build(dir, name string, reg RegistryConfig) (string,
 		binaryPath := filepath.Join(dir, binaryName)
 
 		fmt.Printf("  → Building Go binary for linux/amd64...\n")
-		build := exec.CommandContext(context.Background(), "go", "build",
-			"-a", "-o", binaryPath,
-			"-ldflags=-s -w", ".")
+		build := exec.CommandContext(context.Background(), "go")
+		build.Args = append(build.Args, "build", "-a", "-o", binaryPath, "-ldflags=-s -w", ".")
 		build.Dir = dir
 		build.Stdout = os.Stdout
 		build.Stderr = os.Stderr
@@ -64,11 +64,11 @@ CMD ["/app"]
 `, binaryName)
 
 		dockerfilePath := filepath.Join(dir, "Dockerfile.deploy")
-		if err := os.WriteFile(dockerfilePath, []byte(dockerfileContent), 0644); err != nil {
+		if err := os.WriteFile(filepath.Clean(dockerfilePath), []byte(dockerfileContent), 0600); err != nil {
 			return "", fmt.Errorf("write Dockerfile: %w", err)
 		}
-		defer os.Remove(dockerfilePath)
-		defer os.Remove(binaryPath)
+		defer func() { if err := os.Remove(dockerfilePath); err != nil { log.Printf("builder: remove error: %v", err) } }()
+		defer func() { if err := os.Remove(binaryPath); err != nil { log.Printf("builder: remove error: %v", err) } }()
 
 		return b.buildAndPush(dir, name, reg, tag, dockerfilePath)
 	}
@@ -78,7 +78,8 @@ CMD ["/app"]
 
 func (b *DockerfileBuilder) buildAndPush(dir, name string, reg RegistryConfig, tag, dockerfilePath string) (string, error) {
 	fmt.Printf("  → Logging in to %s...\n", reg.Server)
-	login := exec.CommandContext(context.Background(), "docker", "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
+	login := exec.CommandContext(context.Background(), "docker")
+	login.Args = append(login.Args, "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
 	login.Stdout = os.Stdout
 	login.Stderr = os.Stderr
 	if err := login.Run(); err != nil {
@@ -89,7 +90,8 @@ func (b *DockerfileBuilder) buildAndPush(dir, name string, reg RegistryConfig, t
 	buildID := fmt.Sprintf("%d", time.Now().UnixNano())
 
 	fmt.Printf("  → Building + pushing %s...\n", tag)
-	push := exec.CommandContext(context.Background(), "docker", "buildx", "build",
+	push := exec.CommandContext(context.Background(), "docker")
+	push.Args = append(push.Args, "buildx", "build",
 		"--platform", "linux/amd64",
 		"--build-arg", fmt.Sprintf("CACHEBUST=%s", buildID),
 		"-f", dockerfilePath,

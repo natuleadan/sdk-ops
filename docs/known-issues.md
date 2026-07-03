@@ -24,7 +24,7 @@ sdk-ops provider vps delete ...
 Some VPS providers have upstream firewalls that block non-standard ports. By default, sdk-ops **keeps SSH on port 22** and does not migrate. If you use `--ssh-port N`, the new port is added alongside port 22. If you get locked out:
 
 - Verify the provider doesn't block the new port
-- Use `--insecure` if host keys changed (e.g., after reinstall)
+- Use `--insecure` or set `SDK_OPS_SSH_STRICT_HOST_KEY=false` if host keys changed (e.g., after reinstall)
 - Reconnect on port 22 (which is always kept open)
 
 ## kubectl top (Metrics API)

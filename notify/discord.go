@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 )
 
@@ -33,7 +34,7 @@ func (d *Discord) Send(title, message string) error {
 	if err != nil {
 		return fmt.Errorf("discord post: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { if err := resp.Body.Close(); err != nil { log.Printf("discord: body close error: %v", err) } }()
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("discord: HTTP %d", resp.StatusCode)
 	}

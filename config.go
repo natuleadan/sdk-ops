@@ -43,7 +43,8 @@ func LoadConfig(path string) (*ServerConfig, error) {
 		cfg.Mode = "k3s"
 	}
 	if cfg.SSHKey == "" {
-		cfg.SSHKey = os.ExpandEnv("$HOME/.ssh/id_ed25519")
+		homeDir, _ := os.UserHomeDir()
+		cfg.SSHKey = filepath.Join(homeDir, ".ssh", "id_ed25519")
 	}
 
 	mode := Mode(cfg.Mode)

@@ -62,7 +62,7 @@ func checkForUpdate() (*VersionInfo, error) {
 	if err != nil {
 		return info, fmt.Errorf("github api: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { if err := resp.Body.Close(); err != nil { log.Printf("update: resp body close error: %v", err) } }()
 
 	if resp.StatusCode == 404 {
 		// No releases yet
@@ -105,10 +105,10 @@ func isNewerVersion(latest, current string) bool {
 	for i := range 3 {
 		var lv, cv int
 		if i < len(lParts) {
-			fmt.Sscanf(lParts[i], "%d", &lv)
+			if _, err := fmt.Sscanf(lParts[i], "%d", &lv); err != nil { log.Printf("update: parse version error: %v", err) }
 		}
 		if i < len(cParts) {
-			fmt.Sscanf(cParts[i], "%d", &cv)
+			if _, err := fmt.Sscanf(cParts[i], "%d", &cv); err != nil { log.Printf("update: parse version error: %v", err) }
 		}
 		if lv > cv {
 			return true

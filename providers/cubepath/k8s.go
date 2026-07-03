@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/natuleadan/sdk-ops/providers"
 )
@@ -272,6 +273,6 @@ func (c *Client) ListK8sLBs(ctx context.Context, id string) ([]providers.LoadBal
 
 func atoi(s string) int {
 	var n int
-	fmt.Sscanf(s, "%d", &n)
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil { log.Printf("cubepath: parse int error: %v", err) }
 	return n
 }

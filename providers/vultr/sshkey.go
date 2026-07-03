@@ -3,6 +3,7 @@ package vultr
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/vultr/govultr/v3"
 
@@ -15,7 +16,7 @@ func (c *Client) CreateSSHKey(ctx context.Context, cfg providers.SSHKeyCreateCon
 		SSHKey: cfg.PublicKey,
 	})
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create ssh key: %w", err)
@@ -29,7 +30,7 @@ func (c *Client) CreateSSHKey(ctx context.Context, cfg providers.SSHKeyCreateCon
 func (c *Client) ListSSHKeys(ctx context.Context) ([]providers.SSHKey, error) {
 	keys, _, resp, err := c.client.SSHKey.List(ctx, &govultr.ListOptions{})
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list ssh keys: %w", err)

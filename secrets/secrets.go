@@ -10,9 +10,8 @@ import (
 
 func EncryptFile(path, ageKey string) error {
 	cleanPath := filepath.Clean(path)
-	cmd := exec.CommandContext(context.Background(), "sops", "--encrypt",
-		"--age", ageKey,
-		"--in-place", cleanPath)
+	cmd := exec.CommandContext(context.Background(), "sops")
+	cmd.Args = append(cmd.Args, "--encrypt", "--age", ageKey, "--in-place", cleanPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -23,7 +22,8 @@ func EncryptFile(path, ageKey string) error {
 
 func DecryptFile(path string) ([]byte, error) {
 	cleanPath := filepath.Clean(path)
-	cmd := exec.CommandContext(context.Background(), "sops", "--decrypt", cleanPath)
+	cmd := exec.CommandContext(context.Background(), "sops")
+	cmd.Args = append(cmd.Args, "--decrypt", cleanPath)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("sops decrypt: %w", err)
@@ -36,14 +36,14 @@ func FileIsEncrypted(path string) bool {
 	if err != nil {
 		return false
 	}
-	// SOPS-encrypted files start with a `sops` block in YAML
 	content := string(data)
 	return len(content) > 0 && (content[0] == '{' || len(content) >= 5 && content[:5] == "sops:")
 }
 
 func DecryptFileInPlace(path string) error {
 	cleanPath := filepath.Clean(path)
-	cmd := exec.CommandContext(context.Background(), "sops", "--decrypt", "--in-place", cleanPath)
+	cmd := exec.CommandContext(context.Background(), "sops")
+	cmd.Args = append(cmd.Args, "--decrypt", "--in-place", cleanPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

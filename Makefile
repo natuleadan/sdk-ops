@@ -9,6 +9,7 @@ build: third-party
 	go build -ldflags="-s -w -X main.version=$(VERSION)" -o $(BINARY) ./cmd/sdk-ops/
 
 lint:
+	golangci-lint run --timeout=5m ./...
 	go vet ./...
 
 test:

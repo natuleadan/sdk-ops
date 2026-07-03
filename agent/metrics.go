@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	gosnet "net"
 	"os"
 	"runtime"
@@ -67,7 +68,7 @@ func getUptime() string {
 		return "unknown"
 	}
 	var uptimeSec float64
-	fmt.Sscanf(string(out), "%f", &uptimeSec)
+	if _, err := fmt.Sscanf(string(out), "%f", &uptimeSec); err != nil { log.Printf("metrics: parse uptime error: %v", err) }
 	uptime := time.Duration(uptimeSec) * time.Second
 	days := int(uptime.Hours()) / 24
 	hours := int(uptime.Hours()) % 24
@@ -80,7 +81,7 @@ func getLocalIP() string {
 	if err != nil {
 		return "unknown"
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "metrics: conn close error: %v\n", err) } }()
 	addr := conn.LocalAddr().(*gosnet.UDPAddr)
 	return addr.IP.String()
 }

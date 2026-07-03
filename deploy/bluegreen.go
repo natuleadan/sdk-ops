@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -22,9 +23,26 @@ func DeployBlueGreen(client *goss.Client, name, serviceDir, version string) erro
 	fmt.Printf("  → Current port: %d, New port: %d\n", currentPort, greenPort)
 
 	versionDir := fmt.Sprintf("%s/%s", serviceDir, version)
+
+	if err := startGreenContainer(client, versionDir, greenPort); err != nil {
+		return err
+	}
+
+	if err := healthCheckGreen(client, greenPort, versionDir); err != nil {
+		return err
+	}
+
+	if err := switchToGreen(client, name, serviceDir, versionDir, greenPort); err != nil {
+		return err
+	}
+
+	fmt.Printf("  → Blue/green complete. Now on port %d\n", greenPort)
+	return nil
+}
+
+func startGreenContainer(client *goss.Client, versionDir string, greenPort int) error {
 	greenComposePath := fmt.Sprintf("%s/docker-compose.green.yml", versionDir)
 
-	// Create green compose with different port
 	greenCompose := fmt.Sprintf(`
 services:
   app:
@@ -35,17 +53,18 @@ services:
       - "%d:%d"
 `, greenPort, greenPort)
 
-	ssh.Run(client, fmt.Sprintf("cat > %s << 'EOF'\n%s\nEOF", greenComposePath, greenCompose))
+	if _, _, err := ssh.Run(client, fmt.Sprintf("cat > %s << 'EOF'\n%s\nEOF", greenComposePath, greenCompose)); err != nil { log.Printf("bluegreen: write compose error: %v", err) }
 
-	// Start green container
 	fmt.Printf("  → Starting green container on port %d...\n", greenPort)
 	_, _, err := ssh.Run(client, fmt.Sprintf("cd %s && sudo docker compose -f docker-compose.green.yml up -d 2>&1", versionDir))
 	if err != nil {
-		ssh.Run(client, fmt.Sprintf("cd %s && sudo docker compose -f docker-compose.green.yml down 2>&1 || true", versionDir))
+		if _, _, rErr := ssh.Run(client, fmt.Sprintf("cd %s && sudo docker compose -f docker-compose.green.yml down 2>&1 || true", versionDir)); rErr != nil { log.Printf("bluegreen: rollback error: %v", rErr) }
 		return fmt.Errorf("green start failed: %w", err)
 	}
+	return nil
+}
 
-	// Health check green
+func healthCheckGreen(client *goss.Client, greenPort int, versionDir string) error {
 	fmt.Println("  → Health checking green container...")
 	healthOK := false
 	for range 15 {
@@ -54,40 +73,39 @@ services:
 			healthOK = true
 			break
 		}
-		ssh.Run(client, "sleep 2")
+		if _, _, err := ssh.Run(client, "sleep 2"); err != nil { log.Printf("bluegreen: sleep error: %v", err) }
 	}
 
 	if !healthOK {
 		fmt.Println("  ✗ Health check failed, rolling back green...")
-		ssh.Run(client, fmt.Sprintf("cd %s && sudo docker compose -f docker-compose.green.yml down 2>&1 || true", versionDir))
+		if _, _, err := ssh.Run(client, fmt.Sprintf("cd %s && sudo docker compose -f docker-compose.green.yml down 2>&1 || true", versionDir)); err != nil { log.Printf("bluegreen: rollback error: %v", err) }
 		return fmt.Errorf("green health check failed")
 	}
+	return nil
+}
 
-	// Switch proxy to green port
+func switchToGreen(client *goss.Client, name, serviceDir, versionDir string, greenPort int) error {
 	fmt.Println("  → Switching traffic to green...")
 	proxyType := DetectProxy(client)
 	if proxyType != "" {
 		proxy := NewProxy(proxyType)
 		domains := getAppDomains(client, name)
 		for _, domain := range domains {
-			proxy.UpdateTargetPort(client, domain, greenPort)
+			if err := proxy.UpdateTargetPort(client, domain, greenPort); err != nil { log.Printf("bluegreen: update target port error: %v", err) }
 		}
 	}
 
-	// Stop old container (blue)
 	fmt.Println("  → Stopping old (blue) container...")
-	ssh.Run(client, fmt.Sprintf("cd %s && sudo docker compose down 2>&1 || true", versionDir))
-	ssh.Run(client, fmt.Sprintf("rm -f %s", greenComposePath))
+	greenComposePath := fmt.Sprintf("%s/docker-compose.green.yml", versionDir)
+	if _, _, err := ssh.Run(client, fmt.Sprintf("cd %s && sudo docker compose down 2>&1 || true", versionDir)); err != nil { log.Printf("bluegreen: stop error: %v", err) }
+	if _, _, err := ssh.Run(client, fmt.Sprintf("rm -f %s", greenComposePath)); err != nil { log.Printf("bluegreen: remove error: %v", err) }
 
-	// Update symlink
-	ssh.Run(client, fmt.Sprintf("ln -sfn %s %s/current", versionDir, serviceDir))
+	if _, _, err := ssh.Run(client, fmt.Sprintf("ln -sfn %s %s/current", versionDir, serviceDir)); err != nil { log.Printf("bluegreen: symlink error: %v", err) }
 
-	fmt.Printf("  → Blue/green complete. Now on port %d\n", greenPort)
 	return nil
 }
 
 func getCurrentPort(client *goss.Client, name string) int {
-	// Check current docker compose port
 	out, _, _ := ssh.Run(client, fmt.Sprintf(
 		`sudo docker compose -f /opt/sdk-ops/services/%s/current/docker-compose.yml port app 2>/dev/null || echo "0"`, name))
 	out = strings.TrimSpace(out)
@@ -100,7 +118,6 @@ func getCurrentPort(client *goss.Client, name string) int {
 		}
 	}
 
-	// Fallback: check Caddy reverse proxy target
 	caddyOut, _, _ := ssh.Run(client, `grep -oP 'reverse_proxy localhost:\K\d+' /etc/caddy/Caddyfile 2>/dev/null || echo "8080"`)
 	caddyOut = strings.TrimSpace(caddyOut)
 	if p, err := strconv.Atoi(caddyOut); err == nil {
@@ -110,7 +127,6 @@ func getCurrentPort(client *goss.Client, name string) int {
 }
 
 func getAppDomains(client *goss.Client, name string) []string {
-	// Get domains from Caddyfile
 	out, _, _ := ssh.Run(client, `grep -oP '^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' /etc/caddy/Caddyfile 2>/dev/null | head -1 || echo ""`)
 	domain := strings.TrimSpace(out)
 	if domain != "" {

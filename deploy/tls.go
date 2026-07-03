@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -26,7 +27,7 @@ type CertConfig struct {
 	KeyFile    string
 	TargetPort int
 	Staging    bool
-	Runtime    string // docker or k3s
+	Runtime    string
 }
 
 func InstallCert(client *goss.Client, cfg CertConfig) error {
@@ -127,7 +128,6 @@ kubectl apply -f /var/lib/rancher/k3s/server/manifests/traefik-cert-%s.yaml 2>/d
 echo "Traefik certificate configured for %s"
 `, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain)
 
-	// Check if cert-manager ClusterIssuer exists
 	checkIssuer, _, _ := ssh.Run(client, "kubectl get clusterissuer letsencrypt-prod 2>/dev/null || echo 'missing'")
 	if strings.Contains(checkIssuer, "missing") {
 		fmt.Println("  → Creating Let's Encrypt ClusterIssuer for Traefik...")
@@ -176,55 +176,45 @@ func installCertManual(client *goss.Client, cfg CertConfig) error {
 		return fmt.Errorf("read key file: %w", err)
 	}
 
-	uploadCmd := "sudo mkdir -p /etc/ssl/certs && sudo sh -c 'cat > /etc/ssl/certs/%s.crt'"
+	if err := uploadCertFile(client, certData, fmt.Sprintf("/etc/ssl/certs/%s.crt", cfg.Domain)); err != nil {
+		return fmt.Errorf("upload cert: %w", err)
+	}
+	if err := uploadCertFile(client, keyData, fmt.Sprintf("/etc/ssl/certs/%s.key", cfg.Domain)); err != nil {
+		return fmt.Errorf("upload key: %w", err)
+	}
+
+	fmt.Printf("  → Manual cert installed for %s\n", cfg.Domain)
+	return nil
+}
+
+func uploadCertFile(client *goss.Client, data []byte, remotePath string) error {
 	sess, err := client.NewSession()
 	if err != nil {
 		return fmt.Errorf("ssh session: %w", err)
 	}
-	defer sess.Close()
+	defer func() { if err := sess.Close(); err != nil { log.Printf("tls: session close error: %v", err) } }()
 
 	stdin, err := sess.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
 	}
 	go func() {
-		defer stdin.Close()
-		stdin.Write(certData)
+		defer func() { if err := stdin.Close(); err != nil { log.Printf("tls: stdin close error: %v", err) } }()
+		if _, err := stdin.Write(data); err != nil { log.Printf("tls: stdin write error: %v", err) }
 	}()
-	if out, err := sess.CombinedOutput(fmt.Sprintf(uploadCmd, cfg.Domain)); err != nil {
-		return fmt.Errorf("upload cert: %w\n%s", err, string(out))
-	}
-	sess.Close()
 
-	sess2, err := client.NewSession()
+	out, err := sess.CombinedOutput(fmt.Sprintf("sudo mkdir -p /etc/ssl/certs && sudo sh -c 'cat > %s'", remotePath))
 	if err != nil {
-		return fmt.Errorf("ssh session: %w", err)
+		return fmt.Errorf("upload: %w\n%s", err, string(out))
 	}
-	defer sess2.Close()
-	stdin2, err := sess2.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("stdin pipe: %w", err)
-	}
-	go func() {
-		defer stdin2.Close()
-		stdin2.Write(keyData)
-	}()
-	if out, err := sess2.CombinedOutput(fmt.Sprintf("sudo sh -c 'cat > /etc/ssl/certs/%s.key'", cfg.Domain)); err != nil {
-		return fmt.Errorf("upload key: %w\n%s", err, string(out))
-	}
-	sess2.Close()
-
-	fmt.Printf("  → Manual cert installed for %s\n", cfg.Domain)
 	return nil
 }
 
 func installCertCloudflare(client *goss.Client, cfg CertConfig) error {
-	// Use Cloudflare Origin CA: mark the cert as CF-managed
 	fmt.Println("  → Cloudflare Origin CA: domain uses Cloudflare proxy")
 	fmt.Println("  → Install Cloudflare Origin Certificate manually via CF dashboard")
 	fmt.Println("  → Or use --provider letsencrypt for automatic cert")
 
-	// For k3s runtime: create annotation on default Ingress
 	if cfg.Runtime == "k3s" || cfg.Runtime == "" {
 		script := `
 kubectl annotate ingress --all kubernetes.io/ingress.class=traefik 2>/dev/null || true

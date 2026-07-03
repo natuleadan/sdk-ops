@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/natuleadan/sdk-ops/providers"
 )
@@ -183,6 +184,6 @@ func (c *Client) ToggleLBProtection(ctx context.Context, lbID string) (*provider
 
 func cfgPort(r map[string]any) int {
 	var port int
-	fmt.Sscanf(val(r, "port"), "%d", &port)
+	if _, err := fmt.Sscanf(val(r, "port"), "%d", &port); err != nil { log.Printf("cubepath: parse port error: %v", err) }
 	return port
 }

@@ -39,8 +39,8 @@ type apiHandler struct {
 
 func (h *apiHandler) health(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, http.StatusOK, map[string]string{
-		"status": "ok",
-		"uptime": h.agent.uptime(),
+		"status":  "ok",
+		"uptime":  h.agent.uptime(),
 		"version": h.agent.version,
 	})
 }
@@ -146,14 +146,18 @@ func (h *apiHandler) removeSchedule(w http.ResponseWriter, r *http.Request) {
 
 func toInt(s string) int {
 	var n int
-	fmt.Sscanf(s, "%d", &n)
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
+		log.Printf("api: parse int error: %v", err)
+	}
 	return n
 }
 
-func jsonResp(w http.ResponseWriter, code int, data interface{}) {
+func jsonResp(w http.ResponseWriter, code int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("api: json encode error: %v", err)
+	}
 }
 
 func startAPI(addr string, db *sql.DB, agent *Agent) *http.Server {
@@ -181,7 +185,7 @@ func startAPI(addr string, db *sql.DB, agent *Agent) *http.Server {
 	mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
 		info, err := checkForUpdate()
 		if err != nil {
-			jsonResp(w, http.StatusOK, map[string]interface{}{
+			jsonResp(w, http.StatusOK, map[string]any{
 				"current": version,
 				"error":   err.Error(),
 			})
@@ -193,7 +197,9 @@ func startAPI(addr string, db *sql.DB, agent *Agent) *http.Server {
 	mux.HandleFunc("/schedules/remove", func(w http.ResponseWriter, r *http.Request) {
 		if idStr := r.URL.Query().Get("id"); idStr != "" {
 			h.agent.scheduler.removeSchedule(toInt(idStr))
-			removeSchedule(h.db, toInt(idStr))
+			if err := removeSchedule(h.db, toInt(idStr)); err != nil {
+				log.Printf("api: remove schedule error: %v", err)
+			}
 			jsonResp(w, http.StatusOK, map[string]string{"status": "removed"})
 		} else {
 			jsonResp(w, http.StatusBadRequest, map[string]string{"error": "id required"})
@@ -240,7 +246,8 @@ func startAPI(addr string, db *sql.DB, agent *Agent) *http.Server {
 			})
 			return
 		}
-		cmd := exec.CommandContext(context.Background(), "sh", "-c", safeCmd)
+		cmd := exec.CommandContext(context.Background(), "sh")
+		cmd.Args = append(cmd.Args, "-c", safeCmd)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr

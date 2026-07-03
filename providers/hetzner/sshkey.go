@@ -3,6 +3,7 @@ package hetzner
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 
@@ -42,7 +43,7 @@ func (c *Client) ListSSHKeys(ctx context.Context) ([]providers.SSHKey, error) {
 
 func (c *Client) DeleteSSHKey(ctx context.Context, id string) error {
 	var idInt int64
-	fmt.Sscanf(id, "%d", &idInt)
+	if _, err := fmt.Sscanf(id, "%d", &idInt); err != nil { log.Printf("hetzner: parse id error: %v", err) }
 	_, err := c.client.SSHKey.Delete(ctx, &hcloud.SSHKey{ID: idInt})
 	return err
 }

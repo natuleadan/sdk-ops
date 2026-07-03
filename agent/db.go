@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -105,7 +106,7 @@ func queryMetrics(db *sql.DB, since time.Time) ([]MetricRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { fmt.Fprintf(os.Stderr, "db: rows close error: %v\n", err) } }()
 
 	var results []MetricRow
 	for rows.Next() {
@@ -132,7 +133,7 @@ func queryAudit(db *sql.DB, since time.Time) ([]AuditRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { fmt.Fprintf(os.Stderr, "db: rows close error: %v\n", err) } }()
 
 	var results []AuditRow
 	for rows.Next() {
@@ -159,7 +160,7 @@ func listSchedules(db *sql.DB) ([]ScheduleRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { fmt.Fprintf(os.Stderr, "db: rows close error: %v\n", err) } }()
 
 	var results []ScheduleRow
 	for rows.Next() {

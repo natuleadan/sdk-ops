@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 )
 
@@ -37,7 +38,7 @@ func (s *Slack) post(payload any) error {
 	if err != nil {
 		return fmt.Errorf("slack post: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { if err := resp.Body.Close(); err != nil { log.Printf("slack: body close error: %v", err) } }()
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("slack: HTTP %d", resp.StatusCode)
 	}

@@ -95,7 +95,7 @@ Examples:
 		},
 	}
 	scaleCmd.Flags().IntP("replicas", "r", 0, "Number of replicas")
-	scaleCmd.MarkFlagRequired("replicas")
+	if err := scaleCmd.MarkFlagRequired("replicas"); err != nil { panic(err) }
 	scaleCmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace")
 
 	applyCmd := &cobra.Command{
@@ -451,7 +451,7 @@ func k3sExec(ip, user, key string, port int, kubectlCmd string) error {
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", ip, err)
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err) } }()
 
 	// Auto-install k3s if not present
 	k3sOut, _, _ := ssh.Run(conn, "command -v k3s || echo 'no-k3s'")
@@ -478,7 +478,7 @@ func k3sExecPTY(ip, user, key string, port int, kubectlCmd string) error {
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", ip, err)
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err) } }()
 
 	fullCmd := fmt.Sprintf("sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl %s", kubectlCmd)
 	return ssh.RunPTY(conn, fullCmd)
@@ -570,7 +570,7 @@ func runClusterToken(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", ip, err)
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err) } }()
 	out, _, err := ssh.Run(conn, "sudo cat /var/lib/rancher/k3s/server/token")
 	if err != nil {
 		return fmt.Errorf("token: %w", err)
@@ -587,7 +587,7 @@ func runClusterRestart(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", ip, err)
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err) } }()
 	fmt.Println("  → Restarting k3s...")
 	out, _, err := ssh.Run(conn, "sudo systemctl restart k3s && echo 'k3s restarted'")
 	if err != nil {
@@ -631,7 +631,7 @@ func runClusterUpgrade(version string, cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", ip, err)
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err) } }()
 
 	fmt.Println("  → Upgrading k3s...")
 	installCmd := "curl -sfL https://get.k3s.io | sudo sh -"
@@ -655,7 +655,7 @@ func runClusterEtcdSnapshot(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", ip, err)
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err) } }()
 	fmt.Println("  → Creating etcd snapshot...")
 	out, _, err := ssh.Run(conn, "sudo k3s etcd-snapshot save && echo 'etcd-snapshot: OK' || echo 'etcd-snapshot: FAIL'")
 	if err != nil {
@@ -673,7 +673,7 @@ func runClusterCertRotate(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", ip, err)
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err) } }()
 	fmt.Println("  → Rotating certificates...")
 	out, _, err := ssh.Run(conn, "sudo k3s certificate rotate && sudo systemctl restart k3s && echo 'cert-rotate: OK'")
 	if err != nil {
@@ -701,7 +701,7 @@ func runClusterHelm(kargs string, cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", ip, err)
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err) } }()
 
 	// Auto-install helm if not present
 	out, _, _ := ssh.Run(conn, "command -v helm || echo 'no-helm'")
@@ -733,7 +733,7 @@ func runClusterNodeSSH(nodeName string, cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", ip, err)
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err) } }()
 
 	// Get node internal IP (first one, prefer IPv4)
 	nodeIP, _, err := ssh.Run(conn, fmt.Sprintf(
@@ -759,7 +759,7 @@ func runClusterNodeSSH(nodeName string, cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", nodeIP, err)
 	}
-	defer nodeConn.Close()
+	defer func() { if err := nodeConn.Close(); err != nil { log.Printf("cluster: node conn close error: %v", err) } }()
 
 	// Interactive shell via PTY
 	return ssh.RunPTY(nodeConn, "bash -l")
@@ -773,7 +773,7 @@ func runClusterPortForward(pod, portMapping, namespace string, cmd *cobra.Comman
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", ip, err)
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err) } }()
 
 	kargs := fmt.Sprintf("port-forward %s %s", pod, portMapping)
 	if namespace != "" {
@@ -793,7 +793,7 @@ func runClusterEtcdRestore(snapshotFile string, cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("ssh %s: %w", ip, err)
 	}
-	defer conn.Close()
+	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err) } }()
 
 	fmt.Printf("  → Restoring etcd from %s...\n", snapshotFile)
 	script := fmt.Sprintf(`

@@ -2,6 +2,7 @@ package templates
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,7 +123,7 @@ func Scaffold(name, dir string) error {
 			if err != nil {
 				return fmt.Errorf("create %s: %w", filename, err)
 			}
-			f.Close()
+			if err := f.Close(); err != nil { log.Printf("file close: %v", err) }
 			continue
 		}
 		if err := os.WriteFile(path, []byte(content), 0600); err != nil {

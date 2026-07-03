@@ -26,6 +26,8 @@ A CLI tool and Go SDK for provisioning, hardening, and operating VPS servers. Au
 go install github.com/natuleadan/sdk-ops/cmd/sdk-ops@latest
 ```
 
+**Requires Go 1.26+** (uses `range-over-int`, `min`/`max`, `strings.Cut`, `SplitSeq`, `os.OpenRoot`, `slog`).
+
 Or download a pre-built binary from the [releases page](https://github.com/natuleadan/sdk-ops/releases).
 
 ## 2. Quick Start
@@ -529,6 +531,23 @@ sdk-ops provider k8s delete <cluster-uuid>
 ├── docs/                 # Documentation
 └── .github/              # CI/CD workflows
 ```
+
+## 9. Linting & Code Quality
+
+The project enforces **0 lint issues** via `golangci-lint` v2 with 14 linters:
+
+| Category | Linters |
+|----------|---------|
+| **Errors** | `errcheck`, `govet`, `ineffassign` |
+| **Security** | `gosec`, `bodyclose`, `noctx`, `sqlclosecheck` |
+| **Style** | `staticcheck`, `gocritic`, `gocyclo`, `unparam`, `unused` |
+| **Modern** | `misspell`, `unconvert` |
+
+```bash
+golangci-lint run --timeout=5m ./...
+```
+
+All code must pass before commit. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full checklist.
 
 ## 10. License
 

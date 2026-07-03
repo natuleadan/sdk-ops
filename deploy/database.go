@@ -3,6 +3,7 @@ package deploy
 import (
 	"crypto/rand"
 	"fmt"
+	"log"
 	"math/big"
 	"strings"
 
@@ -62,7 +63,7 @@ func ProvisionDatabase(client *goss.Client, cfg DBConfig) (*DBResult, error) {
 	containerName := fmt.Sprintf("sdk-db-%s", cfg.Name)
 
 	// Pull image silently
-	ssh.Run(client, fmt.Sprintf("docker pull %s:%s 2>/dev/null || true", imageName(cfg.Type), cfg.Version))
+	if _, _, err := ssh.Run(client, fmt.Sprintf("docker pull %s:%s 2>/dev/null || true", imageName(cfg.Type), cfg.Version)); err != nil { log.Printf("deploy: docker pull error: %v", err) }
 
 	var result DBResult
 
@@ -92,7 +93,7 @@ func provisionPostgres(client *goss.Client, cfg DBConfig, containerName string) 
 		portFlag(cfg.Port, 5432),
 		img)
 
-	ssh.Run(client, runCmd)
+	if _, _, err := ssh.Run(client, runCmd); err != nil { log.Printf("deploy: provision error: %v", err) }
 
 	connStr := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", cfg.User, cfg.Pass, containerName, dbName)
 	if exposedPort > 0 {
@@ -113,7 +114,7 @@ func provisionMySQL(client *goss.Client, cfg DBConfig, containerName string) DBR
 		portFlag(cfg.Port, 3306),
 		img)
 
-	ssh.Run(client, runCmd)
+	if _, _, err := ssh.Run(client, runCmd); err != nil { log.Printf("deploy: provision error: %v", err) }
 
 	connStr := fmt.Sprintf("mysql://%s:%s@%s:3306/%s", cfg.User, cfg.Pass, containerName, cfg.Name)
 	if cfg.Port > 0 {
@@ -138,7 +139,7 @@ func provisionRedis(client *goss.Client, cfg DBConfig, containerName string) DBR
 		portFlag(cfg.Port, 6379),
 		img, passFlag)
 
-	ssh.Run(client, runCmd)
+	if _, _, err := ssh.Run(client, runCmd); err != nil { log.Printf("deploy: provision error: %v", err) }
 
 	connStr := fmt.Sprintf("redis://:%s@%s:6379/0", cfg.Pass, containerName)
 	if cfg.Port > 0 {
@@ -159,7 +160,7 @@ func provisionMongoDB(client *goss.Client, cfg DBConfig, containerName string) D
 		portFlag(cfg.Port, 27017),
 		img)
 
-	ssh.Run(client, runCmd)
+	if _, _, err := ssh.Run(client, runCmd); err != nil { log.Printf("deploy: provision error: %v", err) }
 
 	connStr := fmt.Sprintf("mongodb://%s:%s@%s:27017/%s", cfg.User, cfg.Pass, containerName, cfg.Name)
 	if cfg.Port > 0 {

@@ -3,6 +3,7 @@ package sdk_ops
 import (
 	"context"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 	"time"
@@ -59,8 +60,6 @@ func New(cfg ServerConfig) *Server {
 	return &Server{cfg: cfg}
 }
 
-// --- Provider API ---
-
 func (s *Server) CreateVPS(ctx context.Context, createCfg providers.VPSCreateConfig) (*providers.VPS, error) {
 	if s.cfg.Provider == nil {
 		return nil, fmt.Errorf("no provider configured")
@@ -101,8 +100,6 @@ func (s *Server) Destroy(ctx context.Context) error {
 	return s.cfg.Provider.DeleteVPS(ctx, s.cfg.Host)
 }
 
-// --- SSH connection ---
-
 func (s *Server) connect() error {
 	if s.conn != nil {
 		return nil
@@ -130,8 +127,6 @@ func (s *Server) Close() error {
 	return nil
 }
 
-// --- Provision ---
-
 func (s *Server) Provision(ctx context.Context) error {
 	if s.cfg.CloudInit && s.cfg.Provider != nil {
 		return s.provisionCloudInit(ctx)
@@ -139,11 +134,34 @@ func (s *Server) Provision(ctx context.Context) error {
 	return s.provisionSSH(ctx)
 }
 
-func (s *Server) provisionSSH(ctx context.Context) error {
+func ensureDirectories(s *Server) error {
+	if _, _, err := ssh.Run(s.conn, `mkdir -p /opt/sdk-ops/services /opt/sdk-ops/backups /opt/sdk-ops/logs && echo "sdk-ops-init" > /opt/sdk-ops/.version`); err != nil {
+		log.Printf("server: ssh run error: %v", err)
+	}
+	return nil
+}
+
+func (s *Server) provisionSSH(_ context.Context) error {
 	if err := s.connect(); err != nil {
 		return err
 	}
 
+	if err := applyHardening(s); err != nil {
+		return err
+	}
+
+	if err := installRuntime(s); err != nil {
+		return err
+	}
+
+	if err := ensureDirectories(s); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func applyHardening(s *Server) error {
 	hardCfg := hardening.DefaultConfig()
 	if s.cfg.User != "root" {
 		hardCfg.User = s.cfg.User
@@ -156,7 +174,9 @@ func (s *Server) provisionSSH(ctx context.Context) error {
 	if err := hardening.Apply(s.conn, hardCfg); err != nil {
 		fmt.Printf("  ⚠️  Hardening partially failed, continuing...\n")
 	}
-	s.conn.Close()
+	if err := s.conn.Close(); err != nil {
+		log.Printf("server: conn close error: %v", err)
+	}
 	s.conn = nil
 
 	reconnectPort := s.cfg.SSHPort
@@ -164,29 +184,35 @@ func (s *Server) provisionSSH(ctx context.Context) error {
 	if hardCfg.MigrateSSH() {
 		reconnectPort = hardCfg.SSHPort
 	}
-	fmt.Printf("  → Reconnecting as %s@%s port %d...\n", reconnectUser, s.cfg.Host, reconnectPort)
+	return reconnectAfterHardening(s, reconnectUser, reconnectPort)
+}
+
+func reconnectAfterHardening(s *Server, user string, port int) error {
+	fmt.Printf("  → Reconnecting as %s@%s port %d...\n", user, s.cfg.Host, port)
 	for attempt := 1; attempt <= 10; attempt++ {
-		opts := []ssh.Option{ssh.WithPort(reconnectPort)}
+		opts := []ssh.Option{ssh.WithPort(port)}
 		if s.cfg.SSHKey != "" {
 			opts = append(opts, ssh.WithKey(s.cfg.SSHKey))
 		}
 		if s.cfg.InsecureSSH {
 			opts = append(opts, ssh.WithInsecure())
 		}
-		client := ssh.New(s.cfg.Host, reconnectUser, opts...)
+		client := ssh.New(s.cfg.Host, user, opts...)
 		conn, err := client.Connect()
 		if err == nil {
 			s.conn = conn
-			break
+			return nil
 		}
 		if attempt == 10 {
 			return fmt.Errorf("reconnect after hardening: %w", err)
 		}
-		fmt.Printf("  Waiting for SSH on port %d... (attempt %d/10)\n", hardCfg.SSHPort, attempt)
+		fmt.Printf("  Waiting for SSH on port %d... (attempt %d/10)\n", port, attempt)
 		time.Sleep(3 * time.Second)
 	}
-	defer s.conn.Close()
+	return nil
+}
 
+func installRuntime(s *Server) error {
 	if s.cfg.CrowdSec {
 		if err := installCrowdSec(s.conn); err != nil {
 			return err
@@ -208,8 +234,6 @@ func (s *Server) provisionSSH(ctx context.Context) error {
 			return err
 		}
 	}
-
-	ssh.Run(s.conn, `mkdir -p /opt/sdk-ops/services /opt/sdk-ops/backups /opt/sdk-ops/logs && echo "sdk-ops-init" > /opt/sdk-ops/.version`)
 
 	return nil
 }
@@ -240,7 +264,9 @@ func (s *Server) provisionCloudInit(ctx context.Context) error {
 		client := ssh.New(s.cfg.Host, ciUser, opts...)
 		conn, err := client.Connect()
 		if err == nil {
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				log.Printf("server: conn close error: %v", err)
+			}
 			s.cfg.User = ciUser
 			s.cfg.SSHPort = ciPort
 			return nil
@@ -274,13 +300,11 @@ echo "CrowdSec installed"
 	return nil
 }
 
-// --- Status ---
-
 func (s *Server) Status() (string, error) {
 	if err := s.connect(); err != nil {
 		return "", err
 	}
-	defer s.conn.Close()
+	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
 
 	var result string
 	sysInfo := `echo "Hostname: $(hostname)"
@@ -313,13 +337,11 @@ echo "Disk:     $(df -h / | awk 'NR==2 {print $3 "/" $2}')"`
 	return result, nil
 }
 
-// --- Deploy ---
-
 func (s *Server) Deploy(sourceDir string) (*deploy.DeployResult, error) {
 	if err := s.connect(); err != nil {
 		return nil, err
 	}
-	defer s.conn.Close()
+	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
 
 	cfg := deploy.UploadConfig{
 		ServiceName: filepath.Base(sourceDir),
@@ -332,17 +354,11 @@ func (s *Server) DeployPush(sourceDir, name string) (*deploy.DeployResult, error
 	if err := s.connect(); err != nil {
 		return nil, err
 	}
-	defer s.conn.Close()
+	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
 
 	reg := deploy.DefaultRegistry()
-	imageRef, err := deploy.BuildAndPushImage(sourceDir, name, reg)
-	if err != nil {
+	if _, err := deploy.BuildAndPushImage(sourceDir, name, reg); err != nil {
 		fmt.Printf("  ⚠️  Docker build+push failed: %v\n", err)
-	}
-
-	if imageRef != "" {
-		composeData := deploy.GenerateCompose(imageRef, name, 8080, false)
-		_ = composeData
 	}
 
 	cfg := deploy.UploadConfig{
@@ -367,32 +383,30 @@ func (s *Server) DeployPush(sourceDir, name string) (*deploy.DeployResult, error
 		if rbErr := deploy.Rollback(s.conn, name, ""); rbErr != nil {
 			return nil, fmt.Errorf("health: %v\nrollback also failed: %v", err, rbErr)
 		}
-		deploy.RunService(s.conn, svcCfg)
+		if err := deploy.RunService(s.conn, svcCfg); err != nil {
+			log.Printf("server: run service error: %v", err)
+		}
 		return nil, fmt.Errorf("health check failed, rolled back")
 	}
 
 	return result, nil
 }
 
-// --- Exec ---
-
 func (s *Server) Exec(cmd string) (string, error) {
 	if err := s.connect(); err != nil {
 		return "", err
 	}
-	defer s.conn.Close()
+	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
 
 	out, _, err := ssh.Run(s.conn, cmd)
 	return out, err
 }
 
-// --- Backup / Restore ---
-
 func (s *Server) BackupServices(destDir string) (string, error) {
 	if err := s.connect(); err != nil {
 		return "", err
 	}
-	defer s.conn.Close()
+	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
 
 	return deploy.BackupServices(s.conn, destDir)
 }
@@ -401,12 +415,10 @@ func (s *Server) RestoreServices(backupPath string) error {
 	if err := s.connect(); err != nil {
 		return err
 	}
-	defer s.conn.Close()
+	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
 
 	return deploy.RestoreServices(s.conn, backupPath)
 }
-
-// --- Cluster operations ---
 
 type ClusterClient struct {
 	server *Server

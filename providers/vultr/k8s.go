@@ -3,6 +3,7 @@ package vultr
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/vultr/govultr/v3"
 
@@ -21,7 +22,7 @@ func (c *Client) CreateK8s(ctx context.Context, cfg providers.K8sCreateConfig) (
 		}},
 	})
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create k8s: %w", err)
@@ -42,14 +43,13 @@ func (c *Client) DeleteK8s(ctx context.Context, id string) error {
 }
 
 func (c *Client) ListK8s(ctx context.Context) ([]providers.K8sCluster, error) {
-	clusters, meta, resp, err := c.client.Kubernetes.ListClusters(ctx, &govultr.ListOptions{})
+	clusters, _, resp, err := c.client.Kubernetes.ListClusters(ctx, &govultr.ListOptions{})
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list k8s: %w", err)
 	}
-	_ = meta
 	var result []providers.K8sCluster
 	for _, cl := range clusters {
 		result = append(result, providers.K8sCluster{
@@ -62,7 +62,7 @@ func (c *Client) ListK8s(ctx context.Context) ([]providers.K8sCluster, error) {
 func (c *Client) GetK8s(ctx context.Context, id string) (*providers.K8sCluster, error) {
 	cl, resp, err := c.client.Kubernetes.GetCluster(ctx, id)
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr get k8s: %w", err)
@@ -73,7 +73,7 @@ func (c *Client) GetK8s(ctx context.Context, id string) (*providers.K8sCluster, 
 func (c *Client) GetKubeconfig(ctx context.Context, id string) (string, error) {
 	kc, resp, err := c.client.Kubernetes.GetKubeConfig(ctx, id)
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
 	}
 	if err != nil {
 		return "", fmt.Errorf("vultr kubeconfig: %w", err)

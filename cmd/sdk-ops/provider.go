@@ -3,19 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 
 	"github.com/natuleadan/sdk-ops/providers"
-	"github.com/natuleadan/sdk-ops/providers/aws"
-	"github.com/natuleadan/sdk-ops/providers/cubepath"
-	"github.com/natuleadan/sdk-ops/providers/digitalocean"
-	"github.com/natuleadan/sdk-ops/providers/hetzner"
-	"github.com/natuleadan/sdk-ops/providers/vultr"
 	"github.com/natuleadan/sdk-ops/terraform"
 )
 
@@ -43,14 +38,12 @@ func newProviderCmd() *cobra.Command {
 		Short: "Manage cloud provider resources (VPS, K8s, LB, DNS)",
 	}
 
-	// Subcommands
 	cmd.AddCommand(newProviderVPSCmd())
 	cmd.AddCommand(newProviderK8sCmd())
 	cmd.AddCommand(newProviderLBCmd())
 	cmd.AddCommand(newProviderDNSCmd())
 	cmd.AddCommand(newProviderSSHKeyCmd())
 
-	// Global flags
 	cmd.PersistentFlags().StringVar(&pf.provider, "provider", "", "Provider name (cubepath, hetzner, digitalocean, vultr, aws)")
 	cmd.PersistentFlags().StringVar(&pf.apiKey, "api-key", "", "API key (or provider-specific env var)")
 	cmd.PersistentFlags().IntVar(&pf.projectID, "project-id", 0, "Project ID for provider")
@@ -60,71 +53,18 @@ func newProviderCmd() *cobra.Command {
 
 func getProvider() (providers.Provider, error) {
 	apiKey := pf.apiKey
-	creds, _ := providers.LoadCredentials()
 
 	switch pf.provider {
 	case "cubepath":
-		if apiKey == "" {
-			apiKey = os.Getenv("CUBEPATH_API_KEY")
-		}
-		if apiKey == "" && creds != nil {
-			apiKey = creds.CubePathAPIKey
-		}
-		if apiKey == "" {
-			return nil, fmt.Errorf("--api-key, CUBEPATH_API_KEY, or credentials.yaml required")
-		}
-		return cubepath.New(apiKey, pf.projectID), nil
-
+		return newCubePathProvider(apiKey, pf.projectID)
 	case "hetzner":
-		if apiKey == "" {
-			apiKey = os.Getenv("HETZNER_API_TOKEN")
-		}
-		if apiKey == "" && creds != nil {
-			apiKey = creds.HetznerAPIToken
-		}
-		if apiKey == "" {
-			return nil, fmt.Errorf("--api-key, HETZNER_API_TOKEN, or credentials.yaml required")
-		}
-		return hetzner.New(apiKey), nil
-
+		return newHetznerProvider(apiKey)
 	case "digitalocean":
-		if apiKey == "" {
-			apiKey = os.Getenv("DIGITALOCEAN_TOKEN")
-		}
-		if apiKey == "" && creds != nil {
-			apiKey = creds.DigitalOceanToken
-		}
-		if apiKey == "" {
-			return nil, fmt.Errorf("--api-key, DIGITALOCEAN_TOKEN, or credentials.yaml required")
-		}
-		return digitalocean.New(apiKey), nil
-
+		return newDigitalOceanProvider(apiKey)
 	case "vultr":
-		if apiKey == "" {
-			apiKey = os.Getenv("VULTR_API_KEY")
-		}
-		if apiKey == "" && creds != nil {
-			apiKey = creds.VultrAPIKey
-		}
-		if apiKey == "" {
-			return nil, fmt.Errorf("--api-key, VULTR_API_KEY, or credentials.yaml required")
-		}
-		return vultr.New(apiKey), nil
-
+		return newVultrProvider(apiKey)
 	case "aws":
-		region := os.Getenv("AWS_REGION")
-		if region == "" && creds != nil {
-			region = creds.AWSRegion
-		}
-		if region == "" {
-			region = "us-east-1"
-		}
-		cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
-		if err != nil {
-			return nil, fmt.Errorf("aws config: %w", err)
-		}
-		return aws.New(region, cfg), nil
-
+		return newAWSProvider()
 	default:
 		return nil, fmt.Errorf("unknown provider: %s (supported: cubepath, hetzner, digitalocean, vultr, aws)", pf.provider)
 	}
@@ -158,7 +98,7 @@ func newProviderVPSCmd() *cobra.Command {
 			if pf.sshKeyIDs != "" {
 				for s := range strings.SplitSeq(pf.sshKeyIDs, ",") {
 					var id int
-					fmt.Sscanf(s, "%d", &id)
+					if _, err := fmt.Sscanf(s, "%d", &id); err != nil { log.Printf("provider: parse id error: %v", err) }
 					if id > 0 {
 						cfg.SSHKeyIDs = append(cfg.SSHKeyIDs, id)
 					}
@@ -247,7 +187,27 @@ func newProviderK8sCmd() *cobra.Command {
 		Short: "Manage Kubernetes clusters",
 	}
 
-	createCmd := &cobra.Command{
+	cmd.AddCommand(newProviderK8sCreateCmd())
+	cmd.AddCommand(newProviderK8sListCmd())
+	cmd.AddCommand(newProviderK8sDeleteCmd())
+	cmd.AddCommand(newProviderK8sKubeconfigCmd())
+	cmd.AddCommand(newProviderK8sUpdateCmd())
+	cmd.AddCommand(newProviderK8sProtectionCmd())
+
+	addonsCmd := newProviderK8sAddonsCmd()
+	cmd.AddCommand(addonsCmd)
+
+	nodePoolCmd := newProviderK8sNodePoolCmd()
+	cmd.AddCommand(nodePoolCmd)
+
+	k8sLBListCmd := newProviderK8sLBListCmd()
+	cmd.AddCommand(k8sLBListCmd)
+
+	return cmd
+}
+
+func newProviderK8sCreateCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a K8s cluster",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -271,7 +231,16 @@ func newProviderK8sCmd() *cobra.Command {
 		},
 	}
 
-	listCmd := &cobra.Command{
+	cmd.Flags().StringVar(&pf.name, "name", "", "Cluster name")
+	cmd.Flags().StringVar(&pf.location, "location", "", "Location")
+	cmd.Flags().StringVar(&pf.version, "version", "", "K8s version")
+	cmd.Flags().StringVar(&pf.nodePlan, "node-plan", "", "Node plan")
+	cmd.Flags().IntVar(&pf.nodeCount, "nodes", 3, "Number of nodes")
+	return cmd
+}
+
+func newProviderK8sListCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "list",
 		Short: "List K8s clusters",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -289,8 +258,10 @@ func newProviderK8sCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
 
-	deleteCmd := &cobra.Command{
+func newProviderK8sDeleteCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete a K8s cluster",
 		Args:  cobra.ExactArgs(1),
@@ -302,8 +273,10 @@ func newProviderK8sCmd() *cobra.Command {
 			return p.DeleteK8s(context.Background(), args[0])
 		},
 	}
+}
 
-	kubeconfigCmd := &cobra.Command{
+func newProviderK8sKubeconfigCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "kubeconfig <id>",
 		Short: "Get K8s kubeconfig",
 		Args:  cobra.ExactArgs(1),
@@ -320,8 +293,10 @@ func newProviderK8sCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
 
-	updateCmd := &cobra.Command{
+func newProviderK8sUpdateCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "update <id>",
 		Short: "Upgrade K8s version",
 		Args:  cobra.ExactArgs(1),
@@ -342,9 +317,12 @@ func newProviderK8sCmd() *cobra.Command {
 			return nil
 		},
 	}
-	updateCmd.Flags().String("version", "", "Target K8s version")
+	cmd.Flags().String("version", "", "Target K8s version")
+	return cmd
+}
 
-	protectionCmd := &cobra.Command{
+func newProviderK8sProtectionCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "protection <id>",
 		Short: "Toggle K8s cluster deletion protection",
 		Args:  cobra.ExactArgs(1),
@@ -361,8 +339,11 @@ func newProviderK8sCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
 
+func newProviderK8sAddonsCmd() *cobra.Command {
 	addonsCmd := &cobra.Command{Use: "addons", Short: "Manage K8s addons"}
+
 	addonsListCmd := &cobra.Command{
 		Use: "list <id>", Short: "List installed addons", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -421,8 +402,12 @@ func newProviderK8sCmd() *cobra.Command {
 	addonsCmd.AddCommand(addonsAvailableCmd)
 	addonsCmd.AddCommand(addonsInstallCmd)
 	addonsCmd.AddCommand(addonsUninstallCmd)
+	return addonsCmd
+}
 
+func newProviderK8sNodePoolCmd() *cobra.Command {
 	nodePoolCmd := &cobra.Command{Use: "node-pool", Short: "Manage K8s node pools"}
+
 	npListCmd := &cobra.Command{
 		Use: "list <id>", Short: "List node pools", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -488,23 +473,11 @@ func newProviderK8sCmd() *cobra.Command {
 	nodePoolCmd.AddCommand(npAddCmd)
 	nodePoolCmd.AddCommand(npScaleCmd)
 	nodePoolCmd.AddCommand(npDeleteCmd)
+	return nodePoolCmd
+}
 
-	createCmd.Flags().StringVar(&pf.name, "name", "", "Cluster name")
-	createCmd.Flags().StringVar(&pf.location, "location", "", "Location")
-	createCmd.Flags().StringVar(&pf.version, "version", "", "K8s version")
-	createCmd.Flags().StringVar(&pf.nodePlan, "node-plan", "", "Node plan")
-	createCmd.Flags().IntVar(&pf.nodeCount, "nodes", 3, "Number of nodes")
-
-	cmd.AddCommand(createCmd)
-	cmd.AddCommand(listCmd)
-	cmd.AddCommand(deleteCmd)
-	cmd.AddCommand(kubeconfigCmd)
-	cmd.AddCommand(updateCmd)
-	cmd.AddCommand(protectionCmd)
-	cmd.AddCommand(addonsCmd)
-	cmd.AddCommand(nodePoolCmd)
-
-	lbListCmd := &cobra.Command{
+func newProviderK8sLBListCmd() *cobra.Command {
+	return &cobra.Command{
 		Use: "lb-list <id>", Short: "List LBs attached to a K8s cluster", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := getProvider()
@@ -521,9 +494,6 @@ func newProviderK8sCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(lbListCmd)
-
-	return cmd
 }
 
 // --- LB ---
@@ -534,7 +504,28 @@ func newProviderLBCmd() *cobra.Command {
 		Short: "Manage Load Balancers",
 	}
 
-	createCmd := &cobra.Command{
+	cmd.AddCommand(newProviderLBCreateCmd())
+	cmd.AddCommand(newProviderLBListCmd())
+	cmd.AddCommand(newProviderLBDeleteCmd())
+
+	listenerCmd := newProviderLBListenerCmd()
+	cmd.AddCommand(listenerCmd)
+
+	healthCmd := newProviderLBHealthCmd()
+	cmd.AddCommand(healthCmd)
+
+	targetCmd := newProviderLBTargetCmd()
+	cmd.AddCommand(targetCmd)
+
+	cmd.AddCommand(newProviderLBResizeCmd())
+	cmd.AddCommand(newProviderLBMetricsCmd())
+	cmd.AddCommand(newProviderLBProtectionCmd())
+
+	return cmd
+}
+
+func newProviderLBCreateCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a load balancer",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -555,8 +546,14 @@ func newProviderLBCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&pf.name, "name", "", "LB name")
+	cmd.Flags().StringVar(&pf.location, "location", "", "Location")
+	cmd.Flags().StringVar(&pf.plan, "plan", "", "LB plan")
+	return cmd
+}
 
-	listCmd := &cobra.Command{
+func newProviderLBListCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "list",
 		Short: "List load balancers",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -574,8 +571,10 @@ func newProviderLBCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
 
-	deleteCmd := &cobra.Command{
+func newProviderLBDeleteCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete a load balancer",
 		Args:  cobra.ExactArgs(1),
@@ -587,8 +586,11 @@ func newProviderLBCmd() *cobra.Command {
 			return p.DeleteLB(context.Background(), args[0])
 		},
 	}
+}
 
+func newProviderLBListenerCmd() *cobra.Command {
 	listenerCmd := &cobra.Command{Use: "listener", Short: "Manage LB listeners"}
+
 	lsAddCmd := &cobra.Command{
 		Use: "add <lb-id>", Short: "Add a listener", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -640,8 +642,11 @@ func newProviderLBCmd() *cobra.Command {
 	listenerCmd.AddCommand(lsAddCmd)
 	listenerCmd.AddCommand(lsUpdateCmd)
 	listenerCmd.AddCommand(lsDeleteCmd)
+	return listenerCmd
+}
 
-	healthCmd := &cobra.Command{
+func newProviderLBHealthCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use: "health-check <lb-id> <listener-id>", Short: "Set LB health check",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -654,8 +659,11 @@ func newProviderLBCmd() *cobra.Command {
 				providers.LBHealthCheckConfig{Path: path})
 		},
 	}
-	healthCmd.Flags().String("path", "/health", "Health check path")
+	cmd.Flags().String("path", "/health", "Health check path")
+	return cmd
+}
 
+func newProviderLBTargetCmd() *cobra.Command {
 	targetCmd := &cobra.Command{Use: "target", Short: "Manage LB targets"}
 	tgtAddCmd := &cobra.Command{
 		Use: "add <lb-id> <listener-id>", Short: "Add a target", Args: cobra.ExactArgs(2),
@@ -709,8 +717,11 @@ func newProviderLBCmd() *cobra.Command {
 	targetCmd.AddCommand(tgtAddCmd)
 	targetCmd.AddCommand(tgtListCmd)
 	targetCmd.AddCommand(tgtDrainCmd)
+	return targetCmd
+}
 
-	resizeCmd := &cobra.Command{
+func newProviderLBResizeCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use: "resize <lb-id>", Short: "Resize LB plan",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -727,9 +738,12 @@ func newProviderLBCmd() *cobra.Command {
 			return nil
 		},
 	}
-	resizeCmd.Flags().String("plan", "", "Target plan (e.g. lb.medium)")
+	cmd.Flags().String("plan", "", "Target plan (e.g. lb.medium)")
+	return cmd
+}
 
-	metricsCmd := &cobra.Command{
+func newProviderLBMetricsCmd() *cobra.Command {
+	return &cobra.Command{
 		Use: "metrics <lb-id>", Short: "Show LB metrics",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -745,8 +759,10 @@ func newProviderLBCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
 
-	lbProtectionCmd := &cobra.Command{
+func newProviderLBProtectionCmd() *cobra.Command {
+	return &cobra.Command{
 		Use: "protection <lb-id>", Short: "Toggle LB deletion protection",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -762,21 +778,6 @@ func newProviderLBCmd() *cobra.Command {
 			return nil
 		},
 	}
-
-	createCmd.Flags().StringVar(&pf.name, "name", "", "LB name")
-	createCmd.Flags().StringVar(&pf.location, "location", "", "Location")
-	createCmd.Flags().StringVar(&pf.plan, "plan", "", "LB plan")
-
-	cmd.AddCommand(createCmd)
-	cmd.AddCommand(listCmd)
-	cmd.AddCommand(deleteCmd)
-	cmd.AddCommand(listenerCmd)
-	cmd.AddCommand(healthCmd)
-	cmd.AddCommand(targetCmd)
-	cmd.AddCommand(resizeCmd)
-	cmd.AddCommand(metricsCmd)
-	cmd.AddCommand(lbProtectionCmd)
-	return cmd
 }
 
 // --- DNS ---
@@ -862,7 +863,8 @@ func newProviderSSHKeyCmd() *cobra.Command {
 			}
 			pubKey := sshKeyPub
 			if pubKey == "" {
-				pubKey = os.ExpandEnv("$HOME/.ssh/id_ed25519.pub")
+				homeDir, _ := os.UserHomeDir()
+				pubKey = filepath.Join(homeDir, ".ssh", "id_ed25519.pub")
 			}
 			data, err := os.ReadFile(filepath.Clean(pubKey))
 			if err != nil {

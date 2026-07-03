@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 
@@ -79,15 +80,15 @@ func DeployK3s(client *goss.Client, name, imageRef, domain string, port int) err
 	if err != nil {
 		return fmt.Errorf("ssh session: %w", err)
 	}
-	defer sess.Close()
+	defer func() { if err := sess.Close(); err != nil { log.Printf("k8s: session close error: %v", err) } }()
 
 	stdin, err := sess.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
 	}
 	go func() {
-		defer stdin.Close()
-		stdin.Write([]byte(yaml))
+		defer func() { if err := stdin.Close(); err != nil { log.Printf("k8s: stdin close error: %v", err) } }()
+		if _, err := stdin.Write([]byte(yaml)); err != nil { log.Printf("k8s: stdin write error: %v", err) }
 	}()
 
 	out, err := sess.CombinedOutput(fmt.Sprintf("cat > %s && kubectl apply -f %s && rm -f %s", tmpFile, tmpFile, tmpFile))
@@ -111,13 +112,13 @@ func DeployK3sFromCompose(client *goss.Client, name, versionDir, imageRef string
 				domain = strings.TrimSpace(after)
 			}
 			if strings.HasPrefix(line, "port:") {
-				fmt.Sscanf(line, "port: %d", &port)
+				if _, err := fmt.Sscanf(line, "port: %d", &port); err != nil { log.Printf("k8s: parse port error: %v", err) }
 			}
 			if strings.HasPrefix(line, "ports:") {
 				// Parse "80:80" format
 				parts := strings.Split(line, ":")
 				if len(parts) >= 2 {
-					fmt.Sscanf(parts[len(parts)-1], "%d", &port)
+					if _, err := fmt.Sscanf(parts[len(parts)-1], "%d", &port); err != nil { log.Printf("k8s: parse port error: %v", err) }
 				}
 			}
 			if after, ok := strings.CutPrefix(line, "image:"); ok {

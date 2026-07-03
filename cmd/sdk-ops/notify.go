@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/spf13/cobra"
 
@@ -30,7 +31,7 @@ func newNotifyCmd() *cobra.Command {
 
 			errs := notify.SendAll(nn, title, message)
 			for _, err := range errs {
-				fmt.Fprintf(cmd.ErrOrStderr(), "  ⚠️  %v\n", err)
+				if _, fErr := fmt.Fprintf(cmd.ErrOrStderr(), "  ⚠️  %v\n", err); fErr != nil { log.Printf("notify: write error: %v", fErr) }
 			}
 
 			success := len(nn) - len(errs)
@@ -53,7 +54,7 @@ func newNotifyCmd() *cobra.Command {
 
 			errs := notify.SendAll(nn, title, message)
 			for _, err := range errs {
-				fmt.Fprintf(cmd.ErrOrStderr(), "  ⚠️  %v\n", err)
+				if _, fErr := fmt.Fprintf(cmd.ErrOrStderr(), "  ⚠️  %v\n", err); fErr != nil { log.Printf("notify: write error: %v", fErr) }
 			}
 
 			success := len(nn) - len(errs)

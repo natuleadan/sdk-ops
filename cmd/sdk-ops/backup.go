@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -17,25 +18,34 @@ func newBackupCmd() *cobra.Command {
 		Short: "Backup, restore, and schedule backups for services and databases",
 	}
 
-	// --- create (services backup) ---
-	createCmd := &cobra.Command{
+	cmd.AddCommand(newBackupCreateCmd(&user, &key, &port))
+	cmd.AddCommand(newBackupDBCmd(&user, &key, &port))
+	cmd.AddCommand(newBackupScheduleCmd(&user, &key, &port))
+	cmd.AddCommand(newBackupUnscheduleCmd(&user, &key, &port))
+	cmd.AddCommand(newBackupListSchedulesCmd(&user, &key, &port))
+	cmd.AddCommand(newBackupRestoreCmd(&user, &key, &port))
+
+	return cmd
+}
+
+func newBackupCreateCmd(user, key *string, port *int) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "create <ip>",
 		Short: "Backup all services on a node to a local file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newSSHClient(args[0], user, port, key)
+			client := newSSHClient(args[0], *user, *port, *key)
 			conn, err := client.Connect()
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
 
 			path, err := deploy.BackupServices(conn, ".")
 			if err != nil {
 				return err
 			}
 
-			// Upload to S3 if configured
 			s3Cfg := deploy.S3ConfigFromEnv()
 			if s3Cfg.Bucket != "" {
 				if err := deploy.UploadToS3(path, s3Cfg); err != nil {
@@ -48,8 +58,14 @@ func newBackupCmd() *cobra.Command {
 		},
 	}
 
-	// --- db-backup ---
-	dbBackupCmd := &cobra.Command{
+	cmd.Flags().StringVarP(user, "user", "u", "sdkops", "SSH user")
+	cmd.Flags().StringVarP(key, "key", "k", "", "SSH key path")
+	cmd.Flags().IntVarP(port, "port", "p", 2222, "SSH port")
+	return cmd
+}
+
+func newBackupDBCmd(user, key *string, port *int) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "db <type> <container-name> --node <ip>",
 		Short: "Backup a database (postgres, mysql, mongodb, redis)",
 		Args:  cobra.ExactArgs(2),
@@ -73,19 +89,18 @@ Examples:
 
 			dbType := deploy.DBType(dbTypeStr)
 
-			client := newSSHClient(nodeIP, user, port, key)
+			client := newSSHClient(nodeIP, *user, *port, *key)
 			conn, err := client.Connect()
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
 
 			path, err := deploy.BackupDatabase(conn, dbType, dbName, containerName, ".")
 			if err != nil {
 				return err
 			}
 
-			// Upload to S3 if configured
 			s3Cfg := deploy.S3ConfigFromEnv()
 			if s3Cfg.Bucket != "" {
 				if err := deploy.UploadToS3(path, s3Cfg); err != nil {
@@ -98,8 +113,16 @@ Examples:
 		},
 	}
 
-	// --- schedule ---
-	scheduleCmd := &cobra.Command{
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	cmd.Flags().String("db-name", "", "Database name (for postgres)")
+	cmd.Flags().StringVarP(user, "user", "u", "sdkops", "SSH user")
+	cmd.Flags().StringVarP(key, "key", "k", "", "SSH key path")
+	cmd.Flags().IntVarP(port, "port", "p", 2222, "SSH port")
+	return cmd
+}
+
+func newBackupScheduleCmd(user, key *string, port *int) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "schedule <type> [--db-name X] [--container X] [--cron expr] [--node ip]",
 		Short: "Schedule a backup via systemd timer",
 		Long: `Schedule periodic backups using systemd timers.
@@ -114,7 +137,6 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			backupType := deploy.BackupType(args[0])
 
-			// Validate backup type
 			switch backupType {
 			case deploy.BackupTypeServices, deploy.BackupTypePostgres, deploy.BackupTypeMySQL, deploy.BackupTypeMongoDB, deploy.BackupTypeRedis:
 			default:
@@ -130,15 +152,15 @@ Examples:
 				return fmt.Errorf("--node is required")
 			}
 			if cronExpr == "" {
-				cronExpr = "0 3 * * *" // default: daily at 3am
+				cronExpr = "0 3 * * *"
 			}
 
-			client := newSSHClient(nodeIP, user, port, key)
+			client := newSSHClient(nodeIP, *user, *port, *key)
 			conn, err := client.Connect()
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
 
 			var s3Cfg *deploy.S3Config
 			if envCfg := deploy.S3ConfigFromEnv(); envCfg.Bucket != "" {
@@ -158,15 +180,24 @@ Examples:
 		},
 	}
 
-	// --- unschedule ---
-	unscheduleCmd := &cobra.Command{
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	cmd.Flags().String("cron", "0 3 * * *", "Cron expression")
+	cmd.Flags().String("db-name", "", "Database name (for postgres)")
+	cmd.Flags().String("container", "", "Container name (for database backups)")
+	cmd.Flags().StringVarP(user, "user", "u", "sdkops", "SSH user")
+	cmd.Flags().StringVarP(key, "key", "k", "", "SSH key path")
+	cmd.Flags().IntVarP(port, "port", "p", 2222, "SSH port")
+	return cmd
+}
+
+func newBackupUnscheduleCmd(user, key *string, port *int) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "unschedule <type> [--node ip]",
 		Short: "Remove a scheduled backup",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			backupType := deploy.BackupType(args[0])
 
-			// Validate backup type
 			switch backupType {
 			case deploy.BackupTypeServices, deploy.BackupTypePostgres, deploy.BackupTypeMySQL, deploy.BackupTypeMongoDB, deploy.BackupTypeRedis:
 			default:
@@ -178,19 +209,26 @@ Examples:
 				return fmt.Errorf("--node is required")
 			}
 
-			client := newSSHClient(nodeIP, user, port, key)
+			client := newSSHClient(nodeIP, *user, *port, *key)
 			conn, err := client.Connect()
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
 
 			return deploy.UnscheduleBackup(conn, backupType)
 		},
 	}
 
-	// --- list-schedules ---
-	listSchedulesCmd := &cobra.Command{
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	cmd.Flags().StringVarP(user, "user", "u", "sdkops", "SSH user")
+	cmd.Flags().StringVarP(key, "key", "k", "", "SSH key path")
+	cmd.Flags().IntVarP(port, "port", "p", 2222, "SSH port")
+	return cmd
+}
+
+func newBackupListSchedulesCmd(user, key *string, port *int) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "list-schedules [--node ip]",
 		Short: "List backup schedules on a node",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -199,12 +237,12 @@ Examples:
 				return fmt.Errorf("--node is required")
 			}
 
-			client := newSSHClient(nodeIP, user, port, key)
+			client := newSSHClient(nodeIP, *user, *port, *key)
 			conn, err := client.Connect()
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
 
 			schedules, err := deploy.ListBackupSchedules(conn)
 			if err != nil {
@@ -222,18 +260,25 @@ Examples:
 		},
 	}
 
-	// --- restore (existing) ---
-	restoreCmd := &cobra.Command{
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	cmd.Flags().StringVarP(user, "user", "u", "sdkops", "SSH user")
+	cmd.Flags().StringVarP(key, "key", "k", "", "SSH key path")
+	cmd.Flags().IntVarP(port, "port", "p", 2222, "SSH port")
+	return cmd
+}
+
+func newBackupRestoreCmd(user, key *string, port *int) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "restore <ip> <backup-file>",
 		Short: "Restore services from a backup file",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newSSHClient(args[0], user, port, key)
+			client := newSSHClient(args[0], *user, *port, *key)
 			conn, err := client.Connect()
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer conn.Close()
+			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
 
 			if err := deploy.RestoreServices(conn, args[1]); err != nil {
 				return err
@@ -243,45 +288,8 @@ Examples:
 		},
 	}
 
-	createCmd.Flags().StringVarP(&user, "user", "u", "sdkops", "SSH user")
-	createCmd.Flags().StringVarP(&key, "key", "k", "", "SSH key path")
-	createCmd.Flags().IntVarP(&port, "port", "p", 2222, "SSH port")
-
-	dbBackupCmd.Flags().StringP("node", "n", "", "Target node IP")
-	dbBackupCmd.Flags().String("db-name", "", "Database name (for postgres)")
-	dbBackupCmd.Flags().StringVarP(&user, "user", "u", "sdkops", "SSH user")
-	dbBackupCmd.Flags().StringVarP(&key, "key", "k", "", "SSH key path")
-	dbBackupCmd.Flags().IntVarP(&port, "port", "p", 2222, "SSH port")
-
-	scheduleCmd.Flags().StringP("node", "n", "", "Target node IP")
-	scheduleCmd.Flags().String("cron", "0 3 * * *", "Cron expression")
-	scheduleCmd.Flags().String("db-name", "", "Database name (for postgres)")
-	scheduleCmd.Flags().String("container", "", "Container name (for database backups)")
-	scheduleCmd.Flags().StringVarP(&user, "user", "u", "sdkops", "SSH user")
-	scheduleCmd.Flags().StringVarP(&key, "key", "k", "", "SSH key path")
-	scheduleCmd.Flags().IntVarP(&port, "port", "p", 2222, "SSH port")
-
-	unscheduleCmd.Flags().StringP("node", "n", "", "Target node IP")
-	unscheduleCmd.Flags().StringVarP(&user, "user", "u", "sdkops", "SSH user")
-	unscheduleCmd.Flags().StringVarP(&key, "key", "k", "", "SSH key path")
-	unscheduleCmd.Flags().IntVarP(&port, "port", "p", 2222, "SSH port")
-
-	listSchedulesCmd.Flags().StringP("node", "n", "", "Target node IP")
-	listSchedulesCmd.Flags().StringVarP(&user, "user", "u", "sdkops", "SSH user")
-	listSchedulesCmd.Flags().StringVarP(&key, "key", "k", "", "SSH key path")
-	listSchedulesCmd.Flags().IntVarP(&port, "port", "p", 2222, "SSH port")
-
-	restoreCmd.Flags().StringVarP(&user, "user", "u", "sdkops", "SSH user")
-	restoreCmd.Flags().StringVarP(&key, "key", "k", "", "SSH key path")
-	restoreCmd.Flags().IntVarP(&port, "port", "p", 2222, "SSH port")
-
-	cmd.AddCommand(createCmd)
-	cmd.AddCommand(dbBackupCmd)
-	cmd.AddCommand(scheduleCmd)
-	cmd.AddCommand(unscheduleCmd)
-	cmd.AddCommand(listSchedulesCmd)
-	cmd.AddCommand(restoreCmd)
+	cmd.Flags().StringVarP(user, "user", "u", "sdkops", "SSH user")
+	cmd.Flags().StringVarP(key, "key", "k", "", "SSH key path")
+	cmd.Flags().IntVarP(port, "port", "p", 2222, "SSH port")
 	return cmd
 }
-
-

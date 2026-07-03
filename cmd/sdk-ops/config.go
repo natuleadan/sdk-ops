@@ -16,9 +16,9 @@ type NodeConfig struct {
 	User     string `yaml:"user"`
 	Key      string `yaml:"key,omitempty"`
 	Port     int    `yaml:"port"`
-	Mode     string `yaml:"mode,omitempty"` // k3s, docker, bare
-	Role     string `yaml:"role,omitempty"` // server, agent
-	Arch     string `yaml:"arch,omitempty"` // aarch64, x86_64
+	Mode     string `yaml:"mode,omitempty"`
+	Role     string `yaml:"role,omitempty"`
+	Arch     string `yaml:"arch,omitempty"`
 	Hostname string `yaml:"hostname,omitempty"`
 }
 
@@ -27,7 +27,8 @@ type RootConfig struct {
 }
 
 func configDir() string {
-	dir := os.ExpandEnv("$HOME/.sdk-ops")
+	homeDir, _ := os.UserHomeDir()
+	dir := filepath.Join(homeDir, ".sdk-ops")
 	func() { if err := os.MkdirAll(dir, 0700); err != nil { fmt.Fprintf(os.Stderr, "mkdir: %v\n", err) } }()
 	return dir
 }
@@ -73,12 +74,22 @@ func saveConfig(cfg *RootConfig) error {
 }
 
 func newConfigCmd() *cobra.Command {
-	var cmd = &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage sdk-ops configuration and registered nodes",
 	}
 
-	var initCmd = &cobra.Command{
+	cmd.AddCommand(newConfigInitCmd())
+	cmd.AddCommand(newConfigAddNodeCmd())
+	cmd.AddCommand(newConfigListNodeCmd())
+	cmd.AddCommand(newConfigRemoveNodeCmd())
+	cmd.AddCommand(newConfigSetCredsCmd())
+
+	return cmd
+}
+
+func newConfigInitCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "init",
 		Short: "Initialize ~/.sdk-ops/config.yaml",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -93,8 +104,10 @@ func newConfigCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
 
-	var addCmd = &cobra.Command{
+func newConfigAddNodeCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "add-node <ip> [--user] [--key] [--port]",
 		Short: "Register a node in ~/.sdk-ops/config.yaml",
 		Args:  cobra.ExactArgs(1),
@@ -109,7 +122,6 @@ func newConfigCmd() *cobra.Command {
 				return err
 			}
 
-			// Check for duplicate
 			for i, n := range cfg.Nodes {
 				if n.IP == args[0] {
 					cfg.Nodes[i].User = user
@@ -139,12 +151,16 @@ func newConfigCmd() *cobra.Command {
 			return nil
 		},
 	}
-	addCmd.Flags().String("user", "root", "SSH user")
-	addCmd.Flags().String("key", "", "SSH key path")
-	addCmd.Flags().Int("port", 22, "SSH port")
-	addCmd.Flags().String("mode", "", "Installation mode (k3s, docker, bare)")
 
-	var listCmd = &cobra.Command{
+	cmd.Flags().String("user", "root", "SSH user")
+	cmd.Flags().String("key", "", "SSH key path")
+	cmd.Flags().Int("port", 22, "SSH port")
+	cmd.Flags().String("mode", "", "Installation mode (k3s, docker, bare)")
+	return cmd
+}
+
+func newConfigListNodeCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "list-nodes",
 		Short: "List all registered nodes",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -162,8 +178,10 @@ func newConfigCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
 
-	var removeNodeCmd = &cobra.Command{
+func newConfigRemoveNodeCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "remove-node <ip>",
 		Short: "Remove a node from the config",
 		Args:  cobra.ExactArgs(1),
@@ -193,8 +211,10 @@ func newConfigCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
 
-	var setCredsCmd = &cobra.Command{
+func newConfigSetCredsCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "set-credentials",
 		Short: "Save provider credentials to ~/.sdk-ops/credentials.yaml",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -213,12 +233,4 @@ func newConfigCmd() *cobra.Command {
 			return nil
 		},
 	}
-
-	cmd.AddCommand(initCmd)
-	cmd.AddCommand(addCmd)
-	cmd.AddCommand(listCmd)
-	cmd.AddCommand(removeNodeCmd)
-	cmd.AddCommand(setCredsCmd)
-
-	return cmd
 }

@@ -18,7 +18,15 @@ func newKeyCmd() *cobra.Command {
 		Short: "Generate and manage SSH keys locally",
 	}
 
-	generateCmd := &cobra.Command{
+	cmd.AddCommand(newKeyGenerateCmd())
+	cmd.AddCommand(newKeyListCmd())
+	cmd.AddCommand(newKeyDeployCmd())
+
+	return cmd
+}
+
+func newKeyGenerateCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "generate <name> [--type ed25519|rsa] [--dir ~/.sdk-ops/keys]",
 		Short: "Generate a new SSH key pair",
 		Args:  cobra.ExactArgs(1),
@@ -50,7 +58,8 @@ func newKeyCmd() *cobra.Command {
 			if !validateFileName(name) {
 				return fmt.Errorf("invalid key name: %q", name)
 			}
-			cmdExec := exec.CommandContext(context.Background(), "ssh-keygen", argsCmd...)
+			cmdExec := exec.CommandContext(context.Background(), "ssh-keygen")
+			cmdExec.Args = append(cmdExec.Args, argsCmd...)
 			if out, err := cmdExec.CombinedOutput(); err != nil {
 				return fmt.Errorf("ssh-keygen: %w\n%s", err, string(out))
 			}
@@ -62,7 +71,13 @@ func newKeyCmd() *cobra.Command {
 		},
 	}
 
-	listCmd := &cobra.Command{
+	cmd.Flags().StringP("type", "t", "ed25519", "Key type (ed25519, rsa)")
+	cmd.Flags().StringP("dir", "d", "", "Key directory (default: ~/.sdk-ops/keys)")
+	return cmd
+}
+
+func newKeyListCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "list [--dir ~/.sdk-ops/keys]",
 		Short: "List local SSH keys",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -87,7 +102,7 @@ func newKeyCmd() *cobra.Command {
 					continue
 				}
 				pubPath := filepath.Join(keyDir, e.Name()+".pub")
-				pubData, _ := os.ReadFile(pubPath)
+				pubData, _ := os.ReadFile(filepath.Clean(pubPath))
 				info := "no public key"
 				if len(pubData) > 0 {
 					parts := splitAtLast(string(pubData), " ")
@@ -101,7 +116,12 @@ func newKeyCmd() *cobra.Command {
 		},
 	}
 
-	deployCmd := &cobra.Command{
+	cmd.Flags().StringP("dir", "d", "", "Key directory (default: ~/.sdk-ops/keys)")
+	return cmd
+}
+
+func newKeyDeployCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "deploy <name> --server <ip> [--user root] [--port 22]",
 		Short: "Deploy a local SSH key to a server",
 		Args:  cobra.ExactArgs(1),
@@ -126,8 +146,8 @@ func newKeyCmd() *cobra.Command {
 				return fmt.Errorf("read public key: %w", err)
 			}
 
-			// SSH in and add key to authorized_keys
-			sshCmd := exec.Command("ssh",
+			sshCmd := exec.CommandContext(context.Background(), "ssh")
+			sshCmd.Args = append(sshCmd.Args,
 				fmt.Sprintf("-p%d", sshPort),
 				fmt.Sprintf("%s@%s", sshUser, server),
 				fmt.Sprintf("mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '%s' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys", string(pubData)))
@@ -142,17 +162,10 @@ func newKeyCmd() *cobra.Command {
 		},
 	}
 
-	generateCmd.Flags().StringP("type", "t", "ed25519", "Key type (ed25519, rsa)")
-	generateCmd.Flags().StringP("dir", "d", "", "Key directory (default: ~/.sdk-ops/keys)")
-	listCmd.Flags().StringP("dir", "d", "", "Key directory (default: ~/.sdk-ops/keys)")
-	deployCmd.Flags().StringP("dir", "d", "", "Key directory (default: ~/.sdk-ops/keys)")
-	deployCmd.Flags().StringP("server", "s", "", "Server IP (required)")
-	deployCmd.Flags().StringP("user", "u", "root", "SSH user")
-	deployCmd.Flags().IntP("port", "p", 22, "SSH port")
-
-	cmd.AddCommand(generateCmd)
-	cmd.AddCommand(listCmd)
-	cmd.AddCommand(deployCmd)
+	cmd.Flags().StringP("dir", "d", "", "Key directory (default: ~/.sdk-ops/keys)")
+	cmd.Flags().StringP("server", "s", "", "Server IP (required)")
+	cmd.Flags().StringP("user", "u", "root", "SSH user")
+	cmd.Flags().IntP("port", "p", 22, "SSH port")
 	return cmd
 }
 

@@ -3,6 +3,7 @@ package hetzner
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 
@@ -45,7 +46,7 @@ func (c *Client) CreateVPS(ctx context.Context, cfg providers.VPSCreateConfig) (
 
 func (c *Client) DeleteVPS(ctx context.Context, id string) error {
 	var idInt int64
-	fmt.Sscanf(id, "%d", &idInt)
+	if _, err := fmt.Sscanf(id, "%d", &idInt); err != nil { log.Printf("hetzner: parse id error: %v", err) }
 	_, _, err := c.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: idInt})
 	if err != nil {
 		return fmt.Errorf("hetzner delete server: %w", err)
@@ -74,7 +75,7 @@ func (c *Client) ListVPS(ctx context.Context) ([]providers.VPS, error) {
 
 func (c *Client) GetVPS(ctx context.Context, id string) (*providers.VPS, error) {
 	var idInt int64
-	fmt.Sscanf(id, "%d", &idInt)
+	if _, err := fmt.Sscanf(id, "%d", &idInt); err != nil { log.Printf("hetzner: parse id error: %v", err) }
 	s, _, err := c.client.Server.GetByID(ctx, idInt)
 	if err != nil {
 		return nil, fmt.Errorf("hetzner get server: %w", err)

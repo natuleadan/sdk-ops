@@ -36,65 +36,12 @@ func checkContainerHealth() []ContainerHealth {
 		return results
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for _, line := range lines {
-		parts := strings.SplitN(line, "|", 4)
-		if len(parts) < 3 {
+	lines := strings.SplitSeq(strings.TrimSpace(string(out)), "\n")
+	for line := range lines {
+		ch, ok := checkSingleContainer(line)
+		if !ok {
 			continue
 		}
-		ch := ContainerHealth{
-			Name:   parts[0],
-			Image:  parts[1],
-			Ports:  parts[2],
-			Status: "running",
-		}
-		if len(parts) >= 4 {
-			ch.Status = parts[3]
-		}
-
-		// Extract port and IP from container (agent runs in bridge mode, not host)
-		port := extractContainerPort(ch.Ports)
-		containerIP := getContainerIP(ch.Name)
-
-		if port > 0 && containerIP != "" {
-			// Try common health endpoints via container IP
-			urls := []string{
-				fmt.Sprintf("http://%s:%d/health", containerIP, port),
-				fmt.Sprintf("http://%s:%d/", containerIP, port),
-			}
-			for _, url := range urls {
-				client := &http.Client{Timeout: 3 * time.Second}
-				req, _ := http.NewRequestWithContext(context.Background(), "GET", url, nil)
-			resp, err := client.Do(req)
-				if err == nil {
-					resp.Body.Close()
-					if resp.StatusCode == 200 {
-						ch.Healthy = true
-						ch.HealthURL = url
-						break
-					}
-				}
-			}
-		} else {
-			ch.Healthy = ch.Status == "running"
-		}
-
-		// Auto-heal: if unhealthy but status is running, restart
-		if !ch.Healthy && ch.Status == "running" {
-			if _, ok := validContainerName(ch.Name); !ok {
-				log.Printf("health: skipping invalid container name: %q", ch.Name)
-				continue
-			}
-			log.Printf("health: %s unhealthy, restarting...", ch.Name)
-			restartOut, err := exec.Command("docker", "restart", ch.Name).CombinedOutput()
-			if err != nil {
-				log.Printf("health: restart %s failed: %v\n%s", ch.Name, err, string(restartOut))
-			} else {
-				ch.AutoHealed = true
-				log.Printf("health: %s restarted successfully", ch.Name)
-			}
-		}
-
 		results = append(results, ch)
 	}
 
@@ -109,19 +56,89 @@ func checkContainerHealth() []ContainerHealth {
 	return filtered
 }
 
+func checkSingleContainer(line string) (ContainerHealth, bool) {
+	parts := strings.SplitN(line, "|", 4)
+	if len(parts) < 3 {
+		return ContainerHealth{}, false
+	}
+	ch := ContainerHealth{
+		Name:   parts[0],
+		Image:  parts[1],
+		Ports:  parts[2],
+		Status: "running",
+	}
+	if len(parts) >= 4 {
+		ch.Status = parts[3]
+	}
+
+	port := extractContainerPort(ch.Ports)
+	containerIP := getContainerIP(ch.Name)
+
+	if port > 0 && containerIP != "" {
+		urls := []string{
+			fmt.Sprintf("http://%s:%d/health", containerIP, port),
+			fmt.Sprintf("http://%s:%d/", containerIP, port),
+		}
+		for _, url := range urls {
+			client := &http.Client{Timeout: 3 * time.Second}
+			req, err := http.NewRequestWithContext(context.Background(), "GET", url, nil)
+			if err != nil {
+				log.Printf("health: create request: %v", err)
+				continue
+			}
+			resp, err := client.Do(req)
+			if err == nil {
+				if err := resp.Body.Close(); err != nil {
+					log.Printf("health: resp body close error: %v", err)
+				}
+				if resp.StatusCode == 200 {
+					ch.Healthy = true
+					ch.HealthURL = url
+					break
+				}
+			}
+		}
+	} else {
+		ch.Healthy = ch.Status == "running"
+	}
+
+	if !ch.Healthy && ch.Status == "running" {
+		if _, ok := validContainerName(ch.Name); !ok {
+			log.Printf("health: skipping invalid container name: %q", ch.Name)
+			return ContainerHealth{}, false
+		}
+		log.Printf("health: %s unhealthy, restarting...", ch.Name)
+		restartCmd := exec.CommandContext(context.Background(), "docker")
+		restartCmd.Args = append(restartCmd.Args, "restart", ch.Name)
+		restartOut, err := restartCmd.CombinedOutput()
+		if err != nil {
+			log.Printf("health: restart %s failed: %v\n%s", ch.Name, err, string(restartOut))
+		} else {
+			ch.AutoHealed = true
+			log.Printf("health: %s restarted successfully", ch.Name)
+		}
+	}
+
+	return ch, true
+}
+
 func getContainerIP(name string) string {
 	containerName, ok := validContainerName(name)
 	if !ok {
 		return ""
 	}
-	out, err := exec.Command("docker", "inspect", "--format", "{{.NetworkSettings.IPAddress}}", containerName).Output()
+	inspectCmd := exec.CommandContext(context.Background(), "docker")
+	inspectCmd.Args = append(inspectCmd.Args, "inspect", "--format", "{{.NetworkSettings.IPAddress}}", containerName)
+	out, err := inspectCmd.Output()
 	if err != nil {
 		return ""
 	}
 	ip := strings.TrimSpace(string(out))
 	if ip == "" || ip == "<no value>" {
 		// Try Networks default IP
-		out2, err2 := exec.Command("docker", "inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerName).Output()
+		inspect2Cmd := exec.CommandContext(context.Background(), "docker")
+		inspect2Cmd.Args = append(inspect2Cmd.Args, "inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerName)
+		out2, err2 := inspect2Cmd.Output()
 		if err2 != nil {
 			return ""
 		}
@@ -140,13 +157,17 @@ func extractContainerPort(ports string) int {
 		hostPart := parts[0]
 		if idx := strings.LastIndex(hostPart, ":"); idx >= 0 {
 			var p int
-			fmt.Sscanf(hostPart[idx+1:], "%d", &p)
+			if _, err := fmt.Sscanf(hostPart[idx+1:], "%d", &p); err != nil {
+				log.Printf("health: parse port error: %v", err)
+			}
 			return p
 		}
 	}
 	// Try direct port format
 	var p int
-	fmt.Sscanf(strings.Split(ports, "/")[0], "%d", &p)
+	if _, err := fmt.Sscanf(strings.Split(ports, "/")[0], "%d", &p); err != nil {
+		log.Printf("health: parse port error: %v", err)
+	}
 	return p
 }
 
@@ -196,7 +217,9 @@ func checkDiskUsage() []DiskInfo {
 		}
 		log.Printf("disk: fields=[%s] mount=%s blocks=%s used=%s totalGB=%.1f usedGB=%.1f",
 			strings.Join(fields, ","), d.Mount, fields[1], fields[2], d.TotalGB, d.UsedGB)
-		fmt.Sscanf(fields[len(fields)-2], "%f%%", &d.UsedPercent)
+		if _, err := fmt.Sscanf(fields[len(fields)-2], "%f%%", &d.UsedPercent); err != nil {
+			log.Printf("health: parse percent error: %v", err)
+		}
 
 		// Only monitor root mount point
 		if d.Mount != "/" && d.Mount != "/data" {
@@ -241,57 +264,71 @@ func autoPruneDisk() {
 
 // 3. SSL expiry monitor
 type CertInfo struct {
-	Domain      string `json:"domain"`
-	ExpiresIn   string `json:"expires_in"`
-	DaysLeft    int    `json:"days_left"`
-	Status      string `json:"status"`
-	Valid       bool   `json:"valid"`
+	Domain    string `json:"domain"`
+	ExpiresIn string `json:"expires_in"`
+	DaysLeft  int    `json:"days_left"`
+	Status    string `json:"status"`
+	Valid     bool   `json:"valid"`
 }
 
 func checkSSLCerts() []CertInfo {
 	var results []CertInfo
 
-	// Check Caddy certs
-	caddyDir := "/var/lib/caddy/.local/share/caddy/certificates"
-	if _, err := os.Stat(caddyDir); err == nil {
-		filepath.Walk(caddyDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".crt") {
-				return nil
-			}
-			ci := checkCertFile(path)
-			if ci != nil {
-				results = append(results, *ci)
-			}
-			return nil
-		})
-	}
-
-	// Check /etc/ssl/certs
-	sslDir := "/etc/ssl/certs"
-	if _, err := os.Stat(sslDir); err == nil {
-		filepath.Walk(sslDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() || (!strings.HasSuffix(path, ".crt") && !strings.HasSuffix(path, ".pem")) {
-				return nil
-			}
-			ci := checkCertFile(path)
-			if ci != nil {
-				// Deduplicate
-				for _, existing := range results {
-					if existing.Domain == ci.Domain {
-						return nil
-					}
-				}
-				results = append(results, *ci)
-			}
-			return nil
-		})
-	}
+	results = appendCaddyCerts(results)
+	results = appendSSLCerts(results)
 
 	return results
 }
 
+func appendCaddyCerts(results []CertInfo) []CertInfo {
+	caddyDir := "/var/lib/caddy/.local/share/caddy/certificates"
+	if _, err := os.Stat(caddyDir); err != nil {
+		return results
+	}
+
+	if err := filepath.Walk(caddyDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".crt") {
+			return nil
+		}
+		ci := checkCertFile(path)
+		if ci != nil {
+			results = append(results, *ci)
+		}
+		return nil
+	}); err != nil {
+		log.Printf("health: walk error: %v", err)
+	}
+	return results
+}
+
+func appendSSLCerts(results []CertInfo) []CertInfo {
+	sslDir := "/etc/ssl/certs"
+	if _, err := os.Stat(sslDir); err != nil {
+		return results
+	}
+
+	if err := filepath.Walk(sslDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || (!strings.HasSuffix(path, ".crt") && !strings.HasSuffix(path, ".pem")) {
+			return nil
+		}
+		ci := checkCertFile(path)
+		if ci != nil {
+			for _, existing := range results {
+				if existing.Domain == ci.Domain {
+					return nil
+				}
+			}
+			results = append(results, *ci)
+		}
+		return nil
+	}); err != nil {
+		log.Printf("health: walk error: %v", err)
+	}
+	return results
+}
+
 func checkCertFile(path string) *CertInfo {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil
 	}
@@ -315,10 +352,7 @@ func checkCertFile(path string) *CertInfo {
 		ci.Domain = cert.Subject.CommonName
 	}
 
-	ci.DaysLeft = int(time.Until(cert.NotAfter).Hours() / 24)
-	if ci.DaysLeft < 0 {
-		ci.DaysLeft = 0
-	}
+	ci.DaysLeft = max(int(time.Until(cert.NotAfter).Hours()/24), 0)
 
 	switch {
 	case ci.DaysLeft <= 0:
@@ -342,10 +376,10 @@ func checkCertFile(path string) *CertInfo {
 
 // 9. Network latency monitor
 type PingResult struct {
-	Target    string  `json:"target"`
-	LatencyMs float64 `json:"latency_ms"`
+	Target     string  `json:"target"`
+	LatencyMs  float64 `json:"latency_ms"`
 	PacketLoss float64 `json:"packet_loss"`
-	Status    string  `json:"status"`
+	Status     string  `json:"status"`
 }
 
 func checkNetworkLatency() []PingResult {
@@ -353,138 +387,175 @@ func checkNetworkLatency() []PingResult {
 	var results []PingResult
 
 	for _, target := range targets {
-		pr := PingResult{Target: target}
-
-		// Use timeout ping
-		cmd := exec.Command("ping", "-c", "3", "-W", "2", target)
-		out, err := cmd.Output()
-		if err != nil {
-			pr.Status = "unreachable"
-			pr.PacketLoss = 100
-			results = append(results, pr)
-			continue
-		}
-
-		output := string(out)
-
-		// Parse packet loss
-		if idx := strings.Index(output, "packet loss"); idx >= 0 {
-			before := output[:idx]
-			if lastSpace := strings.LastIndex(strings.TrimSpace(before), " "); lastSpace >= 0 {
-				var loss float64
-				fmt.Sscanf(before[lastSpace:], "%f", &loss)
-				pr.PacketLoss = loss
-			}
-		}
-
-		// Parse min/avg/max (Linux format: "min/avg/max/mdev = 10.123/12.456/15.789/1.234 ms")
-		if idx := strings.Index(output, "min/avg/max"); idx >= 0 {
-			after := output[idx:]
-			if eq := strings.Index(after, "="); eq >= 0 {
-				stats := strings.TrimSpace(after[eq+1:])
-				parts := strings.Split(stats, "/")
-				if len(parts) >= 2 {
-					fmt.Sscanf(parts[1], "%f", &pr.LatencyMs)
-				}
-			}
-		}
-		// macOS format: "round-trip min/avg/max/stddev = 10.123/12.456/15.789/1.234 ms"
-		if pr.LatencyMs == 0 {
-			if idx := strings.Index(output, "round-trip"); idx >= 0 {
-				after := output[idx:]
-				if eq := strings.Index(after, "="); eq >= 0 {
-					stats := strings.TrimSpace(after[eq+1:])
-					parts := strings.Split(stats, "/")
-					if len(parts) >= 2 {
-						fmt.Sscanf(parts[1], "%f", &pr.LatencyMs)
-					}
-				}
-			}
-		}
-
-		switch {
-		case pr.PacketLoss >= 50:
-			pr.Status = "critical"
-		case pr.PacketLoss >= 10 || pr.LatencyMs > 200:
-			pr.Status = "warning"
-		default:
-			pr.Status = "ok"
-		}
-
-		results = append(results, pr)
+		results = append(results, pingTarget(target))
 	}
 
 	return results
 }
 
+func pingTarget(target string) PingResult {
+	pr := PingResult{Target: target}
+
+	cmd := exec.CommandContext(context.Background(), "ping")
+	cmd.Args = append(cmd.Args, "-c", "3", "-W", "2", target)
+	out, err := cmd.Output()
+	if err != nil {
+		pr.Status = "unreachable"
+		pr.PacketLoss = 100
+		return pr
+	}
+
+	output := string(out)
+	pr.PacketLoss = parsePingPacketLoss(output)
+	pr.LatencyMs = parsePingLatency(output)
+
+	switch {
+	case pr.PacketLoss >= 50:
+		pr.Status = "critical"
+	case pr.PacketLoss >= 10 || pr.LatencyMs > 200:
+		pr.Status = "warning"
+	default:
+		pr.Status = "ok"
+	}
+
+	return pr
+}
+
+func parsePingPacketLoss(output string) float64 {
+	if before, _, ok := strings.Cut(output, "packet loss"); ok {
+		before := before
+		if lastSpace := strings.LastIndex(strings.TrimSpace(before), " "); lastSpace >= 0 {
+			var loss float64
+			if _, err := fmt.Sscanf(before[lastSpace:], "%f", &loss); err != nil {
+				log.Printf("health: parse loss error: %v", err)
+			}
+			return loss
+		}
+	}
+	return 0
+}
+
+func parsePingLatency(output string) float64 {
+	if idx := strings.Index(output, "min/avg/max"); idx >= 0 {
+		after := output[idx:]
+		if _, after0, ok := strings.Cut(after, "="); ok {
+			stats := strings.TrimSpace(after0)
+			parts := strings.Split(stats, "/")
+			if len(parts) >= 2 {
+				var ms float64
+				if _, err := fmt.Sscanf(parts[1], "%f", &ms); err != nil {
+					log.Printf("health: parse latency error: %v", err)
+				}
+				return ms
+			}
+		}
+	}
+
+	if idx := strings.Index(output, "round-trip"); idx >= 0 {
+		after := output[idx:]
+		if _, after0, ok := strings.Cut(after, "="); ok {
+			stats := strings.TrimSpace(after0)
+			parts := strings.Split(stats, "/")
+			if len(parts) >= 2 {
+				var ms float64
+				if _, err := fmt.Sscanf(parts[1], "%f", &ms); err != nil {
+					log.Printf("health: parse latency error: %v", err)
+				}
+				return ms
+			}
+		}
+	}
+
+	return 0
+}
+
 // 10. Temperature monitor
 type TempInfo struct {
-	Sensor    string  `json:"sensor"`
-	TempC     float64 `json:"temp_c"`
-	Status    string  `json:"status"`
+	Sensor string  `json:"sensor"`
+	TempC  float64 `json:"temp_c"`
+	Status string  `json:"status"`
 }
 
 func checkTemperature() []TempInfo {
+	results := checkThermalZones()
+	if len(results) > 0 {
+		return results
+	}
+	return checkLMSensors()
+}
+
+func checkThermalZones() []TempInfo {
 	var results []TempInfo
 
-	// Try thermal zones (Linux)
 	matches, err := filepath.Glob("/sys/class/thermal/thermal_zone*/temp")
-	if err == nil && len(matches) > 0 {
-		for _, path := range matches {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				continue
-			}
-			var millicelsius int
-			fmt.Sscanf(string(data), "%d", &millicelsius)
-			if millicelsius <= 0 {
-				continue
-			}
-
-			ti := TempInfo{
-				Sensor: filepath.Base(filepath.Dir(path)),
-				TempC:  float64(millicelsius) / 1000.0,
-			}
-
-			switch {
-			case ti.TempC >= 90:
-				ti.Status = "critical"
-			case ti.TempC >= 80:
-				ti.Status = "warning"
-			default:
-				ti.Status = "ok"
-			}
-
-			results = append(results, ti)
-		}
+	if err != nil || len(matches) == 0 {
 		return results
 	}
 
-	// Try lm-sensors (optional)
+	for _, m := range matches {
+		data, err := os.ReadFile(filepath.Clean(m))
+		if err != nil {
+			continue
+		}
+		var millicelsius int
+		if _, err := fmt.Sscanf(string(data), "%d", &millicelsius); err != nil {
+			log.Printf("health: parse temp error: %v", err)
+		}
+		if millicelsius <= 0 {
+			continue
+		}
+
+		ti := TempInfo{
+			Sensor: filepath.Base(filepath.Dir(m)),
+			TempC:  float64(millicelsius) / 1000.0,
+		}
+
+		switch {
+		case ti.TempC >= 90:
+			ti.Status = "critical"
+		case ti.TempC >= 80:
+			ti.Status = "warning"
+		default:
+			ti.Status = "ok"
+		}
+
+		results = append(results, ti)
+	}
+
+	return results
+}
+
+func checkLMSensors() []TempInfo {
+	var results []TempInfo
+
 	out, err := exec.CommandContext(context.Background(), "sensors", "-u").Output()
-	if err == nil {
-		scanner := bufio.NewScanner(strings.NewReader(string(out)))
-		var currentSensor string
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if strings.HasSuffix(line, ":") {
-				currentSensor = strings.TrimSuffix(line, ":")
+	if err != nil {
+		return results
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	var currentSensor string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if before, ok := strings.CutSuffix(line, ":"); ok {
+			currentSensor = before
+		}
+		if strings.HasPrefix(line, "temp1_input:") {
+			var tempC float64
+			if _, err := fmt.Sscanf(line, "temp1_input: %f", &tempC); err != nil {
+				log.Printf("health: parse temp error: %v", err)
 			}
-			if strings.HasPrefix(line, "temp1_input:") {
-				var tempC float64
-				fmt.Sscanf(line, "temp1_input: %f", &tempC)
-				if tempC > 0 {
-					ti := TempInfo{Sensor: currentSensor, TempC: tempC}
-					switch {
-					case ti.TempC >= 90:
-						ti.Status = "critical"
-					case ti.TempC >= 80:
-						ti.Status = "warning"
-					default:
-						ti.Status = "ok"
-					}
-					results = append(results, ti)
+			if tempC > 0 {
+				ti := TempInfo{Sensor: currentSensor, TempC: tempC}
+				switch {
+				case ti.TempC >= 90:
+					ti.Status = "critical"
+				case ti.TempC >= 80:
+					ti.Status = "warning"
+				default:
+					ti.Status = "ok"
 				}
+				results = append(results, ti)
 			}
 		}
 	}
