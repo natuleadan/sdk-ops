@@ -159,6 +159,21 @@ func (c *Client) Connect() (*ssh.Client, error) {
 	return conn, nil
 }
 
+func RunWithStdin(client *ssh.Client, cmd, stdin string) (string, string, error) {
+	sess, err := client.NewSession()
+	if err != nil {
+		return "", "", fmt.Errorf("session: %w", err)
+	}
+	defer func() { if err := sess.Close(); err != nil { log.Printf("ssh: close: %v", err) } }()
+
+	sess.Stdin = strings.NewReader(stdin)
+	out, err := sess.CombinedOutput(cmd)
+	if err != nil {
+		return string(out), "", fmt.Errorf("run: %w\noutput: %s", err, string(out))
+	}
+	return string(out), "", nil
+}
+
 func Run(client *ssh.Client, cmd string) (string, string, error) {
 	sess, err := client.NewSession()
 	if err != nil {

@@ -331,8 +331,9 @@ func ensureDockerOnNode(nodeIP, user, key string, port int, reg deploy.RegistryC
 		}
 	}
 	if reg.Username != "" && reg.Password != "" {
-		if _, _, err := ssh.Run(checkConn, fmt.Sprintf("sudo docker login %s -u %s -p %s 2>/dev/null || true", reg.Server, reg.Username, reg.Password)); err != nil {
-			log.Printf("deploy: docker login error: %v", err)
+		cmd := fmt.Sprintf("sudo docker login %s -u %s --password-stdin 2>/dev/null || true", reg.Server, reg.Username)
+		if _, _, err := ssh.RunWithStdin(checkConn, cmd, reg.Password+"\n"); err != nil {
+			log.Printf("deploy: docker login failed (check registry credentials)")
 		}
 	}
 }
