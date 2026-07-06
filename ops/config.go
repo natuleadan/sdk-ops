@@ -1,4 +1,4 @@
-package sdk_ops
+package ops
 
 import (
 	"fmt"
@@ -62,5 +62,3 @@ func LoadConfig(path string) (*ServerConfig, error) {
 		Mode:    mode,
 	}, nil
 }
-
-

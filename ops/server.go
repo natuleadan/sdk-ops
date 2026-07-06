@@ -1,4 +1,4 @@
-package sdk_ops
+package ops
 
 import (
 	"context"

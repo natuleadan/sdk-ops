@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://avatars.githubusercontent.com/u/210283438?s=400&u=1afe4cf2a1a5347c739f4efc60b86e3c1564cb6&v=4" width="120" height="120" style="border-radius: 50%;">
   <br>
-  <b>CLI:</b> <code>sdk-ops</code> — <b>Go SDK:</b> <code>import "github.com/natuleadan/sdk-ops"</code>
+  <b>CLI:</b> <code>sdk-ops</code> — <b>Go SDK:</b> <code>import "github.com/natuleadan/sdk-ops/ops"</code>
 </p>
 
 <p align="center">
@@ -212,7 +212,7 @@ sdk-ops deploy init ./app --template go --ci github
 ## 4. Use as Go SDK
 
 ```go
-import "github.com/natuleadan/sdk-ops"
+import "github.com/natuleadan/sdk-ops/ops"
 
 // Option 1: YAML-driven
 cfg, _ := ops.LoadConfig("server.yaml")
