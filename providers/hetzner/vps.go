@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 
@@ -22,7 +23,9 @@ func (c *Client) CreateVPS(ctx context.Context, cfg providers.VPSCreateConfig) (
 	if len(cfg.SSHKeyIDs) > 0 {
 		var sshKeys []*hcloud.SSHKey
 		for _, id := range cfg.SSHKeyIDs {
-			sshKeys = append(sshKeys, &hcloud.SSHKey{ID: int64(id)})
+			if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+				sshKeys = append(sshKeys, &hcloud.SSHKey{ID: n})
+			}
 		}
 		opts.SSHKeys = sshKeys
 	}

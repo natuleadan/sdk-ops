@@ -1157,12 +1157,9 @@ func runInfraInit(ip string, f infraFlags) error {
 		}
 		if f.sshKeyIDs != "" {
 			for s := range strings.SplitSeq(f.sshKeyIDs, ",") {
-				var id int
-				if _, err := fmt.Sscanf(s, "%d", &id); err != nil {
-					log.Printf("infra: parse id error: %v", err)
-				}
-				if id > 0 {
-					createCfg.SSHKeyIDs = append(createCfg.SSHKeyIDs, id)
+				s = strings.TrimSpace(s)
+				if s != "" {
+					createCfg.SSHKeyIDs = append(createCfg.SSHKeyIDs, s)
 				}
 			}
 		}

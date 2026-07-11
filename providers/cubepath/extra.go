@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/natuleadan/sdk-ops/providers"
@@ -31,7 +32,13 @@ func (c *Client) CreateBareMetal(ctx context.Context, cfg providers.BareMetalCre
 		"password":      cfg.Password,
 	}
 	if len(cfg.SSHKeyIDs) > 0 {
-		body["ssh_key_ids"] = cfg.SSHKeyIDs
+		var ids []int
+		for _, id := range cfg.SSHKeyIDs {
+			if n, err := strconv.Atoi(id); err == nil {
+				ids = append(ids, n)
+			}
+		}
+		body["ssh_key_ids"] = ids
 	}
 
 	path := fmt.Sprintf("/baremetal/deploy/%d", c.projectID)

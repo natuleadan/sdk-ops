@@ -27,18 +27,13 @@ func osIDFromTemplate(template string) int {
 }
 
 func (c *Client) CreateVPS(ctx context.Context, cfg providers.VPSCreateConfig) (*providers.VPS, error) {
-	sshKeys := make([]string, len(cfg.SSHKeyIDs))
-	for i, id := range cfg.SSHKeyIDs {
-		sshKeys[i] = fmt.Sprintf("%d", id)
-	}
-
 	instance, resp, err := c.client.Instance.Create(ctx, &govultr.InstanceCreateReq{
 		Label:    cfg.Label,
 		Plan:     cfg.Plan,
 		Region:   cfg.Location,
 		Hostname: cfg.Hostname,
 		OsID:     osIDFromTemplate(cfg.Template),
-		SSHKeys:  sshKeys,
+		SSHKeys:  cfg.SSHKeyIDs,
 		UserData: cfg.UserData,
 	})
 	if resp != nil {

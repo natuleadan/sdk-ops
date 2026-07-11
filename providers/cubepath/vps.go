@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/natuleadan/sdk-ops/providers"
@@ -11,8 +12,10 @@ import (
 
 func (c *Client) CreateVPS(ctx context.Context, cfg providers.VPSCreateConfig) (*providers.VPS, error) {
 	var sshKeys []int
-	if len(cfg.SSHKeyIDs) > 0 {
-		sshKeys = cfg.SSHKeyIDs
+	for _, id := range cfg.SSHKeyIDs {
+		if n, err := strconv.Atoi(id); err == nil {
+			sshKeys = append(sshKeys, n)
+		}
 	}
 
 	label := cfg.Label

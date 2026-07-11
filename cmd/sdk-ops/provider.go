@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,10 +100,9 @@ func newProviderVPSCmd() *cobra.Command {
 			cfg.EnableIPv6, _ = cmd.Flags().GetBool("ipv6")
 			if pf.sshKeyIDs != "" {
 				for s := range strings.SplitSeq(pf.sshKeyIDs, ",") {
-					var id int
-					if _, err := fmt.Sscanf(s, "%d", &id); err != nil { log.Printf("provider: parse id error: %v", err) }
-					if id > 0 {
-						cfg.SSHKeyIDs = append(cfg.SSHKeyIDs, id)
+					s = strings.TrimSpace(s)
+					if s != "" {
+						cfg.SSHKeyIDs = append(cfg.SSHKeyIDs, s)
 					}
 				}
 			}

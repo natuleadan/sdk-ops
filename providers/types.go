@@ -8,7 +8,7 @@ type VPSCreateConfig struct {
 	Location   string
 	Template   string
 	Hostname   string
-	SSHKeyIDs  []int
+	SSHKeyIDs  []string
 	EnableIPv4 bool
 	EnableIPv6 bool
 	Backups    bool
@@ -63,7 +63,7 @@ type BareMetalCreateConfig struct {
 	Location   string
 	Template   string
 	Hostname   string
-	SSHKeyIDs  []int
+	SSHKeyIDs  []string
 	Password   string
 	UserData   string
 	EnableIPv4 bool
