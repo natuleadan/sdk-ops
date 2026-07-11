@@ -2,7 +2,7 @@
   https://github.com/aws/aws-sdk-go-v2/blob/v1.42.1/LICENSE.txt
 
 - github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream (Apache-2.0)
-  https://github.com/aws/aws-sdk-go-v2/blob/aws/protocol/eventstream/v1.6.10/aws/protocol/eventstream/LICENSE.txt
+  https://github.com/aws/aws-sdk-go-v2/blob/aws/protocol/eventstream/v1.7.14/aws/protocol/eventstream/LICENSE.txt
 
 - github.com/aws/aws-sdk-go-v2/config (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/config/v1.32.27/config/LICENSE.txt
@@ -38,19 +38,19 @@
   https://github.com/aws/aws-sdk-go-v2/blob/service/internal/accept-encoding/v1.13.13/service/internal/accept-encoding/LICENSE.txt
 
 - github.com/aws/aws-sdk-go-v2/service/internal/checksum (Apache-2.0)
-  https://github.com/aws/aws-sdk-go-v2/blob/service/internal/checksum/v1.7.2/service/internal/checksum/LICENSE.txt
+  https://github.com/aws/aws-sdk-go-v2/blob/service/internal/checksum/v1.9.23/service/internal/checksum/LICENSE.txt
 
 - github.com/aws/aws-sdk-go-v2/service/internal/presigned-url (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/service/internal/presigned-url/v1.13.30/service/internal/presigned-url/LICENSE.txt
 
 - github.com/aws/aws-sdk-go-v2/service/internal/s3shared (Apache-2.0)
-  https://github.com/aws/aws-sdk-go-v2/blob/service/internal/s3shared/v1.18.15/service/internal/s3shared/LICENSE.txt
+  https://github.com/aws/aws-sdk-go-v2/blob/service/internal/s3shared/v1.19.31/service/internal/s3shared/LICENSE.txt
 
 - github.com/aws/aws-sdk-go-v2/service/route53 (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/service/route53/v1.63.5/service/route53/LICENSE.txt
 
 - github.com/aws/aws-sdk-go-v2/service/s3 (Apache-2.0)
-  https://github.com/aws/aws-sdk-go-v2/blob/service/s3/v1.80.0/service/s3/LICENSE.txt
+  https://github.com/aws/aws-sdk-go-v2/blob/service/s3/v1.104.2/service/s3/LICENSE.txt
 
 - github.com/aws/aws-sdk-go-v2/service/signin (Apache-2.0)
   https://github.com/aws/aws-sdk-go-v2/blob/service/signin/v1.2.2/service/signin/LICENSE.txt
@@ -86,7 +86,7 @@
   https://github.com/ebitengine/purego/blob/v0.10.0/LICENSE
 
 - github.com/google/go-querystring/query (BSD-3-Clause)
-  https://github.com/google/go-querystring/blob/v1.2.2/LICENSE
+  https://github.com/google/go-querystring/blob/v1.2.0/LICENSE
 
 - github.com/google/uuid (BSD-3-Clause)
   https://github.com/google/uuid/blob/v1.6.0/LICENSE
