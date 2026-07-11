@@ -14,6 +14,7 @@ Credentials are resolved in this priority order:
 | Hetzner | `HETZNER_API_TOKEN` | yes |
 | DigitalOcean | `DIGITALOCEAN_TOKEN` | yes |
 | Vultr | `VULTR_API_KEY` | yes |
+| Bunny.net | `BUNNY_API_KEY` | yes (also read from credentials file) |
 | AWS | `AWS_REGION` + `AWS_PROFILE` (or default chain) | optional |
 
 ## Credential File

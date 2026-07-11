@@ -142,3 +142,46 @@ Let's Encrypt HTTP-01 validation requires the domain to be publicly accessible o
 - Use DNS-01 challenge (requires Cloudflare API token)
 
 The `--runtime k3s` flag configures the cert via Traefik, which can use its own ACME resolver if configured.
+
+## Vultr LB: Algorithm Must Be leastconn
+
+Vultr load balancers use `leastconn` as their balancing algorithm. The value
+`round_robin` is not supported and will result in a `"Invalid algorithm."`
+error. The provider automatically maps `round_robin` to `leastconn`.
+
+## Vultr K8s: Minimum Plan Requirement
+
+Vultr's managed Kubernetes (VKE) requires a minimum of `vc2-2c-2gb` for node
+pools. The `vc2-1c-1gb` and `vhf-1c-1gb` plans are not supported for VKE and
+will result in `"Invalid NodePool plan"`.
+
+## Vultr Object Storage: tier_id Required
+
+Creating an object storage bucket requires both `cluster_id` and `tier_id`.
+The govultr SDK does not support `tier_id` yet, so creation via the provider
+may fail. Use the Vultr dashboard or raw API for initial setup, then manage
+with the CLI.
+
+## Bunny MC: Fiber Prefork Not Supported
+
+Fiber's prefork mode calls `os.Exit(0)` in the parent process after spawning
+children. In Docker containers, PID 1 exiting causes the container to stop.
+Use single-process mode with `GOMAXPROCS=8` instead.
+
+## Bunny MC: Anycast IP Reachability
+
+Anycast IPs (e.g. `109.x.x.x`) may not be reachable from all geographic
+locations immediately after provisioning. BGP propagation can take minutes
+to hours depending on the region.
+
+## Bunny Edge Storage: Raw Binary Required
+
+File uploads to Bunny Edge Storage must be sent as **raw binary** in the
+request body. Multipart/form-data encoding will result in a 401 error.
+The provider sends raw binary automatically.
+
+## Bunny Edge Scripting: Auth May Require Bearer Token
+
+Some Edge Scripting endpoints may require `Authorization: Bearer` instead of
+`AccessKey` header. If you get a 401, try using the dashboard or raw API
+with both header types.

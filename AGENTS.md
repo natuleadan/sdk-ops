@@ -38,13 +38,14 @@
 | CubePath provider | `providers/cubepath/` |
 | Hetzner | `providers/hetzner/` |
 | DigitalOcean | `providers/digitalocean/` |
-| Vultr | `providers/vultr/` |
+| Vultr | `providers/vultr/` (VPS, K8s, LB, DNS, firewall, S3, CDN, block storage) |
 | AWS EC2 | `providers/aws/` |
+| Bunny.net SDK | `bunny/` (MC, DNS, CDN, Storage, Stream, Shield, Edge Scripting) |
 | License & third-party notices | `LICENSE` / `ThirdPartyNotices.txt` |
 
 ## Entrypoints
 
-- `cmd/sdk-ops/` — CLI entrypoint (Cobra command tree, 15 commands)
+- `cmd/sdk-ops/` — CLI entrypoint (Cobra command tree, 18 commands)
 - `agent/` — On-VPS monitoring agent (systemd or Docker, API :9000)
 - `server.go` / `config.go` — High-level `ops.Server` API + YAML config
 - `ssh/` — SSH client abstraction (public SDK)

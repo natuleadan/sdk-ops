@@ -131,6 +131,14 @@ sdk-ops infra adopt 192.168.1.100 --force
 sdk-ops deploy init ./app --template go --ci github
 ```
 
+### 2.15 Manage Bunny.net services
+
+```bash
+sdk-ops bunny login                   # Verify API key
+sdk-ops bunny dns zone-list           # List DNS zones
+sdk-ops bunny app list                # List Magic Containers apps
+```
+
 ## 3. Features
 
 | Category | Feature | Description |
@@ -194,6 +202,8 @@ sdk-ops deploy init ./app --template go --ci github
 | **Notifications** | `notify send` | Send notification (Slack, Discord, Telegram, Email) |
 | | `notify test` | Test all configured notifiers |
 | **Provider API** | CubePath, Hetzner, DO, Vultr, AWS | 49 methods: VPS, K8s, LB, DNS, SSH keys |
+| | Vultr extras: firewall, object-storage, CDN, block-storage | `sdk-ops provider firewall|object-storage|cdn|block-storage` |
+| **Bunny.net** | `sdk-ops bunny *` | Magic Containers, DNS, CDN, Storage, Stream, Shield, Edge Scripting |
 | | `provider k8s update/protection` | Upgrade K8s version + toggle deletion protection |
 | | `provider k8s addons list/available/install/uninstall` | K8s addon management |
 | | `provider k8s node-pool list/add/scale/delete` | Node pool management |
@@ -304,8 +314,10 @@ Health check probes configurable endpoints via `health_url` in `service.yaml`. F
 | [docs/conventional-commits.md](docs/conventional-commits.md) | Commit rules, versioning, release flow |
 | [docs/provider-credentials.md](docs/provider-credentials.md) | Provider credential setup |
 | [docs/known-issues.md](docs/known-issues.md) | Known limitations and workarounds |
+| [docs/providers/cubepath.md](docs/providers/cubepath.md) | CubePath provider reference (VPS, K8s, LB, DNS) |
+| [docs/providers/vultr.md](docs/providers/vultr.md) | Vultr provider reference (VPS, K8s, LB, DNS, firewall, S3, CDN, storage) |
+| [docs/providers/bunny.md](docs/providers/bunny.md) | Bunny.net SDK reference (MC, DNS, CDN, Storage, Stream, Shield, Scripting) |
 | [AGENTS.md](AGENTS.md) | AI assistant guide |
-| | `cluster nodes/pods/services/top/logs/scale` (16 kubectl commands) | |
 
 ## 8. Examples
 
@@ -524,8 +536,21 @@ sdk-ops provider k8s delete <cluster-uuid>
 │   ├── cubepath/         # CubePath (raw HTTP)
 │   ├── hetzner/          # Hetzner (hcloud-go + raw HTTP)
 │   ├── digitalocean/     # DigitalOcean (godo)
-│   ├── vultr/            # Vultr (govultr)
+│   ├── vultr/            # Vultr (govultr) + firewall, S3, CDN, block storage
 │   └── aws/              # AWS (aws-sdk-go-v2)
+├── bunny/                # Bunny.net SDK (standalone, not a provider)
+│   ├── client.go         # HTTP client (AccessKey auth)
+│   ├── types.go          # All shared types
+│   ├── dns.go            # DNS + geo-routing
+│   ├── pullzone.go       # CDN Pull Zones + edge rules
+│   ├── mc_*.go           # Magic Containers (apps, containers, deploy, regions)
+│   ├── storage.go        # Edge Storage zones + files
+│   ├── stream.go         # Stream video libraries + videos
+│   ├── shield.go         # Shield WAF zones + rate limits
+│   ├── edgescript.go     # Edge Scripting (23 endpoints)
+│   ├── logging.go        # CDN logging query
+│   ├── origin_errors.go  # Origin error logs
+│   └── spec/             # 8 OpenAPI JSON specs
 ├── server.go             # High-level ops.Server API
 ├── config.go             # YAML-driven config
 ├── docs/                 # Documentation

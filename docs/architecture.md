@@ -43,7 +43,7 @@ agent/               ← On-VPS monitoring agent
 ├── config.go        ← Config loading
 └── db.go            ← SQLite storage (metrics, audit, schedules, events)
 
-cmd/sdk-ops/          ← Cobra CLI root + all subcommands (15 commands)
+cmd/sdk-ops/          ← Cobra CLI root + all subcommands (18 commands)
 ├── main.go          ← Root command, 15 subcommands
 ├── infra.go         ← infra init/join/adopt/ready/plan/apply/status/remove/backup/restore
 │                       firewall/cert/proxy/logs/alerts
@@ -61,7 +61,9 @@ cmd/sdk-ops/          ← Cobra CLI root + all subcommands (15 commands)
 ├── notify.go        ← notify send/test
 ├── state.go         ← state show/sync (resource inventory)
 ├── status.go        ← status (unified multi-node dashboard)
-└── spinner.go       ← CLI spinner animation
+├── spinner.go       ← CLI spinner animation
+├── bunny.go         ← bunny (app/dns/pullzone/script/storage/stream/shield – 7 groups)
+└── vultr_cmds.go    ← provider firewall/object-storage/cdn/block-storage (vultr-specific)
 
 server.go / config.go ← High-level ops.Server API + YAML config
 
@@ -153,15 +155,47 @@ providers/           ← Multi-provider interface
 ├── vultr/           ← Vultr (govultr)
 │   ├── client.go    ← Constructor (token transport)
 │   ├── vps.go       ← Instances
-│   ├── k8s.go       ← VKE
-│   ├── lb_dns.go    ← LB + DNS + BareMetal
-│   └── sshkey.go    ← SSH key management
-└── aws/             ← AWS (aws-sdk-go-v2)
+│   ├── k8s.go       ← VKE + node pools + upgrade
+│   ├── lb_dns.go    ← LB + forwarding rules + DNS + BareMetal
+│   ├── sshkey.go    ← SSH key management
+│   ├── firewall.go  ← Firewall groups + rules
+│   ├── object_storage.go ← S3-compatible storage
+│   ├── cdn.go       ← CDN pull zones
+│   └── block_storage.go ← Block storage volumes
+├── aws/             ← AWS (aws-sdk-go-v2)
     ├── client.go    ← Constructor (4 service clients)
     ├── vps.go       ← EC2 instances
     ├── k8s.go       ← EKS + kubeconfig generation
     ├── lb_dns.go    ← ELBv2 + Route53 + BareMetal
     └── sshkey.go    ← SSH key management
+
+bunny/             ← Bunny.net SDK (standalone, not a provider)
+├── client.go    ← HTTP client (AccessKey auth, 6 API base URLs)
+├── types.go     ← All shared types (MC, DNS, CDN, Shield, Stream, Storage...)
+├── dns.go       ← DNS zones + records + geo-routing
+├── pullzone.go  ← CDN Pull Zones + edge rules + cache purge
+├── mc_app.go    ← Magic Containers app CRUD
+├── mc_container.go ← Container templates
+├── mc_deploy.go ← Deploy flow with registry auto-detect
+├── mc_endpoint.go  ← CDN + Anycast endpoints
+├── mc_region.go ← Regions, autoscaling, nodes
+├── mc_registry.go  ← Container registries
+├── mc_volume.go ← Persistent volumes, log forwarding
+├── storage.go   ← Edge Storage zones + files
+├── stream.go    ← Stream video libraries + videos
+├── shield.go    ← Shield WAF zones + rate limits
+├── edgescript.go ← Edge Scripting (23 endpoints)
+├── logging.go   ← CDN logging query
+├── origin_errors.go ← Origin error retrieval
+└── spec/        ← 8 OpenAPI JSON specs
+
+cmd/sdk-ops/
+├── bunny.go     ← CLI: sdk-ops bunny <app|dns|pullzone|script|storage|stream|shield>
+└── vultr_cmds.go ← CLI: sdk-ops provider firewall|object-storage|cdn|block-storage
+
+test-apps/       ← Benchmark apps
+├── bench-fiber/  ← Go Fiber CRUD benchmark
+└── bench-simple/ ← Go stdlib CRUD benchmark
 ```
 
 ## Deploy Flows

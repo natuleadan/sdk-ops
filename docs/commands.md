@@ -501,6 +501,9 @@ sdk-ops config set-credentials                # Save provider credentials from e
 
 ## sdk-ops provider — Cloud provider resources
 
+See [providers/](providers/) for provider-specific commands (bunny, firewall,
+object-storage, cdn, block-storage).
+
 ### vps
 
 ```bash
@@ -591,6 +594,8 @@ sdk-ops provider ssh-key upload <name> [flags]
 sdk-ops provider ssh-key list
 sdk-ops provider ssh-key delete <id>
 ```
+
+
 
 ## sdk-ops db — Database provisioning
 
