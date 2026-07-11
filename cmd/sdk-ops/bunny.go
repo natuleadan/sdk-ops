@@ -30,6 +30,7 @@ type bunnyFlags struct {
 	origin     string
 	hostname   string
 	registryID string
+	digest     string
 	anycast    bool
 	endpointPort int32
 }
@@ -377,6 +378,7 @@ Examples:
 	cmd.Flags().Int32Var(&bf.volumeSize, "volume-size", 5, "Volume size in GB")
 	cmd.Flags().StringVar(&bf.volumePath, "volume-path", "", "Volume mount path (e.g. /data)")
 	cmd.Flags().StringVar(&bf.registryID, "registry-id", "", "Container registry ID (overrides auto-detection)")
+	cmd.Flags().StringVar(&bf.digest, "digest", "", "Image digest (sha256:..., required for private images)")
 	cmd.Flags().BoolVar(&bf.anycast, "anycast", false, "Use Anycast IP instead of CDN endpoint (direct pod access)")
 	_ = cmd.MarkFlagRequired("image")
 	return cmd
@@ -405,6 +407,7 @@ func runBunnyAppCreate(cmd *cobra.Command, args []string) error {
 		AppName:      args[0],
 		Regions:      []string{region},
 		Image:        bf.origin,
+		ImageDigest:  bf.digest,
 		Port:         bf.port,
 		MinInstances: bf.minInst,
 		MaxInstances: bf.maxInst,
@@ -1108,7 +1111,6 @@ func newBunnyStorageZoneCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("✓ Zone created: ID %d\n", zone.ID)
-			fmt.Printf("  Password: %s\n", zone.Password)
 			fmt.Printf("  Hostname: %s\n", zone.StorageHostname)
 			return nil
 		},
@@ -1278,7 +1280,7 @@ func newBunnyStreamLibCmd() *cobra.Command {
 			defer cancel()
 			lib, err := c.CreateVideoLibrary(ctx, args[0])
 			if err != nil { return err }
-			fmt.Printf("✓ Library created: ID %d\nAPI Key: %s\n", lib.ID, lib.APIKey)
+			fmt.Printf("✓ Library created: ID %d\n", lib.ID)
 			return nil
 		},
 	})
