@@ -3,6 +3,7 @@ package bunny
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -142,6 +143,9 @@ func ParseDNSRecordType(s string) int32 {
 	}
 	n, err := strconv.Atoi(s)
 	if err == nil {
+		if n < math.MinInt32 || n > math.MaxInt32 {
+			return DNSRecordA
+		}
 		return int32(n)
 	}
 	return DNSRecordA
