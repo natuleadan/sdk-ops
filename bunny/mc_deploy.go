@@ -3,19 +3,20 @@ package bunny
 import "context"
 
 type DeployOptions struct {
-	AppName    string
-	Runtime    ApplicationRuntimeType
+	AppName     string
+	Runtime     ApplicationRuntimeType
 	MinInstances int32
 	MaxInstances int32
-	Regions    []string
-	Image      string // full image ref: ghcr.io/user/repo:tag
-	Port       int32
-	Env        map[string]string
-	VolumeName string
-	VolumeSize int32
-	VolumePath string
-	RegistryID string // optional, overrides auto-detection
-	Anycast    bool   // use Anycast IP instead of CDN endpoint
+	Regions     []string
+	Image       string // full image ref: ghcr.io/user/repo:tag
+	ImageDigest string // optional, skips Docker Hub digest lookup
+	Port        int32
+	Env         map[string]string
+	VolumeName  string
+	VolumeSize  int32
+	VolumePath  string
+	RegistryID  string // optional, overrides auto-detection
+	Anycast     bool   // use Anycast IP instead of CDN endpoint
 }
 
 func (c *Client) DeployFromImage(ctx context.Context, opts DeployOptions) (*AddApplicationResponse, error) {
@@ -40,6 +41,22 @@ func (c *Client) DeployFromImage(ctx context.Context, opts DeployOptions) (*AddA
 		registryID = detectRegistryID(opts.Image)
 	}
 
+	ct := ContainerRequest{
+		Name:            "app",
+		ImageName:       name,
+		ImageNamespace:  namespace,
+		ImageTag:        tag,
+		ImageRegistryID: registryID,
+		ImagePullPolicy: &policy,
+		EnvironmentVariables: envMapToSlice(opts.Env),
+		Endpoints: []EndpointRequest{
+			buildEndpoint(opts.Port, opts.Anycast),
+		},
+	}
+	if opts.ImageDigest != "" {
+		ct.ImageDigest = &opts.ImageDigest
+	}
+
 	req := AddApplicationRequest{
 		Name:        opts.AppName,
 		RuntimeType: opts.Runtime,
@@ -51,20 +68,7 @@ func (c *Client) DeployFromImage(ctx context.Context, opts DeployOptions) (*AddA
 			AllowedRegionIDs:  opts.Regions,
 			RequiredRegionIDs: opts.Regions,
 		},
-		ContainerTemplates: []ContainerRequest{
-			{
-				Name:            "app",
-				ImageName:       name,
-				ImageNamespace:  namespace,
-				ImageTag:        tag,
-				ImageRegistryID: registryID,
-				ImagePullPolicy: &policy,
-				EnvironmentVariables: envMapToSlice(opts.Env),
-				Endpoints: []EndpointRequest{
-					buildEndpoint(opts.Port, opts.Anycast),
-				},
-			},
-		},
+		ContainerTemplates: []ContainerRequest{ct},
 	}
 
 	if opts.VolumeName != "" && opts.VolumePath != "" {
