@@ -50,6 +50,7 @@ Examples:
 	rootCmd.AddCommand(newStatusCmd())
 	rootCmd.AddCommand(newCompletionCmd(rootCmd))
 	rootCmd.AddCommand(newStateCmd())
+	rootCmd.AddCommand(newBunnyCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

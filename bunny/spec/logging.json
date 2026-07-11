@@ -1,0 +1,583 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "bunny.net CDN Logging",
+    "description": "Access raw request logs via API with up to 3 days retention. Two API versions are available: v1 (legacy pipe-delimited) and v2 (structured JSON with rich filtering and pagination).",
+    "version": "v2"
+  },
+  "paths": {
+    "/{date}/{pullZoneId}.log": {
+      "get": {
+        "tags": [
+          "Logging v1"
+        ],
+        "summary": "Query logs (legacy)",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pullZoneId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "download",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v2/pullzones/{pullZoneId}/logs": {
+      "get": {
+        "tags": [
+          "Logging v2"
+        ],
+        "summary": "Query CDN access logs for a pull zone.",
+        "description": "Authenticate with either an `Authorization` bearer JWT or an `AccessKey` header.\nFilter pushdown happens in ClickHouse where possible; `country` and free-text\n`search` are applied in-process after fetch.",
+        "parameters": [
+          {
+            "name": "pullZoneId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive start of the time range (UTC). Defaults to `To - 24h`.\nMust fall within the 3-day log retention window. The total range\n(`To - From`) cannot exceed 3 days.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Exclusive end of the time range (UTC). Defaults to `now`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Comma-separated list of HTTP status filters. Each entry can be an exact\ncode (e.g. `200`, `404`) or a status class (e.g. `2xx`, `5xx`).\nMultiple entries are combined with OR.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cacheStatus",
+            "in": "query",
+            "description": "Comma-separated list of cache statuses to match exactly (e.g. `HIT,MISS,EXPIRED`).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "description": "ISO 3166 alpha-2 country code (e.g. `EE`). Multiple values can be comma-separated.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "edgeLocation",
+            "in": "query",
+            "description": "Edge location / server zone (exact match).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "remoteIp",
+            "in": "query",
+            "description": "Client IP address filter (IPv4 or IPv6). The match width adapts to the zone's\nIP anonymization setting so the filter can never reveal information beyond\nwhat the API returns: exact match when anonymization is disabled, /24 (IPv4)\nor /64 (IPv6) when last-octet anonymization is enabled, and ignored when full\nanonymization is enabled.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "urlContains",
+            "in": "query",
+            "description": "Case-insensitive substring match against the request URL (host + path).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userAgentContains",
+            "in": "query",
+            "description": "Case-insensitive substring match against the User-Agent header.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "refererContains",
+            "in": "query",
+            "description": "Case-insensitive substring match against the Referer header.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "description": "Free-text, case-insensitive token search. Tokens are space-separated; a row\nmatches if ANY token appears in ANY of the searched columns: cache status,\nrequest ID, edge location, host, path, user agent, referer, and (for zones\nwith extended logging) content range. Remote IP, country code, and the\nauthorization header are not searched. use the dedicated filters for those,\nor note that the authorization header is encrypted at rest. Limited to 16\ntokens of at most 128 characters each.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "query",
+            "description": "Exact request ID (UUID) to look up a single log entry.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeOriginShield",
+            "in": "query",
+            "description": "Include origin-shield (edge → shield) requests. Defaults to `false` to match v1.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum entries to return. Defaults to 100. Capped at 10000.",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Number of entries to skip. Defaults to 0.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "description": "Sort order by timestamp: `asc` or `desc` (default).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful query with paginated results.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogQueryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication credentials missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authentication failed or pull zone not accessible.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Logging is not enabled for the pull zone.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded for the pull zone.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorBody": {
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Machine-readable error code (snake_case).",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable message describing the error.",
+            "nullable": true
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional per-field validation messages.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ErrorResponse": {
+        "required": [
+          "error"
+        ],
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Structured error envelope returned by v2 endpoints."
+      },
+      "LogEntry": {
+        "required": [
+          "bytesSent",
+          "cacheStatus",
+          "edgeLocation",
+          "host",
+          "path",
+          "pullZoneId",
+          "requestId",
+          "scheme",
+          "statusCode",
+          "timestamp",
+          "url"
+        ],
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "description": "Time the request was received at the edge (UTC, millisecond precision).",
+            "format": "date-time"
+          },
+          "pullZoneId": {
+            "type": "integer",
+            "description": "Pull zone identifier the request was served from.",
+            "format": "int64"
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Unique identifier for the request (32-char hex).",
+            "nullable": true
+          },
+          "cacheStatus": {
+            "type": "string",
+            "description": "Cache status reported by the edge (e.g. \"HIT\", \"MISS\", \"EXPIRED\", \"STALE\").",
+            "nullable": true
+          },
+          "statusCode": {
+            "type": "integer",
+            "description": "HTTP response status code.",
+            "format": "int32"
+          },
+          "bytesSent": {
+            "type": "integer",
+            "description": "Total bytes sent in the response (headers + body).",
+            "format": "int64"
+          },
+          "remoteIp": {
+            "type": "string",
+            "description": "Client IP address. May be anonymized (last octet zeroed or set to all-zeros)\nwhen IP anonymization is enabled. `null` when no IP was recorded.",
+            "nullable": true
+          },
+          "countryCode": {
+            "type": "string",
+            "description": "ISO 3166 alpha-2 country code derived from the client IP. `null` if unknown.",
+            "nullable": true
+          },
+          "edgeLocation": {
+            "type": "string",
+            "description": "Edge location/server zone that handled the request.",
+            "nullable": true
+          },
+          "scheme": {
+            "type": "string",
+            "description": "Request scheme (http or https).",
+            "nullable": true
+          },
+          "host": {
+            "type": "string",
+            "description": "Request Host header.",
+            "nullable": true
+          },
+          "path": {
+            "type": "string",
+            "description": "Request URI path with query string.",
+            "nullable": true
+          },
+          "url": {
+            "type": "string",
+            "description": "Fully composed URL (`{scheme}://{host}{path}`).",
+            "nullable": true
+          },
+          "userAgent": {
+            "type": "string",
+            "description": "HTTP User-Agent header. `null` when absent.",
+            "nullable": true
+          },
+          "referer": {
+            "type": "string",
+            "description": "HTTP Referer header. `null` when absent.",
+            "nullable": true
+          },
+          "bodyBytesSent": {
+            "type": "integer",
+            "description": "Body-only bytes sent (extended logging only).",
+            "format": "int64",
+            "nullable": true
+          },
+          "contentRange": {
+            "type": "string",
+            "description": "HTTP Content-Range header (extended logging only). `null` when absent or extended logging disabled.",
+            "nullable": true
+          },
+          "authorizationHeader": {
+            "type": "string",
+            "description": "Decrypted HTTP Authorization header (extended logging only). `null` when absent or extended logging disabled.",
+            "nullable": true
+          },
+          "ja4Fingerprint": {
+            "type": "string",
+            "description": "JA4 TLS client fingerprint. `null` when absent.",
+            "nullable": true
+          },
+          "asn": {
+            "type": "integer",
+            "description": "Autonomous System Number derived from the client IP. `null` if unknown.",
+            "format": "int32",
+            "nullable": true
+          },
+          "asnOrganization": {
+            "type": "string",
+            "description": "Name of the organization that owns the AS. `null` if unknown.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "A single CDN access log entry. Field nullability mirrors the underlying data:\nfields sourced from optional HTTP headers (Referer, User-Agent, Content-Range,\nAuthorization) are `null` when the header was absent. Extended fields\n(BodyBytesSent, ContentRange, AuthorizationHeader) are only populated when\nextended logging is enabled for the pull zone."
+      },
+      "LogQueryResponse": {
+        "required": [
+          "data",
+          "pagination",
+          "query"
+        ],
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogEntry"
+            },
+            "description": "Log entries matching the query, in the requested sort order.",
+            "nullable": true
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PaginationInfo"
+          },
+          "query": {
+            "$ref": "#/components/schemas/QuerySummary"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Paginated response wrapper for log queries."
+      },
+      "PaginationInfo": {
+        "required": [
+          "hasMore",
+          "limit",
+          "offset",
+          "returned"
+        ],
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "description": "Offset that was applied to this query.",
+            "format": "int64"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Limit that was applied to this query.",
+            "format": "int32"
+          },
+          "returned": {
+            "type": "integer",
+            "description": "Number of entries actually returned (≤ bunnynet_cdn_log_api.Models.V2.PaginationInfo.Limit).",
+            "format": "int32"
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "True if more results are available beyond this page."
+          }
+        },
+        "additionalProperties": false
+      },
+      "QuerySummary": {
+        "required": [
+          "from",
+          "order",
+          "pullZoneId",
+          "to"
+        ],
+        "type": "object",
+        "properties": {
+          "pullZoneId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "order": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "AccessKey": {
+        "type": "apiKey",
+        "description": "API key passed through the AccessKey header",
+        "name": "AccessKey",
+        "in": "header"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Logging v1"
+    },
+    {
+      "name": "Logging v2"
+    }
+  ]
+}
