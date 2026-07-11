@@ -65,10 +65,15 @@ func (c *Client) ListBareMetal(ctx context.Context) ([]providers.BareMetal, erro
 }
 
 func (c *Client) CreateLB(ctx context.Context, cfg providers.LBCreateConfig) (*providers.LoadBalancer, error) {
+	alg := cfg.Algorithm
+	// Vultr uses "leastconn" instead of "round_robin"
+	if alg == "" || alg == "round_robin" {
+		alg = "leastconn"
+	}
 	lb, resp, err := c.client.LoadBalancer.Create(ctx, &govultr.LoadBalancerReq{
 		Label:              cfg.Name,
 		Region:             cfg.Location,
-		BalancingAlgorithm: cfg.Algorithm,
+		BalancingAlgorithm: alg,
 	})
 	if resp != nil {
 		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
@@ -141,27 +146,48 @@ func (c *Client) DeleteDNSRecord(ctx context.Context, zoneID, recordID string) e
 }
 
 func (c *Client) CreateLBListener(ctx context.Context, lbID string, cfg providers.LBListenerConfig) (*providers.LBListener, error) {
-	return nil, fmt.Errorf("vultr: method not available")
+	rule, resp, err := c.client.LoadBalancer.CreateForwardingRule(ctx, lbID, &govultr.ForwardingRule{
+		FrontendProtocol: cfg.Protocol,
+		FrontendPort:     cfg.Port,
+		BackendProtocol:  cfg.Protocol,
+		BackendPort:      cfg.TargetPort,
+	})
+	if resp != nil {
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("vultr create lb listener: %w", err)
+	}
+	return &providers.LBListener{
+		ID:         rule.RuleID,
+		Port:       rule.FrontendPort,
+		TargetPort: rule.BackendPort,
+		Protocol:   rule.FrontendProtocol,
+	}, nil
 }
 
 func (c *Client) UpdateLBListener(ctx context.Context, lbID, listenerID string, cfg providers.LBListenerConfig) (*providers.LBListener, error) {
-	return nil, fmt.Errorf("vultr: method not available")
+	// Vultr does not support updating forwarding rules; delete + recreate
+	if err := c.client.LoadBalancer.DeleteForwardingRule(ctx, lbID, listenerID); err != nil {
+		return nil, fmt.Errorf("vultr update lb listener (delete): %w", err)
+	}
+	return c.CreateLBListener(ctx, lbID, cfg)
 }
 
 func (c *Client) DeleteLBListener(ctx context.Context, lbID, listenerID string) error {
-	return fmt.Errorf("vultr: method not available")
+	return c.client.LoadBalancer.DeleteForwardingRule(ctx, lbID, listenerID)
 }
 
 func (c *Client) SetLBHealthCheck(ctx context.Context, lbID, listenerID string, cfg providers.LBHealthCheckConfig) error {
-	return fmt.Errorf("vultr: method not available")
+	return fmt.Errorf("vultr: health checks are configured at LB level, not per-listener")
 }
 
 func (c *Client) AddLBTarget(ctx context.Context, lbID, listenerID string, cfg providers.LBTargetConfig) (*providers.LBTarget, error) {
-	return nil, fmt.Errorf("vultr: method not available")
+	return nil, fmt.Errorf("vultr: LB targets managed via forwarding rules")
 }
 
 func (c *Client) ListLBTargets(ctx context.Context, lbID, listenerID string) ([]providers.LBTarget, error) {
-	return nil, fmt.Errorf("vultr: method not available")
+	return nil, fmt.Errorf("vultr: LB targets managed via forwarding rules")
 }
 
 func (c *Client) DrainLBTarget(ctx context.Context, lbID, listenerID, targetID string) error {
@@ -169,7 +195,7 @@ func (c *Client) DrainLBTarget(ctx context.Context, lbID, listenerID, targetID s
 }
 
 func (c *Client) ResizeLB(ctx context.Context, lbID, plan string) (*providers.LoadBalancer, error) {
-	return nil, fmt.Errorf("vultr: method not available")
+	return nil, fmt.Errorf("vultr: LB plan is set at creation and cannot be resized")
 }
 
 func (c *Client) GetLBMetrics(ctx context.Context, lbID string) (string, error) {

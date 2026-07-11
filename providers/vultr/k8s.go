@@ -82,7 +82,27 @@ func (c *Client) GetKubeconfig(ctx context.Context, id string) (string, error) {
 }
 
 func (c *Client) UpdateK8s(ctx context.Context, id, version string) (*providers.K8sCluster, error) {
-	return nil, fmt.Errorf("vultr: method not available")
+	upgrades, resp, err := c.client.Kubernetes.GetUpgrades(ctx, id)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("vultr get upgrades: %w", err)
+	}
+	valid := false
+	for _, v := range upgrades {
+		if v == version {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return nil, fmt.Errorf("vultr: version %s not in available upgrades: %v", version, upgrades)
+	}
+	if err := c.client.Kubernetes.Upgrade(ctx, id, &govultr.ClusterUpgradeReq{UpgradeVersion: version}); err != nil {
+		return nil, fmt.Errorf("vultr upgrade k8s: %w", err)
+	}
+	return &providers.K8sCluster{ID: id, Version: version, Status: "upgrading"}, nil
 }
 
 func (c *Client) ToggleK8sProtection(ctx context.Context, id string) (*providers.K8sCluster, error) {
@@ -106,21 +126,59 @@ func (c *Client) UninstallK8sAddon(ctx context.Context, id, addonID string) erro
 }
 
 func (c *Client) ListK8sNodePools(ctx context.Context, id string) ([]providers.K8sNodePool, error) {
-	return nil, fmt.Errorf("vultr: method not available")
+	pools, _, resp, err := c.client.Kubernetes.ListNodePools(ctx, id, &govultr.ListOptions{})
+	if resp != nil {
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("vultr list node pools: %w", err)
+	}
+	var result []providers.K8sNodePool
+	for _, p := range pools {
+		result = append(result, providers.K8sNodePool{
+			ID:    p.ID,
+			Name:  p.Label,
+			Plan:  p.Plan,
+			Nodes: p.NodeQuantity,
+			Status: p.Status,
+		})
+	}
+	return result, nil
 }
 
 func (c *Client) CreateK8sNodePool(ctx context.Context, id string, cfg providers.K8sNodePoolConfig) (*providers.K8sNodePool, error) {
-	return nil, fmt.Errorf("vultr: method not available")
+	pool, resp, err := c.client.Kubernetes.CreateNodePool(ctx, id, &govultr.NodePoolReq{
+		NodeQuantity: cfg.NodeCount,
+		Plan:         cfg.Plan,
+		Label:        cfg.Name,
+	})
+	if resp != nil {
+		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("vultr create node pool: %w", err)
+	}
+	return &providers.K8sNodePool{
+		ID:     pool.ID,
+		Name:   pool.Label,
+		Plan:   pool.Plan,
+		Nodes:  pool.NodeQuantity,
+		Status: pool.Status,
+	}, nil
 }
 
 func (c *Client) ScaleK8sNodePool(ctx context.Context, id, poolID string, nodes int) error {
-	return fmt.Errorf("vultr: method not available")
+	_, resp, err := c.client.Kubernetes.UpdateNodePool(ctx, id, poolID, &govultr.NodePoolReqUpdate{NodeQuantity: nodes})
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+	return err
 }
 
 func (c *Client) DeleteK8sNodePool(ctx context.Context, id, poolID string) error {
-	return fmt.Errorf("vultr: method not available")
+	return c.client.Kubernetes.DeleteNodePool(ctx, id, poolID)
 }
 
 func (c *Client) ListK8sLBs(ctx context.Context, id string) ([]providers.LoadBalancer, error) {
-	return nil, fmt.Errorf("vultr: method not available")
+	return c.ListLB(ctx)
 }

@@ -43,6 +43,10 @@ func newProviderCmd() *cobra.Command {
 	cmd.AddCommand(newProviderLBCmd())
 	cmd.AddCommand(newProviderDNSCmd())
 	cmd.AddCommand(newProviderSSHKeyCmd())
+	cmd.AddCommand(newProviderFirewallCmd())
+	cmd.AddCommand(newProviderObjectStorageCmd())
+	cmd.AddCommand(newProviderCDNCmd())
+	cmd.AddCommand(newProviderBlockStorageCmd())
 
 	cmd.PersistentFlags().StringVar(&pf.provider, "provider", "", "Provider name (cubepath, hetzner, digitalocean, vultr, aws)")
 	cmd.PersistentFlags().StringVar(&pf.apiKey, "api-key", "", "API key (or provider-specific env var)")
@@ -924,3 +928,4 @@ func newProviderSSHKeyCmd() *cobra.Command {
 	cmd.AddCommand(deleteCmd)
 	return cmd
 }
+
