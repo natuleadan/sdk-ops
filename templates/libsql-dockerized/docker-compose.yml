@@ -42,11 +42,31 @@ services:
     networks:
       - default
 
+  sqld-replica-2:
+    build: .
+    image: libsql-dockerized:latest
+    command:
+      - sqld
+      - --http-listen-addr=0.0.0.0:8080
+      - --primary-grpc-url=http://sqld-primary:5001
+    depends_on:
+      sqld-primary:
+        condition: service_started
+    ports:
+      - "${LIBSQL_REPLICA2_HTTP:-8082}:8080"
+    volumes:
+      - replica2_data:/var/lib/sqld
+      - ./tls:/tls:ro
+    environment:
+      SQLD_NODE: replica
+    restart: unless-stopped
+    networks:
+      - default
+
   haproxy:
     image: haproxy:3.1-alpine
     ports:
       - "${LIBSQL_HTTP_TLS:-8443}:8443"
-      - "${LIBSQL_REPLICA_HTTP_TLS:-8444}:8444"
     volumes:
       - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - ./tls:/tls:ro
@@ -54,6 +74,8 @@ services:
       sqld-primary:
         condition: service_started
       sqld-replica:
+        condition: service_started
+      sqld-replica-2:
         condition: service_started
     restart: unless-stopped
     networks:
@@ -102,4 +124,5 @@ services:
 volumes:
   primary_data:
   replica_data:
+  replica2_data:
   minio_data:

@@ -5,10 +5,12 @@ set -e
 
 PRIMARY_CONTAINER="libsql-dockerized-sqld-primary-1"
 REPLICA_CONTAINER="libsql-dockerized-sqld-replica-1"
+REPLICA2_CONTAINER="libsql-dockerized-sqld-replica-2-1"
 
-SQL()     { docker exec "$PRIMARY_CONTAINER" curl -sf --max-time 10 -X POST http://localhost:8080 -H "Content-Type: application/json" -d "$1" 2>/dev/null; }
-HC_PRIM() { docker exec "$PRIMARY_CONTAINER" curl -sf http://localhost:8080/health > /dev/null 2>&1; }
-HC_REP()  { docker exec "$REPLICA_CONTAINER" curl -sf http://localhost:8080/health > /dev/null 2>&1; }
+SQL()      { docker exec "$PRIMARY_CONTAINER" curl -sf --max-time 10 -X POST http://localhost:8080 -H "Content-Type: application/json" -d "$1" 2>/dev/null; }
+HC_PRIM()  { docker exec "$PRIMARY_CONTAINER" curl -sf http://localhost:8080/health > /dev/null 2>&1; }
+HC_REP()   { docker exec "$REPLICA_CONTAINER" curl -sf http://localhost:8080/health > /dev/null 2>&1; }
+HC_REP2()  { docker exec "$REPLICA2_CONTAINER" curl -sf http://localhost:8080/health > /dev/null 2>&1; }
 
 echo "=== libsql-dockerized init ==="
 
@@ -25,8 +27,12 @@ echo -n "Waiting for primary..."
 until HC_PRIM; do sleep 2; done
 echo " OK"
 
-echo -n "Waiting for replica..."
+echo -n "Waiting for replica-1..."
 until HC_REP; do sleep 2; done
+echo " OK"
+
+echo -n "Waiting for replica-2..."
+until HC_REP2; do sleep 2; done
 echo " OK"
 
 echo "Creating schema..."
