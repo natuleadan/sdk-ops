@@ -98,7 +98,18 @@ sdk-ops db create postgres --name mydb --node 192.168.1.100
 sdk-ops db create redis --port 6379 --node 192.168.1.100
 ```
 
-### 2.10 Rotate secrets
+### 2.10 Scaffold infrastructure templates
+
+```bash
+sdk-ops deploy init ./pg --template pg-full-bm        # PostgreSQL 18 + PgDog + pgbackrest
+sdk-ops deploy init ./kv --template kv-full-bm        # Dragonfly KV + HAProxy TLS
+
+# Copy to VPS and init (not deploy push — these are Docker Compose stacks)
+scp -r ./pg root@<ip>:/root/pg
+ssh root@<ip> "cd /root/pg && bash init.sh"
+```
+
+### 2.11 Rotate secrets
 
 ```bash
 sdk-ops service rotate db my-postgres --type postgres --node 192.168.1.100

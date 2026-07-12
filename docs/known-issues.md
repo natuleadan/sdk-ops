@@ -203,3 +203,37 @@ The provider sends raw binary automatically.
 Some Edge Scripting endpoints may require `Authorization: Bearer` instead of
 `AccessKey` header. If you get a 401, try using the dashboard or raw API
 with both header types.
+
+## Templates: Infrastructure Templates Are Docker Compose (Not deploy push)
+
+Templates like `pg-full-bm` and `kv-full-bm` are Docker Compose stacks, not
+single-service apps. They use `bash init.sh` to set up everything. Do NOT use
+`deploy push` for these templates — copy the directory to the VPS and run
+`bash init.sh` directly.
+
+```bash
+# Correct workflow:
+sdk-ops deploy init ./pg --template pg-full-bm
+scp -r ./pg root@<ip>:/root/pg
+ssh root@<ip> "cd /root/pg && bash init.sh"
+```
+
+## Dragonfly: TLS Key Loading Fails with tini
+
+Dragonfly v1.39 Docker image has a bug where TLS key loading fails when the
+container runs via `tini` (the default entrypoint) in daemon mode. The template
+works around this by using HAProxy for TLS termination instead of Dragonfly's
+built-in TLS.
+
+```yaml
+# kv-full-bm uses HAProxy for TLS:
+# Dragonfly runs without TLS internally
+# HAProxy terminates TLS on ports 6379/6380
+```
+
+## Dragonfly: --tiered_prefix Crashes on Linux
+
+Dragonfly's SSD data tiering feature (`--tiered_prefix`) requires Linux kernel
+5.19+ with `io_uring` support. On older kernels, Dragonfly crashes with
+`Check failure stack trace`. This flag is removed from the template by default.
+If your kernel supports it, add it back to `docker-compose.yml`.

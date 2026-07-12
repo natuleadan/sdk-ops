@@ -318,9 +318,10 @@ sdk-ops node exec --agents -- <command>        # Run only on agent nodes
 
 ```bash
 sdk-ops deploy init <dir> --template <name> [flags]
-  --template string   Template name: html, node, wordpress, go, nextjs, python-fastapi, django
+  --template string   Template name (run without --template to list all)
   --name string       Service name (default "app")
   --ci string         Generate CI/CD config: github, gitlab
+  --tested            Run integration test after scaffold (requires deployed services)
 
 sdk-ops deploy push <dir> --node <ip> [flags]
   --name             Service name (default: directory name)
@@ -355,6 +356,17 @@ sdk-ops deploy init ./my-svc --template go              # Go HTTP server
 sdk-ops deploy init ./my-app --template nextjs           # Next.js (standalone)
 sdk-ops deploy init ./my-app --template python-fastapi   # FastAPI + uvicorn
 sdk-ops deploy init ./my-app --template django           # Django + gunicorn
+sdk-ops deploy init ./pg --template pg-full-bm           # PostgreSQL + PgDog + pgbackrest
+sdk-ops deploy init ./kv --template kv-full-bm           # Dragonfly KV + HAProxy TLS
+
+# Infrastructure templates deploy via docker compose (not deploy push)
+sdk-ops deploy init ./pg --template pg-full-bm
+sdk-ops deploy init ./kv --template kv-full-bm
+cp -r ./pg /root/pg
+ssh root@<ip> "cd /root/pg && bash init.sh"
+
+# Test interactively (requires running services):
+sdk-ops deploy init ./pg --template pg-full-bm --tested
 
 # Also generate CI/CD pipeline
 sdk-ops deploy init ./my-app --template go --ci github   # + .github/workflows/deploy.yml
