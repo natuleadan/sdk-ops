@@ -308,16 +308,13 @@ func newInfraFirewallCmd(f *infraFlags) *cobra.Command {
 
 func newInfraFirewallOpenCmd(f *infraFlags) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "open <port>",
-		Short: "Open a port in the firewall",
+		Use:   "open <port>[,<port>,...]",
+		Short: "Open ports in the firewall",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cobraCmd *cobra.Command, args []string) error {
-			port := 0
-			if _, err := fmt.Sscanf(args[0], "%d", &port); err != nil {
-				log.Printf("infra: parse port error: %v", err)
-			}
-			if port < 1 || port > 65535 {
-				return fmt.Errorf("invalid port: %s", args[0])
+			ports, err := parsePorts(args[0])
+			if err != nil {
+				return err
 			}
 			proto, _ := cobraCmd.Flags().GetString("proto")
 			node := firewalledNode(cobraCmd)
@@ -334,7 +331,13 @@ func newInfraFirewallOpenCmd(f *infraFlags) *cobra.Command {
 					fmt.Fprintf(os.Stderr, "infra: conn close error: %v\n", err)
 				}
 			}()
-			return hardening.FirewallOpen(conn, port, proto)
+			for _, p := range ports {
+				fmt.Printf("→ Opening port %d/%s on %s...\n", p, proto, node)
+				if err := hardening.FirewallOpen(conn, p, proto); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	}
 
@@ -344,18 +347,30 @@ func newInfraFirewallOpenCmd(f *infraFlags) *cobra.Command {
 	return cmd
 }
 
+func parsePorts(raw string) ([]int, error) {
+	var ports []int
+	for _, s := range strings.Split(raw, ",") {
+		p := 0
+		if _, err := fmt.Sscanf(strings.TrimSpace(s), "%d", &p); err != nil {
+			return nil, fmt.Errorf("invalid port: %q", s)
+		}
+		if p < 1 || p > 65535 {
+			return nil, fmt.Errorf("port out of range: %d", p)
+		}
+		ports = append(ports, p)
+	}
+	return ports, nil
+}
+
 func newInfraFirewallCloseCmd(f *infraFlags) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "close <port>",
-		Short: "Close a port in the firewall",
+		Use:   "close <port>[,<port>,...]",
+		Short: "Close ports in the firewall",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cobraCmd *cobra.Command, args []string) error {
-			port := 0
-			if _, err := fmt.Sscanf(args[0], "%d", &port); err != nil {
-				log.Printf("infra: parse port error: %v", err)
-			}
-			if port < 1 || port > 65535 {
-				return fmt.Errorf("invalid port: %s", args[0])
+			ports, err := parsePorts(args[0])
+			if err != nil {
+				return err
 			}
 			proto, _ := cobraCmd.Flags().GetString("proto")
 			node := firewalledNode(cobraCmd)
@@ -372,7 +387,13 @@ func newInfraFirewallCloseCmd(f *infraFlags) *cobra.Command {
 					fmt.Fprintf(os.Stderr, "infra: conn close error: %v\n", err)
 				}
 			}()
-			return hardening.FirewallClose(conn, port, proto)
+			for _, p := range ports {
+				fmt.Printf("→ Closing port %d/%s on %s...\n", p, proto, node)
+				if err := hardening.FirewallClose(conn, p, proto); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	}
 
