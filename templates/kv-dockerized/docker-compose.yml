@@ -45,6 +45,30 @@ services:
     networks:
       - default
 
+  dragonfly-replica-2:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
+    command: [
+      "--cluster_mode=yes",
+      "--admin_port=10003",
+      "--requirepass=${DF_PASSWORD:-dragonfly}",
+      "--port=6381",
+      "--bind=0.0.0.0",
+      "--cache_mode=true",
+      "--dir=/data",
+      "--dbfilename=replica2-{timestamp}",
+      "--snapshot_cron=*/30 * * * *"
+    ]
+    depends_on:
+      dragonfly-primary:
+        condition: service_started
+    volumes:
+      - ./ssl:/ssl:ro
+      - replica2_data:/data
+      - ./backups:/backups
+    restart: unless-stopped
+    networks:
+      - default
+
   haproxy:
     image: haproxy:3.1-alpine
     ports:
@@ -57,6 +81,8 @@ services:
       dragonfly-primary:
         condition: service_started
       dragonfly-replica:
+        condition: service_started
+      dragonfly-replica-2:
         condition: service_started
     restart: unless-stopped
     networks:
@@ -105,4 +131,5 @@ services:
 volumes:
   primary_data:
   replica_data:
+  replica2_data:
   minio_data:
