@@ -1,0 +1,108 @@
+name: kv-full-bm
+services:
+  dragonfly-primary:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
+    command: [
+      "--cluster_mode=yes",
+      "--admin_port=10001",
+      "--requirepass=${DF_PASSWORD:-dragonfly}",
+      "--port=6379",
+      "--bind=0.0.0.0",
+      "--cache_mode=true",
+      "--dir=/data",
+      "--dbfilename=dump-{timestamp}",
+      "--snapshot_cron=*/30 * * * *"
+    ]
+    volumes:
+      - ./ssl:/ssl:ro
+      - primary_data:/data
+      - ./backups:/backups
+    restart: unless-stopped
+    networks:
+      - default
+
+  dragonfly-replica:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
+    command: [
+      "--cluster_mode=yes",
+      "--admin_port=10002",
+      "--requirepass=${DF_PASSWORD:-dragonfly}",
+      "--port=6380",
+      "--bind=0.0.0.0",
+      "--cache_mode=true",
+      "--dir=/data",
+      "--dbfilename=replica-{timestamp}",
+      "--snapshot_cron=*/30 * * * *"
+    ]
+    depends_on:
+      dragonfly-primary:
+        condition: service_started
+    volumes:
+      - ./ssl:/ssl:ro
+      - replica_data:/data
+      - ./backups:/backups
+    restart: unless-stopped
+    networks:
+      - default
+
+  haproxy:
+    image: haproxy:3.1-alpine
+    ports:
+      - "${DF_PORT:-6379}:6379"
+      - "${DF_REPLICA_PORT:-6380}:6380"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./ssl:/ssl:ro
+    depends_on:
+      dragonfly-primary:
+        condition: service_started
+      dragonfly-replica:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - default
+
+  minio:
+    image: minio/minio:latest
+    profiles:
+      - s3
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET:-minioadmin}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - minio_data:/data
+    networks:
+      - default
+
+  createbucket:
+    image: minio/mc:latest
+    profiles:
+      - s3
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${S3_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-kv-backups}
+    entrypoint: >
+      sh -c "
+      mc alias set s3 http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb s3/$${S3_BUCKET} --ignore-existing
+      "
+    networks:
+      - default
+
+volumes:
+  primary_data:
+  replica_data:
+  minio_data:
