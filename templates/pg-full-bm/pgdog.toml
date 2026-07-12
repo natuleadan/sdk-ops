@@ -1,0 +1,38 @@
+[general]
+host = "0.0.0.0"
+port = 6432
+workers = 4
+default_pool_size = POOL_SIZE
+min_pool_size = 10
+connect_timeout = 10_000
+pooler_mode = "transaction"
+query_parser = "session_control_and_locks"
+prepared_statements = "extended"
+connection_recovery = "recover"
+rollback_timeout = 5000
+client_connection_recovery = "recover"
+checkout_timeout = 30_000
+load_balancing_strategy = "round_robin"
+read_write_split = "exclude_primary"
+lsn_check_delay = 0
+lsn_check_interval = 1_000
+ban_replica_lag = 60_000
+ban_replica_lag_bytes = 25_000_000
+auth_type = "scram"
+tls_certificate = "/ssl/server.crt"
+tls_private_key = "/ssl/server.key"
+tls_verify = "prefer"
+log_format = "text"
+log_level = "info"
+
+[[databases]]
+name = "PG_DATABASE"
+role = "auto"
+host = "postgres"
+port = 5432
+
+[[databases]]
+name = "PG_DATABASE"
+role = "auto"
+host = "pg-replica"
+port = 5432
