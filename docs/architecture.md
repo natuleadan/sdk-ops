@@ -193,9 +193,6 @@ cmd/sdk-ops/
 ├── bunny.go     ← CLI: sdk-ops bunny <app|dns|pullzone|script|storage|stream|shield>
 └── vultr_cmds.go ← CLI: sdk-ops provider firewall|object-storage|cdn|block-storage
 
-test-apps/       ← Benchmark apps
-├── bench-fiber/  ← Go Fiber CRUD benchmark
-└── bench-simple/ ← Go stdlib CRUD benchmark
 ```
 
 ## Deploy Flows

@@ -166,7 +166,25 @@ with the CLI.
 
 Fiber's prefork mode calls `os.Exit(0)` in the parent process after spawning
 children. In Docker containers, PID 1 exiting causes the container to stop.
-Use single-process mode with `GOMAXPROCS=8` instead.
+Use single-process mode instead.
+
+## Bunny MC: Private Image Requires --digest
+
+When deploying private Docker Hub images to Magic Containers, Bunny's API
+returns a 503 error (`"Failed to get latest image digests"`). The API needs
+the image digest explicitly to skip the public Docker Hub lookup:
+
+```bash
+sdk-ops bunny app create my-app \
+  --image natuleadan/my-app:latest \
+  --registry-id "9014" \
+  --digest "sha256:f9202d5178..."
+```
+
+List available registries to find your credential-configured registry ID:
+- `1155` = Docker Hub Public
+- `1156` = GitHub Container Registry Public
+- Custom IDs via `ListContainerRegistries()` SDK method
 
 ## Bunny MC: Anycast IP Reachability
 

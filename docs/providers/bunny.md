@@ -61,7 +61,7 @@ Deploy containerized applications globally on Bunny's edge network.
 
 | Command | Description |
 |---------|-------------|
-| `sdk-ops bunny app create <name> -i <image> -p <port> -r <region>` | Create + deploy an app |
+| `sdk-ops bunny app create <name> -i <image> -p <port> -r <region> [--digest sha256:...]` | Create + deploy an app (use `--digest` for private images) |
 | `sdk-ops bunny app list` | List all apps |
 | `sdk-ops bunny app status <id>` | App details + resource usage |
 | `sdk-ops bunny app overview <id>` | CPU, RAM, cost, latency |
@@ -75,6 +75,10 @@ Region aliases: `bogota`/`latam` → CO, `miami`/`usa` → MI, `frankfurt`/`euro
 
 Registry auto-detection: `ghcr.io/*` → GHCR (ID 1156), others → Docker Hub (ID 1155).
 Override with `--registry-id`.
+
+**Private images:** use `--digest sha256:...` to skip image digest lookup (required for
+private Docker Hub repos). Use `--registry-id` to select a credential-configured registry.
+List registries with the SDK: `ListContainerRegistries()`.
 
 ### DNS
 
@@ -157,6 +161,7 @@ File operations use the storage zone password as `AccessKey` (fetched automatica
 - **Anycast IP** may not be reachable from all geographic locations immediately
 - **File uploads** must be raw binary (not multipart)
 - **Storage file operations** require the zone password (not the API key)
+- **Private images** require `--digest` flag; Bunny's API returns 503 when it cannot resolve the digest from Docker Hub
 - **Shared runtime** MC pods do not support Fiber prefork (parent process exits)
 
 ## Code Location

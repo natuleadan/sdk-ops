@@ -40,6 +40,7 @@
 | DigitalOcean | `providers/digitalocean/` |
 | Vultr | `providers/vultr/` (VPS, K8s, LB, DNS, firewall, S3, CDN, block storage) |
 | AWS EC2 | `providers/aws/` |
+| Civo | `providers/civo/` (VPS, K8s, LB, DNS, SSH keys) |
 | Bunny.net SDK | `bunny/` (MC, DNS, CDN, Storage, Stream, Shield, Edge Scripting) |
 | License & third-party notices | `LICENSE` / `ThirdPartyNotices.txt` |
 

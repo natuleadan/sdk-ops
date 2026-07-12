@@ -55,7 +55,7 @@ Flags:
   --logs string           Install Promtail, ship logs to Loki URL
   --alerts string         Install Alertmanager with Slack webhook URL
   --cloud-init            Use cloud-init instead of SSH-based provisioning
-  --provider string       Create VPS via provider (cubepath, hetzner, digitalocean, vultr, aws)
+  --provider string       Create VPS via provider (cubepath, hetzner, digitalocean, vultr, aws, civo)
   --plan string           VPS plan (default "gp.nano")
   --location string       VPS location (default "us-mia-1")
   --template string       OS template (default "ubuntu-24")
