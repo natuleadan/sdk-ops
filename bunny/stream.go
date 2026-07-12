@@ -236,3 +236,120 @@ func (c *Client) CreateCollection(ctx context.Context, libID int64, accessKey, n
 	}
 	return &col, nil
 }
+
+func (c *Client) GetCollection(ctx context.Context, libID int64, accessKey string, collectionID int64) (*VideoCollection, error) {
+	var col VideoCollection
+	err := c.streamDo(ctx, libID, accessKey, "GET", fmt.Sprintf("/collections/%d", collectionID), nil, &col)
+	if err != nil {
+		return nil, err
+	}
+	return &col, nil
+}
+
+func (c *Client) UpdateCollection(ctx context.Context, libID int64, accessKey string, collectionID int64, name string) (*VideoCollection, error) {
+	var col VideoCollection
+	err := c.streamDo(ctx, libID, accessKey, "POST", fmt.Sprintf("/collections/%d", collectionID),
+		map[string]string{"name": name}, &col)
+	if err != nil {
+		return nil, err
+	}
+	return &col, nil
+}
+
+func (c *Client) DeleteCollection(ctx context.Context, libID int64, accessKey string, collectionID int64) error {
+	return c.streamDo(ctx, libID, accessKey, "DELETE", fmt.Sprintf("/collections/%d", collectionID), nil, nil)
+}
+
+func (c *Client) UpdateVideo(ctx context.Context, libID int64, accessKey, videoID string, updates map[string]any) (*Video, error) {
+	var video Video
+	err := c.streamDo(ctx, libID, accessKey, "POST", "/videos/"+videoID, updates, &video)
+	if err != nil {
+		return nil, err
+	}
+	return &video, nil
+}
+
+func (c *Client) GetVideoHeatmap(ctx context.Context, libID int64, accessKey, videoID string) ([]map[string]any, error) {
+	var resp []map[string]any
+	err := c.streamDo(ctx, libID, accessKey, "GET", "/videos/"+videoID+"/heatmap", nil, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *Client) GetVideoPlayData(ctx context.Context, libID int64, accessKey, videoID string) (*map[string]any, error) {
+	var resp map[string]any
+	err := c.streamDo(ctx, libID, accessKey, "GET", "/videos/"+videoID+"/play", nil, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *Client) GetVideoStatistics(ctx context.Context, libID int64, accessKey string) (*map[string]any, error) {
+	var resp map[string]any
+	err := c.streamDo(ctx, libID, accessKey, "GET", "/statistics", nil, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *Client) AddOutputCodec(ctx context.Context, libID int64, accessKey, videoID string, outputCodecID int64) error {
+	return c.streamDo(ctx, libID, accessKey, "PUT",
+		fmt.Sprintf("/videos/%s/outputs/%d", videoID, outputCodecID), nil, nil)
+}
+
+func (c *Client) RepackageVideo(ctx context.Context, libID int64, accessKey, videoID string) error {
+	return c.streamDo(ctx, libID, accessKey, "POST", "/videos/"+videoID+"/repackage", nil, nil)
+}
+
+func (c *Client) GetVideoResolutions(ctx context.Context, libID int64, accessKey, videoID string) ([]map[string]any, error) {
+	var resp []map[string]any
+	err := c.streamDo(ctx, libID, accessKey, "GET", "/videos/"+videoID+"/resolutions", nil, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *Client) GetVideoStorageSize(ctx context.Context, libID int64, accessKey, videoID string) (*map[string]any, error) {
+	var resp map[string]any
+	err := c.streamDo(ctx, libID, accessKey, "GET", "/videos/"+videoID+"/storage", nil, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *Client) CleanupResolutions(ctx context.Context, libID int64, accessKey, videoID string) error {
+	return c.streamDo(ctx, libID, accessKey, "POST", "/videos/"+videoID+"/resolutions/cleanup", nil, nil)
+}
+
+func (c *Client) AddCaption(ctx context.Context, libID int64, accessKey, videoID, srclang, label string, captionsFile io.Reader) error {
+	url := fmt.Sprintf("https://video.bunnycdn.com/library/%d/videos/%s/captions/%s", libID, videoID, srclang)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, captionsFile)
+	if err != nil {
+		return fmt.Errorf("add caption request: %w", err)
+	}
+	req.Header.Set("AccessKey", accessKey)
+	if c.apiKey != "" {
+		req.Header.Set("AccessKey", c.apiKey)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("add caption do: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("add caption: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (c *Client) DeleteCaption(ctx context.Context, libID int64, accessKey, videoID, srclang string) error {
+	return c.streamDo(ctx, libID, accessKey, "DELETE",
+		fmt.Sprintf("/videos/%s/captions/%s", videoID, srclang), nil, nil)
+}
