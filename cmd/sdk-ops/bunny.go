@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -15,61 +18,61 @@ import (
 )
 
 type bunnyFlags struct {
-	apiKey     string
-	region     string
-	minInst    int32
-	maxInst    int32
-	port       int32
-	volumeName string
-	volumeSize int32
-	volumePath string
-	env        string
-	recordType string
-	ttl        int32
-	priority   int32
-	origin     string
-	hostname   string
-	registryID string
-	digest     string
-	anycast    bool
+	apiKey       string
+	region       string
+	minInst      int32
+	maxInst      int32
+	port         int32
+	volumeName   string
+	volumeSize   int32
+	volumePath   string
+	env          string
+	recordType   string
+	ttl          int32
+	priority     int32
+	origin       string
+	hostname     string
+	registryID   string
+	digest       string
+	anycast      bool
 	endpointPort int32
 }
 
 var bf bunnyFlags
 
 var regionAliases = map[string]string{
-	"bogota":   "CO",
-	"colombia": "CO",
-	"latam":    "CO",
-	"miami":    "MI",
-	"usa":      "MI",
-	"us":       "MI",
-	"na":       "MI",
-	"frankfurt": "DE",
-	"germany":  "DE",
-	"europe":   "DE",
-	"eu":       "DE",
-	"london":   "UK",
-	"uk":       "UK",
-	"tokyo":    "JP",
-	"japan":    "JP",
-	"singapore": "SG",
-	"sg":       "SG",
-	"sydney":   "SYD",
-	"brazil":   "BR",
-	"mexico":   "MX",
-	"ny":       "NY",
-	"newyork":  "NY",
-	"la":       "LA",
+	"bogota":     "CO",
+	"colombia":   "CO",
+	"latam":      "CO",
+	"miami":      "MI",
+	"usa":        "MI",
+	"us":         "MI",
+	"na":         "MI",
+	"frankfurt":  "DE",
+	"germany":    "DE",
+	"europe":     "DE",
+	"eu":         "DE",
+	"london":     "UK",
+	"uk":         "UK",
+	"tokyo":      "JP",
+	"japan":      "JP",
+	"singapore":  "SG",
+	"sg":         "SG",
+	"sydney":     "SYD",
+	"brazil":     "BR",
+	"mexico":     "MX",
+	"ny":         "NY",
+	"newyork":    "NY",
+	"la":         "LA",
 	"losangeles": "LA",
-	"dallas":   "TX",
-	"texas":    "TX",
-	"paris":    "FR",
-	"france":   "FR",
-	"spain":    "ES",
-	"italy":    "IT",
-	"poland":   "PL",
-	"sweden":   "SE",
+	"dallas":     "TX",
+	"texas":      "TX",
+	"paris":      "FR",
+	"france":     "FR",
+	"spain":      "ES",
+	"italy":      "IT",
+	"poland":     "PL",
+	"sweden":     "SE",
 }
 
 func resolveRegion(s string) string {
@@ -108,6 +111,10 @@ Region aliases:
 	cmd.AddCommand(newBunnyStorageCmd())
 	cmd.AddCommand(newBunnyStreamCmd())
 	cmd.AddCommand(newBunnyShieldCmd())
+	cmd.AddCommand(newBunnyBillingCmd())
+	cmd.AddCommand(newBunnyStatsCmd())
+	cmd.AddCommand(newBunnyMiscCmd())
+	cmd.AddCommand(newBunnyLogsCmd())
 	cmd.AddCommand(newBunnyLoginCmd())
 
 	return cmd
@@ -392,7 +399,7 @@ func runBunnyAppCreate(cmd *cobra.Command, args []string) error {
 	region := resolveRegion(bf.region)
 
 	envMap := make(map[string]string)
-	for _, e := range strings.Split(bf.env, ",") {
+	for e := range strings.SplitSeq(bf.env, ",") {
 		e = strings.TrimSpace(e)
 		if e == "" {
 			continue
@@ -1256,6 +1263,27 @@ func newBunnyStreamCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "stream", Short: "Manage Stream video libraries and videos"}
 	cmd.AddCommand(newBunnyStreamLibCmd())
 	cmd.AddCommand(newBunnyStreamVideoCmd())
+	cmd.AddCommand(newBunnyStreamCollectionCmd())
+	cmd.AddCommand(&cobra.Command{Use: "statistics <id>", Short: "Show library statistics", Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			libID := parseInt64(a[0])
+			ak, err := cl.GetLibraryAPIKey(ctx, libID)
+			if err != nil {
+				return err
+			}
+			stats, err := cl.GetVideoStatistics(ctx, libID, ak)
+			if err != nil {
+				return err
+			}
+			for k, v := range *stats {
+				fmt.Printf("%s: %v\n", k, v)
+			}
+			return nil
+		},
+	})
 	return cmd
 }
 
@@ -1267,9 +1295,16 @@ func newBunnyStreamLibCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
 			libs, err := c.ListVideoLibraries(ctx)
-			if err != nil { return err }
-			if len(libs) == 0 { fmt.Println("No video libraries found."); return nil }
-			for _, l := range libs { fmt.Printf("%d  %s  videos=%d  storage=%dMB\n", l.ID, l.Name, l.VideoCount, l.TotalStorage/1e6) }
+			if err != nil {
+				return err
+			}
+			if len(libs) == 0 {
+				fmt.Println("No video libraries found.")
+				return nil
+			}
+			for _, l := range libs {
+				fmt.Printf("%d  %s  videos=%d  storage=%dMB\n", l.ID, l.Name, l.VideoCount, l.TotalStorage/1e6)
+			}
 			return nil
 		},
 	})
@@ -1279,7 +1314,9 @@ func newBunnyStreamLibCmd() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
 			lib, err := c.CreateVideoLibrary(ctx, args[0])
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			fmt.Printf("✓ Library created: ID %d\n", lib.ID)
 			return nil
 		},
@@ -1292,66 +1329,476 @@ func newBunnyStreamVideoCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{Use: "create <id> <title>", Short: "Create a video", Args: cobra.ExactArgs(2), RunE: runStreamCreate})
 	cmd.AddCommand(&cobra.Command{Use: "list <id>", Short: "List videos", Args: cobra.ExactArgs(1), RunE: runStreamList})
 	cmd.AddCommand(&cobra.Command{Use: "get <id> <vid>", Short: "Get video details", Args: cobra.ExactArgs(2), RunE: runStreamGet})
+	updateCmd := &cobra.Command{Use: "update <id> <vid>", Short: "Update video metadata", Args: cobra.ExactArgs(2), RunE: runStreamUpdate}
+	updateCmd.Flags().String("title", "", "New title")
+	cmd.AddCommand(updateCmd)
 	cmd.AddCommand(&cobra.Command{Use: "fetch <id> <url>", Short: "Import video from URL", Args: cobra.ExactArgs(2), RunE: runStreamFetch})
 	cmd.AddCommand(&cobra.Command{Use: "delete <id> <vid>", Short: "Delete a video", Args: cobra.ExactArgs(2), RunE: runStreamDelete})
+	cmd.AddCommand(&cobra.Command{Use: "resolutions <id> <vid>", Short: "List video resolutions", Args: cobra.ExactArgs(2), RunE: runStreamResolutions})
+	cmd.AddCommand(&cobra.Command{Use: "upload <id> <vid> <file>", Short: "Upload video file", Args: cobra.ExactArgs(3), RunE: runStreamUpload})
+	return cmd
+}
+
+func runStreamUpdate(cmd *cobra.Command, args []string) error {
+	c := bunnyClient()
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+	libID := parseInt64(args[0])
+	ak, err := c.GetLibraryAPIKey(ctx, libID)
+	if err != nil {
+		return err
+	}
+	title, _ := cmd.Flags().GetString("title")
+	v, err := c.UpdateVideo(ctx, libID, ak, args[1], map[string]any{"title": title})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("✓ Updated: %s\n", v.ID)
+	return nil
+}
+
+func runStreamResolutions(cmd *cobra.Command, args []string) error {
+	c := bunnyClient()
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+	libID := parseInt64(args[0])
+	ak, err := c.GetLibraryAPIKey(ctx, libID)
+	if err != nil {
+		return err
+	}
+	res, err := c.GetVideoResolutions(ctx, libID, ak, args[1])
+	if err != nil {
+		return err
+	}
+	for _, r := range res {
+		fmt.Printf("  %v\n", r)
+	}
+	return nil
+}
+
+func runStreamUpload(cmd *cobra.Command, args []string) error {
+	c := bunnyClient()
+	ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
+	defer cancel()
+	libID := parseInt64(args[0])
+	ak, err := c.GetLibraryAPIKey(ctx, libID)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(args[2])
+	if err != nil {
+		return fmt.Errorf("read file: %w", err)
+	}
+	url := fmt.Sprintf("https://video.bunnycdn.com/library/%d/videos/%s", libID, args[1])
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("upload request: %w", err)
+	}
+	req.Header.Set("AccessKey", ak)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("upload: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("upload: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	fmt.Printf("✓ Uploaded %s (%d bytes)\n", args[2], len(data))
+	return nil
+}
+
+func newBunnyStreamCollectionCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "collection", Short: "Manage video collections"}
+	cmd.AddCommand(&cobra.Command{Use: "list <id>", Short: "List collections", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
+		cl := bunnyClient()
+		ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+		defer cancel()
+		libID := parseInt64(a[0])
+		ak, err := cl.GetLibraryAPIKey(ctx, libID)
+		if err != nil {
+			return err
+		}
+		cols, err := cl.ListCollections(ctx, libID, ak)
+		if err != nil {
+			return err
+		}
+		for _, col := range cols {
+			fmt.Printf("%d  %s  videos=%d\n", col.ID, col.Name, col.VideoCount)
+		}
+		return nil
+	}})
+	cmd.AddCommand(&cobra.Command{Use: "create <id> <name>", Short: "Create collection", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, a []string) error {
+		cl := bunnyClient()
+		ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+		defer cancel()
+		libID := parseInt64(a[0])
+		ak, err := cl.GetLibraryAPIKey(ctx, libID)
+		if err != nil {
+			return err
+		}
+		col, err := cl.CreateCollection(ctx, libID, ak, a[1])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("✓ Collection created: %d\n", col.ID)
+		return nil
+	}})
+	cmd.AddCommand(&cobra.Command{Use: "delete <id> <col-id>", Short: "Delete collection", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, a []string) error {
+		cl := bunnyClient()
+		ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+		defer cancel()
+		libID := parseInt64(a[0])
+		ak, err := cl.GetLibraryAPIKey(ctx, libID)
+		if err != nil {
+			return err
+		}
+		return cl.DeleteCollection(ctx, libID, ak, parseInt64(a[1]))
+	}})
 	return cmd
 }
 
 func runStreamCreate(cmd *cobra.Command, args []string) error {
-	c := bunnyClient(); ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
-	libID := parseInt64(args[0]); ak, err := c.GetLibraryAPIKey(ctx, libID)
-	if err != nil { return err }
+	c := bunnyClient()
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+	libID := parseInt64(args[0])
+	ak, err := c.GetLibraryAPIKey(ctx, libID)
+	if err != nil {
+		return err
+	}
 	v, err := c.CreateVideo(ctx, libID, ak, args[1])
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	fmt.Printf("✓ Video created: GUID %s\nUpload URL: %s\n", v.GUID, v.UploadURL)
 	return nil
 }
 
 func runStreamList(cmd *cobra.Command, args []string) error {
-	c := bunnyClient(); ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
-	libID := parseInt64(args[0]); ak, err := c.GetLibraryAPIKey(ctx, libID)
-	if err != nil { return err }
+	c := bunnyClient()
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+	libID := parseInt64(args[0])
+	ak, err := c.GetLibraryAPIKey(ctx, libID)
+	if err != nil {
+		return err
+	}
 	videos, err := c.ListVideos(ctx, libID, ak, 1, 100)
-	if err != nil { return err }
-	if len(videos) == 0 { fmt.Println("No videos found."); return nil }
+	if err != nil {
+		return err
+	}
+	if len(videos) == 0 {
+		fmt.Println("No videos found.")
+		return nil
+	}
 	for _, v := range videos {
-		s := "queued"; switch v.Status { case 1: s = "processing"; case 2: s = "ready"; case 3: s = "failed" }
+		s := "queued"
+		switch v.Status {
+		case 1:
+			s = "processing"
+		case 2:
+			s = "ready"
+		case 3:
+			s = "failed"
+		}
 		fmt.Printf("%s  %s  [%s]  %ds  %dx%d\n", v.ID, v.Title, s, v.Length, v.Width, v.Height)
 	}
 	return nil
 }
 
 func runStreamGet(cmd *cobra.Command, args []string) error {
-	c := bunnyClient(); ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
-	libID := parseInt64(args[0]); ak, err := c.GetLibraryAPIKey(ctx, libID)
-	if err != nil { return err }
+	c := bunnyClient()
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+	libID := parseInt64(args[0])
+	ak, err := c.GetLibraryAPIKey(ctx, libID)
+	if err != nil {
+		return err
+	}
 	v, err := c.GetVideo(ctx, libID, ak, args[1])
-	if err != nil { return err }
-	s := "queued"; switch v.Status { case 1: s = "processing"; case 2: s = "ready"; case 3: s = "failed" }
+	if err != nil {
+		return err
+	}
+	s := "queued"
+	switch v.Status {
+	case 1:
+		s = "processing"
+	case 2:
+		s = "ready"
+	case 3:
+		s = "failed"
+	}
 	fmt.Printf("ID: %s\nTitle: %s\nStatus: %s\nCreated: %s\nLength: %ds\nSize: %dMB\nViews: %d\n", v.ID, v.Title, s, v.DateCreated, v.Length, v.StorageSize/1e6, v.Views)
 	return nil
 }
 
 func runStreamFetch(cmd *cobra.Command, args []string) error {
-	c := bunnyClient(); ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
-	libID := parseInt64(args[0]); ak, err := c.GetLibraryAPIKey(ctx, libID)
-	if err != nil { return err }
+	c := bunnyClient()
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+	libID := parseInt64(args[0])
+	ak, err := c.GetLibraryAPIKey(ctx, libID)
+	if err != nil {
+		return err
+	}
 	v, err := c.FetchVideo(ctx, libID, ak, args[1])
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	fmt.Printf("✓ Video fetching: %s\n", v.ID)
 	return nil
 }
 
 func runStreamDelete(cmd *cobra.Command, args []string) error {
-	c := bunnyClient(); ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
-	libID := parseInt64(args[0]); ak, err := c.GetLibraryAPIKey(ctx, libID)
-	if err != nil { return err }
+	c := bunnyClient()
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+	libID := parseInt64(args[0])
+	ak, err := c.GetLibraryAPIKey(ctx, libID)
+	if err != nil {
+		return err
+	}
 	return c.DeleteVideo(ctx, libID, ak, args[1])
 }
 
 func parseInt64(s string) int64 {
 	n, _ := strconv.ParseInt(s, 10, 64)
 	return n
+}
+
+// ============================================================================
+// bunny billing subcommands
+
+func newBunnyBillingCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "billing", Short: "View billing details and usage"}
+	cmd.AddCommand(&cobra.Command{Use: "show", Short: "Show billing details", Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			b, err := cl.GetBillingDetails(ctx)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Balance: $%.2f\n", b.Balance)
+			fmt.Printf("Available: $%.2f\n", b.AvailableBalance)
+			fmt.Printf("This Month Charges: $%.2f\n", b.ThisMonthCharges)
+			fmt.Printf("Bandwidth Used: %d GB\n", b.MonthlyBandwidthUsed/1e9)
+			fmt.Println("--- Per Service ---")
+			fmt.Printf("  CDN EU Traffic:    $%.2f\n", b.MonthlyChargesEUTraffic)
+			fmt.Printf("  CDN US Traffic:    $%.2f\n", b.MonthlyChargesUSTraffic)
+			fmt.Printf("  CDN Asia Traffic:  $%.2f\n", b.MonthlyChargesASIATraffic)
+			fmt.Printf("  Storage:           $%.2f\n", b.MonthlyChargesStorage)
+			fmt.Printf("  DNS:               $%.2f\n", b.MonthlyChargesDNS)
+			fmt.Printf("  Shield:            $%.2f\n", b.MonthlyChargesShield)
+			fmt.Printf("  Magic Containers:  $%.2f\n", b.MonthlyChargesMagicContainers)
+			fmt.Printf("  Edge Scripting:    $%.2f\n", b.MonthlyChargesScripting)
+			fmt.Printf("  Optimizer:         $%.2f\n", b.MonthlyChargesOptimizer)
+			fmt.Printf("  Transcribe:        $%.2f\n", b.MonthlyChargesTranscribe)
+			fmt.Printf("  Premium Encoding:  $%.2f\n", b.MonthlyChargesPremiumEncoding)
+			fmt.Printf("  DRM:               $%.2f\n", b.MonthlyChargesDrm)
+			fmt.Printf("  WebSockets:        $%.2f\n", b.MonthlyChargesWebSockets)
+			fmt.Printf("  DB:                $%.2f\n", b.MonthlyChargesDB)
+			fmt.Printf("  Taxes:             $%.2f\n", b.MonthlyChargesTaxes)
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{Use: "summary", Short: "Show billing summary per Pull Zone", Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			items, err := cl.GetBillingSummary(ctx)
+			if err != nil {
+				return err
+			}
+			for _, item := range items {
+				fmt.Printf("PullZone=%d  credits=%.4f  bandwidth=%dGB\n", item.PullZoneID, item.MonthlyUsage, item.MonthlyBandwidthUsed/1e9)
+			}
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{Use: "invoices", Short: "List pending payment requests", Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			reqs, err := cl.GetPaymentRequests(ctx)
+			if err != nil {
+				return err
+			}
+			for _, r := range reqs {
+				fmt.Printf("$%.2f  %s  paid=%v  %s\n", r.Amount, r.Description, r.Paid, r.Date)
+			}
+			return nil
+		},
+	})
+	return cmd
+}
+
+// ============================================================================
+// bunny statistics subcommands
+
+func newBunnyStatsCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "statistics", Short: "View CDN statistics and metrics"}
+	cmd.AddCommand(&cobra.Command{Use: "show", Short: "Show global CDN statistics", Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			s, err := cl.GetStatistics(ctx)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Total Bandwidth: %d GB\n", s.TotalBandwidthUsed/1e9)
+			fmt.Printf("Total Requests: %d\n", s.TotalRequestsServed)
+			fmt.Printf("Cache Hit Rate: %.2f%%\n", s.CacheHitRate)
+			fmt.Printf("Avg Origin Time: %.0fms\n", s.AverageOriginResponseTime)
+			fmt.Printf("Origin Traffic: %d GB\n", s.TotalOriginTraffic/1e9)
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{Use: "originshield <pullzone-id>", Short: "Show Origin Shield queue stats", Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			s, err := cl.GetOriginShieldQueueStatistics(ctx, parseInt64(a[0]))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Queue Size: %d\nRequests: %d\nAvg Wait: %dms\n", s.CurrentQueueSize, s.TotalRequests, s.AverageWaitTime)
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{Use: "safehop <pullzone-id>", Short: "Show SafeHop failover stats", Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			s, err := cl.GetSafeHopStatistics(ctx, parseInt64(a[0]))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Total Failovers: %d\nHealthy: %d\nUnhealthy: %d\n", s.TotalFailovers, s.HealthyOrigins, s.UnhealthyOrigins)
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{Use: "optimizer <pullzone-id>", Short: "Show Optimizer savings", Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			s, err := cl.GetOptimizerStatistics(ctx, parseInt64(a[0]))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Images Optimized: %d\nBytes Saved: %d MB\n", s.TotalImagesOptimized, s.TotalSavedBytes/1e6)
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{Use: "dns <zone-id>", Short: "Show DNS zone statistics", Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			s, err := cl.GetDNSZoneStatistics(ctx, parseInt64(a[0]))
+			if err != nil {
+				return err
+			}
+			for k, v := range *s {
+				fmt.Printf("%s: %v\n", k, v)
+			}
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{Use: "storage <zone-id>", Short: "Show storage zone statistics", Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			s, err := cl.GetStorageZoneStatistics(ctx, parseInt64(a[0]))
+			if err != nil {
+				return err
+			}
+			for k, v := range *s {
+				fmt.Printf("%s: %v\n", k, v)
+			}
+			return nil
+		},
+	})
+	return cmd
+}
+
+// ============================================================================
+// bunny logs subcommand
+
+func newBunnyLogsCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "logs", Short: "Query CDN logs"}
+	cmd.AddCommand(&cobra.Command{
+		Use: "query <pullzone-id> <from> <to>", Short: "Query CDN logs (ISO dates)",
+		Args: cobra.ExactArgs(3),
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 60*time.Second)
+			defer cancel()
+			pz := parseInt64(a[0])
+			from, err1 := time.Parse(time.RFC3339, a[1])
+			to, err2 := time.Parse(time.RFC3339, a[2])
+			if err1 != nil || err2 != nil {
+				return fmt.Errorf("dates must be ISO 8601, e.g. 2026-07-12T00:00:00Z")
+			}
+			res, err := cl.QueryCDNLogs(ctx, pz, from, to, bunny.CDNLogQuery{Limit: 10})
+			if err != nil {
+				return err
+			}
+			for _, e := range res.Data {
+				fmt.Printf("[%s] %d %s %s\n", e.Timestamp, e.StatusCode, e.CacheStatus, e.Path)
+			}
+			return nil
+		},
+	})
+	return cmd
+}
+
+// ============================================================================
+// bunny misc subcommands (country, region)
+
+func newBunnyMiscCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "country", Short: "List available countries"}
+	cmd.AddCommand(&cobra.Command{Use: "list", Short: "List all countries", Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			countries, err := cl.GetCountryList(ctx)
+			if err != nil {
+				return err
+			}
+			for _, c := range countries {
+				fmt.Printf("%s  %s  EU=%v  tax=%.0f%%\n", c.IsoCode, c.Name, c.IsEU, c.TaxRate*100)
+			}
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{Use: "regions", Short: "List CDN regions", Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, a []string) error {
+			cl := bunnyClient()
+			ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+			defer cancel()
+			regions, err := cl.GetRegionList(ctx)
+			if err != nil {
+				return err
+			}
+			for _, r := range regions {
+				fmt.Printf("%d  %s  $%.4f/GB  %s\n", r.ID, r.Name, r.PricePerGigabyte, r.RegionCode)
+			}
+			return nil
+		},
+	})
+	return cmd
 }
 
 // ============================================================================
@@ -1368,9 +1815,9 @@ func newBunnyShieldCmd() *cobra.Command {
 		Use: "zone-list", Short: "List Shield zones", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := bunnyClient()
-			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
 			defer cancel()
-			zones, err := c.ListShieldZones(ctx)
+			zones, err := c.ListShieldZoneConfigs(ctx)
 			if err != nil {
 				return err
 			}
@@ -1379,34 +1826,120 @@ func newBunnyShieldCmd() *cobra.Command {
 				return nil
 			}
 			for _, z := range zones {
-				fmt.Printf("%d  PullZone=%d  %s\n", z.ID, z.PullZoneID, z.Name)
+				fmt.Printf("Zone=%d  PullZone=%d  waf=%v  learning=%v\n", z.ID, z.PullZoneID, z.WafEnabled, z.LearningMode)
 			}
 			return nil
 		},
 	})
 
-	rateCmd := &cobra.Command{
-		Use: "rate-limit", Short: "Manage rate limits",
-	}
+	cmd.AddCommand(&cobra.Command{
+		Use: "zone-create <pullzone-id>", Short: "Create Shield zone for PullZone", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := bunnyClient()
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			z, err := c.CreateShieldZoneV2(ctx, bunny.CreateShieldZoneRequest{PullZoneID: parseInt64(args[0])})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Created Shield zone %d\n", z.ID)
+			return nil
+		},
+	})
 
+	cmd.AddCommand(&cobra.Command{
+		Use: "zone-delete <id>", Short: "Delete Shield zone", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := bunnyClient()
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			return c.DeleteShieldZone(ctx, parseInt64(args[0]))
+		},
+	})
+
+	wafCmd := &cobra.Command{Use: "waf", Short: "Manage WAF rules"}
+	wafCmd.AddCommand(&cobra.Command{
+		Use: "list <zone-id>", Short: "List WAF rules", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := bunnyClient()
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			rules, err := c.GetWAFRules(ctx, parseInt64(args[0]))
+			if err != nil {
+				return err
+			}
+			for _, r := range rules {
+				fmt.Printf("ID=%d  name=%s  action=%s  enabled=%v\n", r.ID, r.RuleName, r.ActionType, r.Enabled)
+			}
+			return nil
+		},
+	})
+	wafCmd.AddCommand(&cobra.Command{
+		Use: "profiles", Short: "List WAF profiles", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := bunnyClient()
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			profiles, err := c.ListWAFProfiles(ctx)
+			if err != nil {
+				return err
+			}
+			for _, p := range profiles {
+				fmt.Printf("%d  %s\n", p.ID, p.Name)
+			}
+			return nil
+		},
+	})
+	cmd.AddCommand(wafCmd)
+
+	rateCmd := &cobra.Command{Use: "rate-limit", Short: "Manage rate limits"}
 	rateCmd.AddCommand(&cobra.Command{
 		Use: "list <zone-id>", Short: "List rate limits", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := bunnyClient()
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
-			zoneID := parseInt64(args[0])
-			rules, err := c.ListRateLimits(ctx, zoneID)
+			rules, err := c.GetRateLimitsForZone(ctx, parseInt64(args[0]))
 			if err != nil {
 				return err
 			}
 			for _, r := range rules {
-				fmt.Printf("ID=%d  limit=%d  window=%ds  action=%s  path=%s\n", r.ID, r.RequestsLimit, r.WindowLength, r.Action, r.Path)
+				fmt.Printf("ID=%d  name=%s  blocked=%d  logged=%d\n", r.ID, r.RuleName, r.BlockedRequests, r.LoggedRequests)
 			}
 			return nil
 		},
 	})
-
 	cmd.AddCommand(rateCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use: "api-guardian <zone-id>", Short: "Show API Guardian config", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := bunnyClient()
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			cfg, err := c.GetAPIGuardian(ctx, parseInt64(args[0]))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Enabled=%v  Mode=%s  BodyLimit=%s\n", cfg.IsEnabled, cfg.ExecutionMode, cfg.BodyLimitAction)
+			return nil
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use: "bot-detection <zone-id>", Short: "Show bot detection config", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := bunnyClient()
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			cfg, err := c.GetBotDetectionConfig(ctx, parseInt64(args[0]))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Mode=%s  Sensitivity=%s\n", cfg.ExecutionMode, cfg.Sensitivity)
+			return nil
+		},
+	})
+
 	return cmd
 }
