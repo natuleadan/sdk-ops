@@ -204,6 +204,20 @@ Some Edge Scripting endpoints may require `Authorization: Bearer` instead of
 `AccessKey` header. If you get a 401, try using the dashboard or raw API
 with both header types.
 
+## Infrastructure Templates: Single Entrypoint Architecture
+
+Templates expose only the **entrypoint** port to the internet. Internal ports
+(primary, replica direct connections) are closed via iptables/nftables.
+
+| Template | Entrypoint | Internal ports closed |
+|----------|:----------:|:-------------------:|
+| `pg-dockerized` | 6432 (PgDog) | 5432, 5433, 5434 |
+| `kv-dockerized` | 6379 (HAProxy TLS) | 6380, 6381, 10001-10003 |
+| `libsql-dockerized` | 8443 (HAProxy TLS) | 8080, 8081, 8082, 5001 |
+
+All internal communication happens within the Docker network. Only the load
+balancer port is reachable from outside. This minimizes attack surface.
+
 ## Templates: Infrastructure Templates Are Docker Compose (Not deploy push)
 
 Templates like `pg-full-bm` and `kv-full-bm` are Docker Compose stacks, not

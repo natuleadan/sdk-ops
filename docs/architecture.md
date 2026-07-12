@@ -309,7 +309,7 @@ templates/
 │   ├── backup.sh        # BGSAVE → local + S3
 │   ├── restore.sh       # .dfs snapshot restore
 │   └── test/test.sh     # PITR integration test
-└── libsql-dockerized/     # (pending — upstream image bug)
+└── libsql-dockerized/     # libSQL + HAProxy TLS + WAL snapshots
 ```
 
 Infrastructure templates deploy via copy + `bash init.sh`, not `deploy push`:

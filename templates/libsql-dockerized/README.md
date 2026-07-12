@@ -1,13 +1,15 @@
 # libsql-dockerized — libSQL Full Stack
 
-libSQL (sqld) primary-replica cluster with TLS gRPC replication, WAL-based incremental snapshots, and optional MinIO.
+libSQL (sqld) cluster with 1 primary + 2 replicas, HAProxy TLS (single entrypoint), WAL-based incremental snapshots, and optional MinIO.
 
 ## Services
 
 | Role | Port | TLS | Description |
 |------|:----:|:---:|-------------|
-| **sqld-primary** | 8080 (HTTP), 5001 (gRPC) | ✅ gRPC | Read/write |
-| **sqld-replica** | 8081 (HTTP) | ✅ gRPC | Read-only |
+| **HAProxy** | **8443** | ✅ | **Entrypoint** — round_robin primary + rep-1 + rep-2 |
+| **sqld-primary** | 8080 (int) | ❌ | Read/write, gRPC :5001 |
+| **sqld-replica-1** | 8081 (int) | ❌ | Read-only, gRPC to primary |
+| **sqld-replica-2** | 8082 (int) | ❌ | Read-only, gRPC to primary |
 | **MinIO** | 9000/9001 | ❌ | S3 storage (profile: s3) |
 
 ## Quick start
@@ -20,11 +22,8 @@ bash init.sh
 ## Connect
 
 ```bash
-# HTTP API
-curl -d '{"statements":["SELECT * FROM items"]}' http://<VPS_IP>:8080
-
-# Vector search
-curl -d '{"statements":["SELECT content FROM items ORDER BY embedding MATCH vector('"'"'[0.1,0.2,0.3]'"'"') LIMIT 5"]}' http://<VPS_IP>:8080
+# Single entrypoint — HAProxy distributes via round-robin
+curl -d '{"statements":["SELECT * FROM items"]}' https://<VPS_IP>:8443
 ```
 
 ## Backups
@@ -33,8 +32,6 @@ curl -d '{"statements":["SELECT content FROM items ORDER BY embedding MATCH vect
 bash backup.sh              # Full .db + WAL snapshots
 bash backup-cron.sh          # Daily cron at 4 AM
 ```
-
-Automatic WAL snapshots every 30s via `--snapshot-exec` and `--max-log-duration=30`.
 
 ## Restore
 
@@ -67,27 +64,38 @@ bash test/test.sh       # PITR cycle: CREATE → INSERT → DROP → restore →
 ## Architecture
 
 ```
-┌──────────────────┐    gRPC (TLS)     ┌──────────────────┐
-│  sqld-primary     │◄──────────────────│  sqld-replica     │
-│  :8080 HTTP       │  WAL streaming    │  :8081 HTTP       │
-│  :5001 gRPC       │                   │  read-only        │
-│  snapshot_exec    │                   │                   │
-└──────────────────┘                   └──────────────────┘
+                           ┌──────────────┐
+                           │   Clients     │
+                           └──────┬───────┘
+                                  │ 8443 (único puerto expuesto, TLS)
+                           ┌──────▼───────┐
+                           │   HAProxy      │  round_robin
+                           │   TLS term     │  server primary
+                           │                │  server rep-1
+                           └──┬────────┬────┘  server rep-2
+                              │        │
+                     ┌────────▼──┐ ┌───▼──────┐ ┌───▼──────┐
+                     │ Primary    │ │ Rep-1    │ │ Rep-2    │
+                     │ :8080      │ │ :8081    │ │ :8082    │
+                     │ gRPC:5001  │ │ gRPC ↓   │ │ gRPC ↓   │
+                     └────────────┘ └──────────┘ └──────────┘
+                     WAL snapshots every 30s → ./backups/
 ```
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `docker-compose.yml` | sqld primary + replica + MinIO (profile: s3) |
-| `service.yaml` | Metadata for deploy |
-| `init.sh` | TLS certs + start + schema |
-| `validate.sh` | Health check (HTTP, SQL, vector, TLS) |
+| `docker-compose.yml` | sqld primary + 2 replicas + HAProxy + MinIO |
+| `Dockerfile` | Custom image (adds curl for health checks) |
+| `init.sh` | TLS + start + schema creation |
+| `validate.sh` | Health check (HTTP, SQL, vector, TLS via HAProxy) |
 | `backup.sh` | Copy .db + WAL snapshots |
 | `restore.sh` | Restore from .db backup (--yes flag) |
 | `backup-cron.sh` | Daily backup cron |
-| `gen-certs.sh` | Generate TLS certs for gRPC |
+| `haproxy.cfg` | Round-robin TLS termination |
+| `gen-certs.sh` | EC key generation + PEM for HAProxy |
 | `snapshot.sh` | Callback for --snapshot-exec |
 | `libsql-primary.conf` | Reference config for primary |
 | `libsql-replica.conf` | Reference config for replica |
-| `test/test.sh` | Integration test (PITR cycle) |
+| `test/test.sh` | PITR integration test |

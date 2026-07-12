@@ -1,14 +1,15 @@
 # pg-dockerized — PostgreSQL Full Stack
 
-PostgreSQL 18 + streaming replica + PgDog connection pooler (read/write split, LB) + SSL/TLS + pgbackrest backups + optional MinIO S3 storage.
+PostgreSQL 18 + 2 streaming replicas + PgDog connection pooler (read/write split, round_robin LB) + SSL/TLS + pgbackrest backups + optional MinIO S3.
 
 ## Services
 
 | Role | Port | TLS | Description |
 |------|:----:|:---:|-------------|
-| **PostgreSQL (primary)** | 5432 | ✅ | WAL archiving, pgbackrest |
-| **PostgreSQL (replica)** | 5433 | ✅ | Streaming standby, hot standby |
-| **PgDog** | 6432 | ✅ | LB round_robin, `exclude_primary`, `role=auto` |
+| **PgDog** | **6432** | ✅ | **Entrypoint** — LB round_robin, exclude_primary, role=auto |
+| **PostgreSQL (primary)** | 5432 (internal) | ✅ | WAL archiving, pgbackrest |
+| **PostgreSQL (replica-1)** | 5433 (internal) | ✅ | Streaming standby, hot standby |
+| **PostgreSQL (replica-2)** | 5434 (internal) | ✅ | Streaming standby, hot standby |
 | **MinIO** | 9000/9001 | ❌ | S3 storage (`--profile s3`) |
 
 ## Quick start
@@ -59,7 +60,8 @@ bash test/test.sh       # PITR cycle: backup → disaster → restore → verify
 | `PG_PASSWORD` | `devpass` | PostgreSQL password |
 | `PG_DATABASE` | `postgres` | Default database |
 | `PG_PORT` | `5432` | Primary port |
-| `PG_REPLICA_PORT` | `5433` | Replica port |
+| `PG_REPLICA_PORT` | `5433` | Replica-1 port (internal) |
+| `PG_REPLICA2_PORT` | `5434` | Replica-2 port (internal) |
 | `PGDOG_PORT` | `6432` | PgDog port |
 | `PGDOG_POOL_SIZE` | `20` | Connection pool size |
 | `REPLICATOR_PASSWORD` | `replicatorpass` | Replication user password |
@@ -74,19 +76,18 @@ bash test/test.sh       # PITR cycle: backup → disaster → restore → verify
                     ┌──────────────┐
                     │   Clients     │
                     └──────┬───────┘
-                           │ 6432
+                           │ 6432 (único puerto expuesto)
                     ┌──────▼───────┐
                     │   PgDog      │  LB round_robin
                     │  role=auto   │  exclude_primary
                     │  repl check  │  lsn_check_interval=1s
                     └──┬────────┬──┘
-                       │        │
-                ┌──────▼──┐ ┌──▼────────┐
-                │ Primary  │ │ Replica   │
-                │ :5432    │ │ :5433     │
-                │ pgbackrest│ │ streaming │
-                │ WAL arch │ │ standby   │
-                └────┬─────┘ └───────────┘
+                       │        │          ┌───────────┐
+                ┌──────▼──┐ ┌──▼────┐ ┌────▼──────────┐
+                │ Primary  │ │ Rep-1 │ │ Rep-2        │
+                │ :5432    │ │:5433  │ │ :5434        │
+                │ pgbackrest│ │stream │ │ stream      │
+                └────┬─────┘ └───────┘ └──────────────┘
                      │
               ┌──────▼──────┐
               │ pgbackrest   │
