@@ -349,7 +349,7 @@ func newInfraFirewallOpenCmd(f *infraFlags) *cobra.Command {
 
 func parsePorts(raw string) ([]int, error) {
 	var ports []int
-	for _, s := range strings.Split(raw, ",") {
+	for s := range strings.SplitSeq(raw, ",") {
 		p := 0
 		if _, err := fmt.Sscanf(strings.TrimSpace(s), "%d", &p); err != nil {
 			return nil, fmt.Errorf("invalid port: %q", s)

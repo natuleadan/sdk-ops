@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 
 	"github.com/vultr/govultr/v3"
 
@@ -22,7 +23,11 @@ func (c *Client) CreateK8s(ctx context.Context, cfg providers.K8sCreateConfig) (
 		}},
 	})
 	if resp != nil {
-		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("vultr: body close error: %v", err)
+			}
+		}()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create k8s: %w", err)
@@ -45,7 +50,11 @@ func (c *Client) DeleteK8s(ctx context.Context, id string) error {
 func (c *Client) ListK8s(ctx context.Context) ([]providers.K8sCluster, error) {
 	clusters, _, resp, err := c.client.Kubernetes.ListClusters(ctx, &govultr.ListOptions{})
 	if resp != nil {
-		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("vultr: body close error: %v", err)
+			}
+		}()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list k8s: %w", err)
@@ -62,7 +71,11 @@ func (c *Client) ListK8s(ctx context.Context) ([]providers.K8sCluster, error) {
 func (c *Client) GetK8s(ctx context.Context, id string) (*providers.K8sCluster, error) {
 	cl, resp, err := c.client.Kubernetes.GetCluster(ctx, id)
 	if resp != nil {
-		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("vultr: body close error: %v", err)
+			}
+		}()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr get k8s: %w", err)
@@ -73,7 +86,11 @@ func (c *Client) GetK8s(ctx context.Context, id string) (*providers.K8sCluster, 
 func (c *Client) GetKubeconfig(ctx context.Context, id string) (string, error) {
 	kc, resp, err := c.client.Kubernetes.GetKubeConfig(ctx, id)
 	if resp != nil {
-		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("vultr: body close error: %v", err)
+			}
+		}()
 	}
 	if err != nil {
 		return "", fmt.Errorf("vultr kubeconfig: %w", err)
@@ -89,13 +106,7 @@ func (c *Client) UpdateK8s(ctx context.Context, id, version string) (*providers.
 	if err != nil {
 		return nil, fmt.Errorf("vultr get upgrades: %w", err)
 	}
-	valid := false
-	for _, v := range upgrades {
-		if v == version {
-			valid = true
-			break
-		}
-	}
+	valid := slices.Contains(upgrades, version)
 	if !valid {
 		return nil, fmt.Errorf("vultr: version %s not in available upgrades: %v", version, upgrades)
 	}
@@ -128,7 +139,11 @@ func (c *Client) UninstallK8sAddon(ctx context.Context, id, addonID string) erro
 func (c *Client) ListK8sNodePools(ctx context.Context, id string) ([]providers.K8sNodePool, error) {
 	pools, _, resp, err := c.client.Kubernetes.ListNodePools(ctx, id, &govultr.ListOptions{})
 	if resp != nil {
-		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("vultr: body close error: %v", err)
+			}
+		}()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr list node pools: %w", err)
@@ -136,10 +151,10 @@ func (c *Client) ListK8sNodePools(ctx context.Context, id string) ([]providers.K
 	var result []providers.K8sNodePool
 	for _, p := range pools {
 		result = append(result, providers.K8sNodePool{
-			ID:    p.ID,
-			Name:  p.Label,
-			Plan:  p.Plan,
-			Nodes: p.NodeQuantity,
+			ID:     p.ID,
+			Name:   p.Label,
+			Plan:   p.Plan,
+			Nodes:  p.NodeQuantity,
 			Status: p.Status,
 		})
 	}
@@ -153,7 +168,11 @@ func (c *Client) CreateK8sNodePool(ctx context.Context, id string, cfg providers
 		Label:        cfg.Name,
 	})
 	if resp != nil {
-		defer func() { if err := resp.Body.Close(); err != nil { log.Printf("vultr: body close error: %v", err) } }()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("vultr: body close error: %v", err)
+			}
+		}()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vultr create node pool: %w", err)

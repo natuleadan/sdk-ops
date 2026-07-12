@@ -11,6 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.55.6
 	github.com/aws/aws-sdk-go-v2/service/route53 v1.63.5
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.104.2
+	github.com/civo/civogo v0.7.2
 	github.com/digitalocean/godo v1.197.0
 	github.com/hetznercloud/hcloud-go/v2 v2.44.0
 	github.com/robfig/cron/v3 v3.0.1
@@ -40,7 +41,6 @@ require (
 	github.com/aws/smithy-go v1.27.3 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/civo/civogo v0.7.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
