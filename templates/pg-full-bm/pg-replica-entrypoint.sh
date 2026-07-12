@@ -2,10 +2,6 @@
 # pg-full-bm replica entrypoint — clones primary via pg_basebackup, starts as standby
 set -e
 
-if ! command -v pgbackrest >/dev/null 2>&1; then
-  apk add --no-cache pgbackrest 2>&1 | tail -1
-fi
-
 mkdir -p /tmp/pgbackrest && chmod 777 /tmp/pgbackrest
 
 PGDATA="${PGDATA:-/var/lib/postgresql/18/docker}"
@@ -24,7 +20,7 @@ if [ ! -f "$PGDATA/PG_VERSION" ]; then
 primary_conninfo = 'host=$PRIMARY_HOST port=$PRIMARY_PORT user=replicator password=$REPLICATOR_PASSWORD sslmode=prefer'
 EOF
   chown -R 70:70 "$PGDATA"
-  chmod 755 "$(dirname "$PGDATA")"  # entrypoint re-execs as postgres, needs parent accessible
+  chmod 755 "$(dirname "$PGDATA")"
   echo "Replica: clone complete, starting standby"
 fi
 

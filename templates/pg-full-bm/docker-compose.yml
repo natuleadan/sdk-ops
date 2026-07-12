@@ -18,7 +18,7 @@ services:
       - default
 
   postgres:
-    image: postgres:18-alpine
+    build: .
     entrypoint: ["/usr/local/bin/pg-entrypoint.sh"]
     command:
       - postgres
@@ -62,7 +62,7 @@ services:
       - default
 
   pg-replica:
-    image: postgres:18-alpine
+    build: .
     entrypoint: ["/usr/local/bin/pg-replica-entrypoint.sh"]
     command:
       - postgres

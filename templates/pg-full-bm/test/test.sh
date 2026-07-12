@@ -79,11 +79,15 @@ docker run --rm \
   -v "$COMPOSE_DIR/data/pgbackrest:/var/lib/pgbackrest" \
   -v "$COMPOSE_DIR/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro" \
   -e PGPASSWORD="$PG_PASSWORD" \
-  postgres:18-alpine \
+  pg-full-bm:latest \
   sh -c "
-apk add --no-cache pgbackrest 2>&1 | tail -1
-pgbackrest --stanza=$STANZA --db-path=/var/lib/postgresql/18/docker --type=immediate restore 2>&1
+pgbackrest --stanza=$STANZA --db-path=/var/lib/postgresql/18/docker --type=none restore 2>&1
 rm -f /var/lib/postgresql/18/docker/postgresql.auto.conf
+rm -f /var/lib/postgresql/18/docker/backup_label
+rm -f /var/lib/postgresql/18/docker/recovery.signal
+chown -R postgres:postgres /var/lib/postgresql/18/docker 2>/dev/null
+su -s /bin/sh postgres -c 'pg_resetwal -f -D /var/lib/postgresql/18/docker' 2>/dev/null || \
+su -s /bin/sh postgres -c 'pg_reset_wal -f -D /var/lib/postgresql/18/docker' 2>/dev/null || true
 " 2>&1 | tail -3
 
 echo "  Starting PostgreSQL..."
