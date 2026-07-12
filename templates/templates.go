@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed pg-full-bm kv-full-bm libsql-full-bm
+//go:embed pg-dockerized kv-dockerized libsql-dockerized
 var infraTemplates embed.FS
 
 type Template struct {

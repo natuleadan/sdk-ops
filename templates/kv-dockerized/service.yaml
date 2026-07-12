@@ -1,0 +1,21 @@
+name: kv-dockerized
+description: Dragonfly KV cluster + replication + TLS + snapshot backups
+services:
+  - dragonfly-primary (KV store, cluster mode, TLS)
+  - dragonfly-replica (read-only replica, TLS replication)
+  - minio (optional S3-compatible storage via --profile s3)
+ports:
+  - "6379:6379"    # Primary (TLS)
+  - "6380:6380"    # Replica (TLS, read-only)
+  - "10001:10001"  # Admin primary (no TLS, LAN only)
+  - "10002:10002"  # Admin replica (no TLS, LAN only)
+env:
+  DF_PASSWORD: dragonfly
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  backup: bash backup.sh
+  restore: bash restore.sh [-y|--yes] <snapshot>
+  validate: bash validate.sh
