@@ -38,116 +38,93 @@ Or download a pre-built binary from the [releases page](https://github.com/natul
 sdk-ops config add-node 192.168.1.100 --user root --key ~/.ssh/id_ed25519
 ```
 
-### 2.2 Provision a fresh VPS
+### 2.2 Provision a VPS
 
 ```bash
 sdk-ops infra init 192.168.1.100              # hardening + Docker + k3s (default)
 sdk-ops infra init 192.168.1.100 --docker     # Docker only
 sdk-ops infra init 192.168.1.100 --bare       # Hardening only
-sdk-ops infra init --provider cubepath --plan gp.nano --location us-mia-1  # Create + provision
 ```
 
-### 2.3 Check the cluster
+### 2.3 Deploy a service
 
 ```bash
-sdk-ops infra status 192.168.1.100
+sdk-ops deploy init ./api --template go                  # Scaffold project
+sdk-ops deploy init ./api --template go --ci github      # + CI/CD pipeline
+sdk-ops deploy push ./api --node 192.168.1.100            # Deploy to VPS
+sdk-ops service rotate env api --name DB_URL --node ...   # Rotate env vars
 ```
 
-### 2.4 Deploy a service
-
-```bash
-sdk-ops deploy push ./my-service --node 192.168.1.100
-sdk-ops deploy push ./my-service --all              # deploy to all nodes
-```
-
-### 2.5 Operate the cluster
+### 2.4 Operate k3s cluster
 
 ```bash
 sdk-ops cluster nodes
 sdk-ops cluster pods
 sdk-ops cluster scale deploy/my-app --replicas 5
+sdk-ops infra status 192.168.1.100
 ```
 
-### 2.6 Manage firewall
+### 2.5 Manage firewall
 
 ```bash
-sdk-ops infra firewall open 8080 --node 192.168.1.100
+sdk-ops infra firewall open 8080,9090 --node 192.168.1.100
 sdk-ops infra firewall list --node 192.168.1.100
 ```
 
-### 2.7 Backup and restore
+### 2.6 Backup and restore
 
 ```bash
 sdk-ops infra backup 192.168.1.100
 sdk-ops infra restore 192.168.1.100 ./backup.tar.gz
 ```
 
-### 2.8 Deploy monitoring agent
+### 2.7 Monitoring agent
 
 ```bash
 sdk-ops agent install --node 192.168.1.100                  # systemd (default)
 sdk-ops agent install --node 192.168.1.100 --runtime docker  # Docker container
 sdk-ops agent status --node 192.168.1.100
-sdk-ops agent schedule add nightly --cron "0 3 * * *" --task shell --config "echo hello"
+sdk-ops status                                               # Unified dashboard
 ```
 
-### 2.9 Provision a database
+### 2.8 Provision a database
 
 ```bash
 sdk-ops db create postgres --name mydb --node 192.168.1.100
 sdk-ops db create redis --port 6379 --node 192.168.1.100
 ```
 
-### 2.10 Scaffold infrastructure templates
+### 2.9 Infrastructure templates
 
 ```bash
-sdk-ops deploy init ./pg --template pg-full-bm        # PostgreSQL 18 + PgDog + pgbackrest
-sdk-ops deploy init ./kv --template kv-full-bm        # Dragonfly KV + HAProxy TLS
+sdk-ops deploy init ./pg --template pg-full-bm     # PostgreSQL + PgDog + pgbackrest
+sdk-ops deploy init ./kv --template kv-full-bm     # Dragonfly KV + HAProxy TLS
 
-# Copy to VPS and init (not deploy push — these are Docker Compose stacks)
+# Copy to VPS and run init (these are Docker Compose stacks)
 scp -r ./pg root@<ip>:/root/pg
 ssh root@<ip> "cd /root/pg && bash init.sh"
 ```
 
-### 2.11 Rotate secrets
-
-```bash
-sdk-ops service rotate db my-postgres --type postgres --node 192.168.1.100
-sdk-ops service rotate env myservice --name API_KEY --node 192.168.1.100
-```
-
-### 2.11 Track resources
+### 2.10 Track resources
 
 ```bash
 sdk-ops state show
 sdk-ops state sync --node 192.168.1.100
+sdk-ops service rotate db my-postgres --type postgres --node ...
 ```
 
-### 2.12 Unified dashboard
-
-```bash
-sdk-ops status
-sdk-ops status --node 192.168.1.100
-```
-
-### 2.13 Adopt existing server
+### 2.11 Adopt existing server
 
 ```bash
 sdk-ops infra adopt 192.168.1.100 --force
 ```
 
-### 2.14 Generate CI/CD
+### 2.12 Multi-node operations
 
 ```bash
-sdk-ops deploy init ./app --template go --ci github
-```
-
-### 2.15 Manage Bunny.net services
-
-```bash
-sdk-ops bunny login                   # Verify API key
-sdk-ops bunny dns zone-list           # List DNS zones
-sdk-ops bunny app list                # List Magic Containers apps
+sdk-ops deploy push ./api --all            # Deploy to all registered nodes
+sdk-ops node list                           # List all nodes
+sdk-ops node exec --all "uptime"            # Run command on all nodes
 ```
 
 ## 3. Features
