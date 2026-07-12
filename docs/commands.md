@@ -358,10 +358,12 @@ sdk-ops deploy init ./my-app --template python-fastapi   # FastAPI + uvicorn
 sdk-ops deploy init ./my-app --template django           # Django + gunicorn
 sdk-ops deploy init ./pg --template pg-full-bm           # PostgreSQL + PgDog + pgbackrest
 sdk-ops deploy init ./kv --template kv-full-bm           # Dragonfly KV + HAProxy TLS
+sdk-ops deploy init ./ls --template libsql-full-bm        # libSQL + HAProxy TLS
 
 # Infrastructure templates deploy via docker compose (not deploy push)
 sdk-ops deploy init ./pg --template pg-full-bm
 sdk-ops deploy init ./kv --template kv-full-bm
+sdk-ops deploy init ./ls --template libsql-full-bm
 cp -r ./pg /root/pg
 ssh root@<ip> "cd /root/pg && bash init.sh"
 

@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed pg-full-bm kv-full-bm
+//go:embed pg-full-bm kv-full-bm libsql-full-bm
 var infraTemplates embed.FS
 
 type Template struct {
@@ -102,6 +102,12 @@ var Templates = map[string]Template{
 		Description: "Dragonfly KV cluster + replication + TLS + admin (bare metal)",
 		IsDir:       true,
 		DirName:     "kv-full-bm",
+	},
+	"libsql-full-bm": {
+		Name:        "libsql-full-bm",
+		Description: "libSQL (sqld) primary + replica + HAProxy TLS (bare metal)",
+		IsDir:       true,
+		DirName:     "libsql-full-bm",
 	},
 }
 
