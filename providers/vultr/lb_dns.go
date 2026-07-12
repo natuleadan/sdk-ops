@@ -179,15 +179,42 @@ func (c *Client) DeleteLBListener(ctx context.Context, lbID, listenerID string) 
 }
 
 func (c *Client) SetLBHealthCheck(ctx context.Context, lbID, listenerID string, cfg providers.LBHealthCheckConfig) error {
-	return fmt.Errorf("vultr: health checks are configured at LB level, not per-listener")
+	hc := &govultr.HealthCheck{
+		Protocol:           cfg.Protocol,
+		Port:               cfg.Port,
+		Path:               cfg.Path,
+		CheckInterval:      cfg.Interval,
+		ResponseTimeout:    cfg.Timeout,
+		UnhealthyThreshold: cfg.Retries,
+		HealthyThreshold:   cfg.Retries,
+	}
+	req := &govultr.LoadBalancerReq{HealthCheck: hc}
+	if err := c.client.LoadBalancer.Update(ctx, lbID, req); err != nil {
+		return fmt.Errorf("vultr set lb health check: %w", err)
+	}
+	return nil
 }
 
 func (c *Client) AddLBTarget(ctx context.Context, lbID, listenerID string, cfg providers.LBTargetConfig) (*providers.LBTarget, error) {
-	return nil, fmt.Errorf("vultr: LB targets managed via forwarding rules")
+	return nil, fmt.Errorf("vultr: LB targets managed via forwarding rules, not per-target")
 }
 
 func (c *Client) ListLBTargets(ctx context.Context, lbID, listenerID string) ([]providers.LBTarget, error) {
-	return nil, fmt.Errorf("vultr: LB targets managed via forwarding rules")
+	rules, _, resp, err := c.client.LoadBalancer.ListForwardingRules(ctx, lbID, &govultr.ListOptions{})
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("vultr list lb targets: %w", err)
+	}
+	var result []providers.LBTarget
+	for _, r := range rules {
+		result = append(result, providers.LBTarget{
+			ID:   r.RuleID,
+			Type: r.FrontendProtocol,
+		})
+	}
+	return result, nil
 }
 
 func (c *Client) DrainLBTarget(ctx context.Context, lbID, listenerID, targetID string) error {
