@@ -22,25 +22,23 @@ echo "User: $PG_USER  DB: $PG_DATABASE  Pool: $POOL_SIZE"
 # Create directories
 mkdir -p data/pg data/pg-replica data/pgbackrest ssl
 
-# Generate self-signed SSL certificates BEFORE starting PostgreSQL
+# Generate SSL certificates if missing
 if [ ! -f ssl/server.key ]; then
-  echo "Generating SSL certificates..."
-  openssl req -x509 -newkey rsa:4096 -keyout ssl/server.key -out ssl/server.crt \
-    -days 365 -nodes -subj "/CN=postgres" 2>/dev/null
-  chown 70:70 ssl/server.key ssl/server.crt 2>/dev/null
-  chmod 600 ssl/server.key
-  cp ssl/server.crt ssl/root.crt
-  echo "  SSL certs generated"
+  bash gen-certs.sh
+  # Fix permissions inside Docker (cross-platform)
+  docker run --rm -v "$(pwd)/ssl:/ssl" alpine sh -c '
+    chown -R 70:70 /ssl && chmod 600 /ssl/server.key && chmod 644 /ssl/server.crt
+  ' 2>/dev/null
 fi
 
-# Replace placeholders in config files
+# Replace placeholders in config files (cross-platform sed)
+_ni() { sed -i.bak "$1" "$2" && rm -f "${2}.bak"; }
 for f in pgdog.toml users.toml pgbackrest.conf; do
-  if [ -f "$f" ]; then
-    sed -i "s/PG_USER/$PG_USER/g" "$f"
-    sed -i "s/PG_PASSWORD/$PG_PASSWORD/g" "$f"
-    sed -i "s/PG_DATABASE/$PG_DATABASE/g" "$f"
-    sed -i "s/POOL_SIZE/$POOL_SIZE/g" "$f"
-  fi
+  [ -f "$f" ] || continue
+  _ni "s/PG_USER/$PG_USER/g" "$f"
+  _ni "s/PG_PASSWORD/$PG_PASSWORD/g" "$f"
+  _ni "s/PG_DATABASE/$PG_DATABASE/g" "$f"
+  _ni "s/POOL_SIZE/$POOL_SIZE/g" "$f"
 done
 
 # Configure pgbackrest storage backend
@@ -48,7 +46,7 @@ if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_BUCKET" ] && [ -n "$S3_KEY" ] && [ -n "$S3
   echo "Backup: S3 ($S3_ENDPOINT/$S3_BUCKET)"
   cat > pgbackrest.conf << EOF
 [pgbackrest]
-compress-type=gz
+compress-type=zst
 compress-level=3
 process-max=2
 start-fast=y
@@ -63,6 +61,17 @@ repo1-path=/var/lib/pgbackrest
 repo1-retention-full=2
 repo1-retention-diff=4
 repo1-cipher-type=none
+repo1-bundle=y
+repo1-block=y
+
+[global]
+spool-path=/var/spool/pgbackrest
+
+[global:archive-push]
+compress-level=1
+
+[global:archive-get]
+compress-level=1
 
 [main:storage]
 type=s3
@@ -107,8 +116,10 @@ docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" pgbackrest --stanza=main s
   docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" pgbackrest --stanza=main stanza-create 2>&1 | tail -1
 }
 
-# Fix ownership so postgres user (PID 70) can read/write repo for archive_command
+# Fix ownership so postgres user can read/write repo for archive_command
 docker exec "$CONTAINER" chown -R 70:70 /var/lib/pgbackrest 2>/dev/null
+# Fix SSL permissions inside container (in case bind mount preserved wrong perms)
+docker exec "$CONTAINER" chmod 600 /ssl/server.key 2>/dev/null
 
 # Start replica + pgdog (need replicator user + stanza first)
 echo "Starting services..."

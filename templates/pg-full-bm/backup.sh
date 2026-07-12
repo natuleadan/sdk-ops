@@ -29,12 +29,12 @@ docker exec "$CONTAINER" chown -R 70:70 /var/lib/pgbackrest 2>/dev/null
 # Run pgbackrest backup
 echo "Backing up (type=$TYPE, stanza=$STANZA)..."
 docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" \
-  pgbackrest --stanza="$STANZA" --type="$TYPE" backup 2>&1 || {
+  pgbackrest --stanza="$STANZA" --type="$TYPE" --no-archive-check backup 2>&1 || {
   # Retry with stanza-upgrade if system-id mismatch
   docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" \
     pgbackrest --stanza="$STANZA" stanza-upgrade 2>&1 | tail -1
   docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" \
-    pgbackrest --stanza="$STANZA" --type="$TYPE" backup 2>&1
+    pgbackrest --stanza="$STANZA" --type="$TYPE" --no-archive-check backup 2>&1
 }
 docker exec "$CONTAINER" chown -R 70:70 /var/lib/pgbackrest 2>/dev/null
 
