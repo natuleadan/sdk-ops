@@ -68,8 +68,10 @@ func getProvider() (providers.Provider, error) {
 		return newVultrProvider(apiKey)
 	case "aws":
 		return newAWSProvider()
+	case "civo":
+		return newCivoProvider(apiKey, pf.location)
 	default:
-		return nil, fmt.Errorf("unknown provider: %s (supported: cubepath, hetzner, digitalocean, vultr, aws)", pf.provider)
+		return nil, fmt.Errorf("unknown provider: %s (supported: cubepath, hetzner, digitalocean, vultr, aws, civo)", pf.provider)
 	}
 }
 

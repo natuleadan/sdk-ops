@@ -24,6 +24,7 @@ import (
 	"github.com/natuleadan/sdk-ops/plan"
 	"github.com/natuleadan/sdk-ops/providers"
 	"github.com/natuleadan/sdk-ops/providers/aws"
+	"github.com/natuleadan/sdk-ops/providers/civo"
 	"github.com/natuleadan/sdk-ops/providers/cubepath"
 	"github.com/natuleadan/sdk-ops/providers/digitalocean"
 	"github.com/natuleadan/sdk-ops/providers/hetzner"
@@ -1022,7 +1023,7 @@ Examples:
 	}
 }
 
-func getInfraProvider(name, apiKey string, projectID int) (providers.Provider, error) {
+func getInfraProvider(name, apiKey, location string, projectID int) (providers.Provider, error) {
 	switch name {
 	case "cubepath":
 		return newCubePathProvider(apiKey, projectID)
@@ -1034,8 +1035,10 @@ func getInfraProvider(name, apiKey string, projectID int) (providers.Provider, e
 		return newVultrProvider(apiKey)
 	case "aws":
 		return newAWSProvider()
+	case "civo":
+		return newCivoProvider(apiKey, location)
 	default:
-		return nil, fmt.Errorf("unsupported provider: %s (supported: cubepath, hetzner, digitalocean, vultr, aws)", name)
+		return nil, fmt.Errorf("unsupported provider: %s (supported: cubepath, hetzner, digitalocean, vultr, aws, civo)", name)
 	}
 }
 
@@ -1121,6 +1124,25 @@ func newAWSProvider() (providers.Provider, error) {
 	return aws.New(region, cfg), nil
 }
 
+func newCivoProvider(apiKey, region string) (providers.Provider, error) {
+	if apiKey == "" {
+		apiKey = os.Getenv("CIVO_API_KEY")
+	}
+	if apiKey == "" {
+		creds, _ := providers.LoadCredentials()
+		if creds != nil {
+			apiKey = creds.CivoAPIKey
+		}
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("CIVO_API_KEY required for civo")
+	}
+	if region == "" {
+		region = "LON1"
+	}
+	return civo.New(apiKey, region)
+}
+
 func infraSSHClient(ip, user string, port int, f infraFlags) *ssh.Client {
 	return newSSHClient(ip, user, port, f.key)
 }
@@ -1141,7 +1163,7 @@ func runInfraInit(ip string, f infraFlags) error {
 	}
 
 	if f.provider != "" {
-		p, err := getInfraProvider(f.provider, f.apiKey, f.projectID)
+		p, err := getInfraProvider(f.provider, f.apiKey, f.location, f.projectID)
 		if err != nil {
 			return err
 		}
