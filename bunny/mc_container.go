@@ -32,7 +32,7 @@ func (c *Client) DeleteContainerTemplate(ctx context.Context, appID, containerID
 }
 
 func (c *Client) SetContainerEnvVars(ctx context.Context, appID, containerID string, envs []EnvironmentVariable) error {
-	return c.Put(ctx, APIMC, fmt.Sprintf("/apps/%s/containers/%s/environment-variables", appID, containerID),
+	return c.Put(ctx, APIMC, fmt.Sprintf("/apps/%s/containers/%s/env", appID, containerID),
 		map[string]any{"environmentVariables": envs}, nil)
 }
 

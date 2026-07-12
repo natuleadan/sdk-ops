@@ -2,6 +2,7 @@ package bunny
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 )
 
@@ -81,6 +82,10 @@ func (c *Client) UndeployApp(ctx context.Context, appID string) error {
 
 func (c *Client) RestartApp(ctx context.Context, appID string) error {
 	return c.Post(ctx, APIMC, "/apps/"+appID+"/restart", nil, nil)
+}
+
+func (c *Client) RecreatePod(ctx context.Context, appID, podID string) error {
+	return c.Post(ctx, APIMC, fmt.Sprintf("/apps/%s/pods/%s/recreate", appID, podID), nil, nil)
 }
 
 func (c *Client) GetAppOverview(ctx context.Context, appID string) (*Overview, error) {

@@ -43,3 +43,12 @@ func (c *Client) ListNodes(ctx context.Context) ([]string, error) {
 	}
 	return resp.Items, nil
 }
+
+func (c *Client) ListNodesPlain(ctx context.Context) ([]string, error) {
+	var resp []string
+	err := c.Get(ctx, APIMC, "/nodes/plain", &resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}

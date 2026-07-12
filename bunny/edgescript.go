@@ -220,3 +220,56 @@ func (c *Client) GetEdgeScriptStatistics(ctx context.Context, id int64) (*EdgeSc
 	}
 	return &resp, nil
 }
+
+// --- Variables (individual) ---
+
+func (c *Client) GetEdgeScriptVariable(ctx context.Context, scriptID, varID int64) (*EdgeScriptVariable, error) {
+	var resp EdgeScriptVariable
+	err := c.Get(ctx, APICore, fmt.Sprintf("/compute/script/%d/variables/%d", scriptID, varID), &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *Client) UpdateEdgeScriptVariable(ctx context.Context, scriptID, varID int64, name, value string) (*EdgeScriptVariable, error) {
+	var resp EdgeScriptVariable
+	err := c.Post(ctx, APICore, fmt.Sprintf("/compute/script/%d/variables/%d", scriptID, varID),
+		EdgeScriptVariable{Name: name, Value: value}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// --- Secrets (individual) ---
+
+func (c *Client) UpdateEdgeScriptSecret(ctx context.Context, scriptID, secretID int64, name, value string) (*EdgeScriptSecret, error) {
+	var resp EdgeScriptSecret
+	err := c.Post(ctx, APICore, fmt.Sprintf("/compute/script/%d/secrets/%d", scriptID, secretID),
+		EdgeScriptSecret{Name: name, Value: value}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// --- Releases (list + publish by UUID) ---
+
+type ListReleasesResponse struct {
+	Items []EdgeScriptRelease `json:"Items,omitempty"`
+	Total int64               `json:"TotalItems,omitempty"`
+}
+
+func (c *Client) ListReleases(ctx context.Context, id int64) (*ListReleasesResponse, error) {
+	var resp ListReleasesResponse
+	err := c.Get(ctx, APICore, fmt.Sprintf("/compute/script/%d/releases", id), &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *Client) PublishReleaseByUUID(ctx context.Context, id int64, uuid string) error {
+	return c.Post(ctx, APICore, fmt.Sprintf("/compute/script/%d/publish/%s", id, uuid), nil, nil)
+}

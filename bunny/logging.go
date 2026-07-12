@@ -69,6 +69,37 @@ type QuerySummary struct {
 	Order      string `json:"order"`
 }
 
+func (c *Client) QueryLegacyLogs(ctx context.Context, date, pullZoneID string, opts map[string]string) (string, error) {
+	u := fmt.Sprintf("%s/%s/%s.log", LoggingAPIBase, date, pullZoneID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", fmt.Errorf("legacy logs request: %w", err)
+	}
+	q := req.URL.Query()
+	for k, v := range opts {
+		q.Set(k, v)
+	}
+	req.URL.RawQuery = q.Encode()
+	req.Header.Set("Accept", "text/plain")
+	if c.apiKey != "" {
+		req.Header.Set("AccessKey", c.apiKey)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("legacy logs do: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", fmt.Errorf("legacy logs: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("legacy logs read: %w", err)
+	}
+	return string(data), nil
+}
+
 func (c *Client) QueryCDNLogs(ctx context.Context, pullZoneID int64, from, to time.Time, opts CDNLogQuery) (*CDNLogResponse, error) {
 	u := fmt.Sprintf("%s/v2/pullzones/%d/logs?from=%s&to=%s",
 		LoggingAPIBase, pullZoneID,
