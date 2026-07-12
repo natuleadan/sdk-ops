@@ -91,23 +91,23 @@ var Templates = map[string]Template{
 			"project/wsgi.py":     djangoWsgi,
 		},
 	},
-	"pg-full-bm": {
-		Name:        "pg-full-bm",
-		Description: "PostgreSQL 18 + PgDog + SSL + pgbackrest (bare metal)",
+	"pg-dockerized": {
+		Name:        "pg-dockerized",
+		Description: "PostgreSQL 18 + PgDog + 2 replicas + pgbackrest",
 		IsDir:       true,
-		DirName:     "pg-full-bm",
+		DirName:     "pg-dockerized",
 	},
-	"kv-full-bm": {
-		Name:        "kv-full-bm",
-		Description: "Dragonfly KV cluster + replication + TLS + admin (bare metal)",
+	"kv-dockerized": {
+		Name:        "kv-dockerized",
+		Description: "Dragonfly KV cluster + 2 replicas + HAProxy TLS",
 		IsDir:       true,
-		DirName:     "kv-full-bm",
+		DirName:     "kv-dockerized",
 	},
-	"libsql-full-bm": {
-		Name:        "libsql-full-bm",
-		Description: "libSQL (sqld) primary + replica + HAProxy TLS (bare metal)",
+	"libsql-dockerized": {
+		Name:        "libsql-dockerized",
+		Description: "libSQL (sqld) primary + 2 replicas + HAProxy TLS",
 		IsDir:       true,
-		DirName:     "libsql-full-bm",
+		DirName:     "libsql-dockerized",
 	},
 }
 

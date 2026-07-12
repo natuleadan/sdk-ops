@@ -356,19 +356,19 @@ sdk-ops deploy init ./my-svc --template go              # Go HTTP server
 sdk-ops deploy init ./my-app --template nextjs           # Next.js (standalone)
 sdk-ops deploy init ./my-app --template python-fastapi   # FastAPI + uvicorn
 sdk-ops deploy init ./my-app --template django           # Django + gunicorn
-sdk-ops deploy init ./pg --template pg-full-bm           # PostgreSQL + PgDog + pgbackrest
-sdk-ops deploy init ./kv --template kv-full-bm           # Dragonfly KV + HAProxy TLS
-sdk-ops deploy init ./ls --template libsql-full-bm        # libSQL + HAProxy TLS
+sdk-ops deploy init ./pg --template pg-dockerized           # PostgreSQL + PgDog + pgbackrest
+sdk-ops deploy init ./kv --template kv-dockerized           # Dragonfly KV + HAProxy TLS
+sdk-ops deploy init ./ls --template libsql-dockerized        # libSQL + HAProxy TLS
 
 # Infrastructure templates deploy via docker compose (not deploy push)
-sdk-ops deploy init ./pg --template pg-full-bm
-sdk-ops deploy init ./kv --template kv-full-bm
-sdk-ops deploy init ./ls --template libsql-full-bm
+sdk-ops deploy init ./pg --template pg-dockerized
+sdk-ops deploy init ./kv --template kv-dockerized
+sdk-ops deploy init ./ls --template libsql-dockerized
 cp -r ./pg /root/pg
 ssh root@<ip> "cd /root/pg && bash init.sh"
 
 # Test interactively (requires running services):
-sdk-ops deploy init ./pg --template pg-full-bm --tested
+sdk-ops deploy init ./pg --template pg-dockerized --tested
 
 # Also generate CI/CD pipeline
 sdk-ops deploy init ./my-app --template go --ci github   # + .github/workflows/deploy.yml

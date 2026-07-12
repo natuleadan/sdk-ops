@@ -293,7 +293,7 @@ sdk-ops provides directory-based infrastructure templates under `templates/`:
 
 ```
 templates/
-├── pg-full-bm/         # PostgreSQL 18 + PgDog + pgbackrest + replica
+├── pg-dockerized/         # PostgreSQL 18 + PgDog + pgbackrest + replica
 │   ├── Dockerfile       # Custom image with pgbackrest pre-installed
 │   ├── docker-compose.yml
 │   ├── init.sh          # SSL + primary + replica + PgDog
@@ -302,20 +302,20 @@ templates/
 │   ├── validate.sh      # Health checks (inside Docker)
 │   ├── gen-certs.sh     # SSL certificate generation
 │   └── test/test.sh     # PITR integration test
-├── kv-full-bm/         # Dragonfly KV + HAProxy TLS + replica
+├── kv-dockerized/         # Dragonfly KV + HAProxy TLS + replica
 │   ├── docker-compose.yml
 │   ├── haproxy.cfg      # TLS termination (workaround for tini bug)
 │   ├── init.sh          # SSL + cluster + REPLICAOF
 │   ├── backup.sh        # BGSAVE → local + S3
 │   ├── restore.sh       # .dfs snapshot restore
 │   └── test/test.sh     # PITR integration test
-└── libsql-full-bm/     # (pending — upstream image bug)
+└── libsql-dockerized/     # (pending — upstream image bug)
 ```
 
 Infrastructure templates deploy via copy + `bash init.sh`, not `deploy push`:
 
 ```bash
-sdk-ops deploy init ./pg --template pg-full-bm
+sdk-ops deploy init ./pg --template pg-dockerized
 scp -r ./pg root@<ip>:/root/pg
 ssh root@<ip> "cd /root/pg && bash init.sh"
 ```

@@ -97,9 +97,9 @@ sdk-ops db create redis --port 6379 --node 192.168.1.100
 ### 2.9 Infrastructure templates
 
 ```bash
-sdk-ops deploy init ./pg --template pg-full-bm     # PostgreSQL + PgDog + pgbackrest
-sdk-ops deploy init ./kv --template kv-full-bm     # Dragonfly KV + HAProxy TLS
-sdk-ops deploy init ./ls --template libsql-full-bm  # libSQL + HAProxy TLS
+sdk-ops deploy init ./pg --template pg-dockerized     # PostgreSQL + PgDog + pgbackrest
+sdk-ops deploy init ./kv --template kv-dockerized     # Dragonfly KV + HAProxy TLS
+sdk-ops deploy init ./ls --template libsql-dockerized  # libSQL + HAProxy TLS
 
 # Copy to VPS and run init (these are Docker Compose stacks)
 scp -r ./pg root@<ip>:/root/pg
