@@ -224,6 +224,7 @@ func newConfigSetCredsCmd() *cobra.Command {
 				DigitalOceanToken: os.Getenv("DIGITALOCEAN_TOKEN"),
 				VultrAPIKey:       os.Getenv("VULTR_API_KEY"),
 				BunnyAPIKey:       os.Getenv("BUNNY_API_KEY"),
+				CivoAPIKey:        os.Getenv("CIVO_API_KEY"),
 				AWSRegion:         os.Getenv("AWS_REGION"),
 				AWSProfile:        os.Getenv("AWS_PROFILE"),
 			}

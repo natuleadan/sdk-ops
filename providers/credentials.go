@@ -13,6 +13,7 @@ type Credentials struct {
 	DigitalOceanToken  string `yaml:"digitalocean_token"`
 	VultrAPIKey        string `yaml:"vultr_api_key"`
 	BunnyAPIKey        string `yaml:"bunny_api_key"`
+	CivoAPIKey         string `yaml:"civo_api_key"`
 	AWSRegion          string `yaml:"aws_region"`
 	AWSProfile         string `yaml:"aws_profile"`
 }
