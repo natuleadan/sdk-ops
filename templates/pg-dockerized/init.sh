@@ -123,13 +123,15 @@ docker exec "$CONTAINER" chmod 600 /ssl/server.key 2>/dev/null
 
 # Start replica + pgdog (need replicator user + stanza first)
 echo "Starting services..."
-docker compose up -d pg-replica pgdog 2>&1 | tail -3
-echo "  Waiting for replica..."
+docker compose up -d pg-replica pg-replica-2 pgdog 2>&1 | tail -3
+echo "  Waiting for replicas..."
 sleep 10
-until docker exec -e PGPASSWORD="$PG_PASSWORD" pg-dockerized-pg-replica-1 pg_isready -U "$PG_USER" -h localhost 2>/dev/null; do
-  sleep 5
+for REP in pg-replica pg-replica-2; do
+  until docker compose exec -e PGPASSWORD="$PG_PASSWORD" "$REP" pg_isready -U "$PG_USER" -h localhost 2>/dev/null; do
+    sleep 5
+  done
+  echo "  $REP ready"
 done
-echo "  Replica ready"
 
 echo "✓ pg-dockerized ready"
 echo "  PG:      postgresql://$PG_USER:$PG_PASSWORD@localhost:5432/$PG_DATABASE?sslmode=require"

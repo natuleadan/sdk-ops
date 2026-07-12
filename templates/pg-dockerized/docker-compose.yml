@@ -13,6 +13,8 @@ services:
         condition: service_healthy
       pg-replica:
         condition: service_healthy
+      pg-replica-2:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - default
@@ -99,6 +101,50 @@ services:
         condition: service_healthy
     volumes:
       - ./data/pg-replica:/var/lib/postgresql
+      - ./ssl:/ssl:ro
+      - ./pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - ./pg-replica-entrypoint.sh:/usr/local/bin/pg-replica-entrypoint.sh:ro
+    networks:
+      - default
+
+  pg-replica-2:
+    build: .
+    entrypoint: ["/usr/local/bin/pg-replica-entrypoint.sh"]
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/ssl/server.crt
+      - -c
+      - ssl_key_file=/ssl/server.key
+      - -c
+      - hot_standby=on
+    environment:
+      POSTGRES_USER: ${PG_USER:-dev}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-devpass}
+      POSTGRES_DB: ${PG_DATABASE:-postgres}
+      PGDATA: /var/lib/postgresql/18/docker
+      PGPASSWORD: ${PG_PASSWORD:-devpass}
+      PRIMARY_HOST: postgres
+      PRIMARY_PORT: 5432
+      REPLICATOR_PASSWORD: ${REPLICATOR_PASSWORD:-replicatorpass}
+    ports:
+      - "${PG_REPLICA2_PORT:-5434}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-dev} -h localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./data/pg-replica-2:/var/lib/postgresql
       - ./ssl:/ssl:ro
       - ./pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
       - ./pg-replica-entrypoint.sh:/usr/local/bin/pg-replica-entrypoint.sh:ro

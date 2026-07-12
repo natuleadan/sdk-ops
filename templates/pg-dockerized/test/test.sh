@@ -121,9 +121,9 @@ PSQL -c "DROP TABLE IF EXISTS _pitr_test;" 2>/dev/null
 echo "  ✓ Test table dropped"
 
 # 10. Verify replication is still working
-echo "--- Step 10: Verify replica ---"
+echo "--- Step 10: Verify replicas ---"
 docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" psql -U "$PG_USER" -d "$PG_DATABASE" -h localhost -tAc \
-  "SELECT state FROM pg_stat_replication LIMIT 1" 2>/dev/null | grep -q "streaming" && echo "  ✓ Replication streaming" || echo "  WARN: Replication not streaming"
+  "SELECT state, count(*) FROM pg_stat_replication GROUP BY state" 2>/dev/null | grep -q "streaming" && echo "  ✓ Replicas streaming" || echo "  WARN: Replication not streaming"
 
 echo ""
 echo "=== pg-dockerized INTEGRATION TEST PASSED ==="

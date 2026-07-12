@@ -36,3 +36,9 @@ name = "PG_DATABASE"
 role = "auto"
 host = "pg-replica"
 port = 5432
+
+[[databases]]
+name = "PG_DATABASE"
+role = "auto"
+host = "pg-replica-2"
+port = 5432

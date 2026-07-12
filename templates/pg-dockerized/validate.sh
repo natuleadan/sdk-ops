@@ -15,8 +15,11 @@ echo "=== pg-dockerized validate ==="
 echo -n "Primary: "
 docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" pg_isready -U "$PG_USER" -h localhost -q && echo "OK" || echo "FAIL"
 
-echo -n "Replica: "
+echo -n "Replica-1: "
 docker exec -e PGPASSWORD="$PG_PASSWORD" pg-dockerized-pg-replica-1 pg_isready -U "$PG_USER" -h localhost -q && echo "OK" || echo "FAIL"
+
+echo -n "Replica-2: "
+docker exec -e PGPASSWORD="$PG_PASSWORD" pg-dockerized-pg-replica-2 pg_isready -U "$PG_USER" -h localhost -q && echo "OK" || echo "FAIL"
 
 echo -n "PgDog: "
 docker exec -e PGPASSWORD="$PG_PASSWORD" pg-dockerized-postgres-1 psql -U "$PG_USER" -h pgdog -p 6432 -d "$PG_DATABASE" -tAc "SELECT 1" 2>/dev/null | grep -q "1" && echo "OK" || echo "FAIL"
