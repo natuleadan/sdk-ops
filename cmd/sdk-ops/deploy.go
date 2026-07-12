@@ -661,14 +661,17 @@ func newDeployInitCmd() *cobra.Command {
 		Short: "Scaffold a new service from a template",
 		Long: `Generate project structure from a template.
 
-Templates:
+Application templates:
   html            Static HTML site with Nginx
-  node            Node.js Express app
+  node            Node.js Express app  
   wordpress       WordPress with MySQL
   go              Go HTTP server (multi-stage build)
   nextjs          Next.js app (standalone output)
   python-fastapi  FastAPI async Python app (uvicorn)
   django          Django project (gunicorn + settings)
+
+Infrastructure templates (Docker Compose services):
+  pg-full-bm     PostgreSQL 18 + PgDog + SSL + pgbackrest
 
 Run 'sdk-ops deploy init' without --template to list available templates.
 
@@ -707,13 +710,24 @@ Examples:
 				}
 				fmt.Printf("  → CI/CD: %s\n", ciType)
 			}
+
+			tested, _ := cmd.Flags().GetBool("tested")
+			if tested {
+				fmt.Printf("  → Running integration test...\n")
+				if err := templates.RunTest(tmpl, dir); err != nil {
+					return fmt.Errorf("test failed: %w", err)
+				}
+				fmt.Printf("  ✅ Integration test passed\n")
+			}
+
 			fmt.Printf("\n✅ %s scaffolded in %s\n", tmpl, dir)
 			fmt.Printf("   Edit service.yaml, then:\n")
 			fmt.Printf("   sdk-ops deploy push %s --node <ip>\n", dir)
 			return nil
 		},
 	}
-	initCmd.Flags().String("template", "", "Template name (html, node, wordpress, go)")
+	initCmd.Flags().String("template", "", "Template name (run 'deploy init --help' for list)")
+	initCmd.Flags().Bool("tested", false, "Run integration test after scaffold (requires deployed services)")
 	initCmd.Flags().String("name", "app", "Service name")
 	initCmd.Flags().String("ci", "", "Generate CI/CD config (github, gitlab)")
 	return initCmd
