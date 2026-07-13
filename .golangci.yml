@@ -22,8 +22,8 @@ linters:
 
   settings:
     gosec:
-      severity: medium
-      confidence: high
+      severity: low
+      confidence: low
     gocyclo:
       min-complexity: 15
 
