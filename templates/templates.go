@@ -180,7 +180,12 @@ func RunTest(name, dir string) error {
 	if _, err := os.Stat(testScript); err != nil {
 		return fmt.Errorf("test script not found: %s (run deploy init first)", testScript)
 	}
-	cmd := exec.CommandContext(context.Background(), "/bin/sh", testScript) //nolint:gosec
+	cleanScript := filepath.Clean(testScript)
+	cleanDir := filepath.Clean(dir)
+	if !strings.HasPrefix(cleanScript, cleanDir) {
+		return fmt.Errorf("test script path escapes template directory")
+	}
+	cmd := exec.CommandContext(context.Background(), "/bin/sh", cleanScript)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
