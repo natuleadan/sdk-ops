@@ -32,7 +32,4 @@ cross:
 	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o $(BINARY)-windows-amd64.exe ./cmd/sdk-ops/
 
 third-party:
-	@echo "Generating ThirdPartyNotices.txt..."
-	@go run github.com/google/go-licenses@latest csv ./... 2>/dev/null | grep -v "natuleadan" | \
-	  awk -F, '{printf "- %s (%s)\n  %s\n\n", $$1, $$3, $$2}' > ThirdPartyNotices.txt
-	@echo "Done"
+	@bash .github/scripts/generate-third-party.sh

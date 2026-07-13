@@ -12,11 +12,11 @@
   <br>
   <a href="https://pkg.go.dev/github.com/natuleadan/sdk-ops"><img src="https://img.shields.io/badge/Go-Reference-00ADD8?style=for-the-badge&logo=go"></a>
   <a href="https://golang.org"><img src="https://img.shields.io/github/go-mod/go-version/natuleadan/sdk-ops?style=for-the-badge&logo=go"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=for-the-badge"></a>
   <a href="https://conventionalcommits.org"><img src="https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg?style=for-the-badge"></a>
 </p>
 
-A CLI tool and Go SDK for provisioning, hardening, and operating VPS servers. Automates the full lifecycle: SSH-based hardening (nftables, fail2ban, kernel tuning), Docker/k3s installation, service deployment with auto-rollback, cluster management via kubectl, and cloud resource management across providers.
+An experimental CLI tool and Go SDK for provisioning, hardening, and operating VPS servers. Automates the full lifecycle: SSH-based hardening (nftables, fail2ban, kernel tuning), Docker/k3s installation, service deployment with auto-rollback, cluster management via kubectl, and cloud resource management across providers, currently in development.
 
 ---
 
@@ -565,4 +565,6 @@ All code must pass before commit. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
 
 ## 10. License
 
-This project is open source under the MIT License. See [LICENSE](LICENSE) for the full text.
+Apache 2.0 — see [LICENSE](LICENSE).
+
+This software is provided "as is", without warranty of any kind. Use at your own risk.

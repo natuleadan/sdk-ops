@@ -59,6 +59,14 @@ jobs:
             git diff --exit-code
           fi
 
+      - name: Check ThirdPartyNotices.txt is up to date
+        run: |
+          bash .github/scripts/generate-third-party.sh
+          if ! git diff --exit-code ThirdPartyNotices.txt; then
+            echo "❌ ThirdPartyNotices.txt is out of date. Run 'make third-party' and commit the result."
+            exit 1
+          fi
+
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
