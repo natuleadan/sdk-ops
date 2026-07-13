@@ -353,3 +353,32 @@ func (c *Client) DeleteCaption(ctx context.Context, libID int64, accessKey, vide
 	return c.streamDo(ctx, libID, accessKey, "DELETE",
 		fmt.Sprintf("/videos/%s/captions/%s", videoID, srclang), nil, nil)
 }
+
+// --- AI Features ---
+
+type TranscribeSettings struct {
+	TargetLanguages     []string `json:"targetLanguages,omitempty"`
+	GenerateTitle       *bool    `json:"generateTitle,omitempty"`
+	GenerateDescription *bool    `json:"generateDescription,omitempty"`
+	GenerateChapters    *bool    `json:"generateChapters,omitempty"`
+	GenerateMoments     *bool    `json:"generateMoments,omitempty"`
+	SourceLanguage      string   `json:"sourceLanguage,omitempty"`
+}
+
+type SmartGenerateModel struct {
+	GenerateTitle       *bool  `json:"generateTitle,omitempty"`
+	GenerateDescription *bool  `json:"generateDescription,omitempty"`
+	GenerateChapters    *bool  `json:"generateChapters,omitempty"`
+	GenerateMoments     *bool  `json:"generateMoments,omitempty"`
+	SourceLanguage      string `json:"sourceLanguage,omitempty"`
+}
+
+func (c *Client) TranscribeVideo(ctx context.Context, libID int64, accessKey, videoID string, force bool, settings *TranscribeSettings) error {
+	path := fmt.Sprintf("/videos/%s/transcribe?force=%t", videoID, force)
+	return c.streamDo(ctx, libID, accessKey, "POST", path, settings, nil)
+}
+
+func (c *Client) SmartGenerate(ctx context.Context, libID int64, accessKey, videoID string, model SmartGenerateModel) error {
+	return c.streamDo(ctx, libID, accessKey, "POST",
+		fmt.Sprintf("/videos/%s/smart", videoID), model, nil)
+}
