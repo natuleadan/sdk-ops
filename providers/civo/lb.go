@@ -86,6 +86,13 @@ func (c *Client) GetLB(ctx context.Context, id string) (*providers.LoadBalancer,
 	return result, nil
 }
 
+func toPort(n int) int32 {
+	if n < 0 || n > 65535 {
+		return 0
+	}
+	return int32(n)
+}
+
 func backendToConfig(b civogo.LoadBalancerBackend) civogo.LoadBalancerBackendConfig {
 	return civogo.LoadBalancerBackendConfig(b)
 }
@@ -98,7 +105,7 @@ func parsePort(id string) int32 {
 	for i := len(id) - 1; i >= 0; i-- {
 		if id[i] == ':' {
 			if p, err := strconv.Atoi(id[i+1:]); err == nil {
-				return int32(p)
+				return toPort(p)
 			}
 			break
 		}
@@ -117,8 +124,8 @@ func (c *Client) CreateLBListener(ctx context.Context, lbID string, cfg provider
 	}
 	backend := civogo.LoadBalancerBackendConfig{
 		Protocol:   prot,
-		SourcePort: int32(cfg.Port),
-		TargetPort: int32(cfg.TargetPort),
+		SourcePort: toPort(cfg.Port),
+		TargetPort: toPort(cfg.TargetPort),
 	}
 	var backends []civogo.LoadBalancerBackendConfig
 	for _, b := range lb.Backends {
@@ -129,7 +136,7 @@ func (c *Client) CreateLBListener(ctx context.Context, lbID string, cfg provider
 		return nil, err
 	}
 	return &providers.LBListener{
-		ID:         listenerID(lbID, int32(cfg.Port)),
+		ID:         listenerID(lbID, toPort(cfg.Port)),
 		Port:       cfg.Port,
 		TargetPort: cfg.TargetPort,
 		Protocol:   prot,
@@ -176,8 +183,8 @@ func (c *Client) UpdateLBListener(ctx context.Context, lbID, listenerID string, 
 		bcfg := backendToConfig(b)
 		if b.SourcePort == port {
 			bcfg.Protocol = prot
-			bcfg.SourcePort = int32(cfg.Port)
-			bcfg.TargetPort = int32(cfg.TargetPort)
+			bcfg.SourcePort = toPort(cfg.Port)
+			bcfg.TargetPort = toPort(cfg.TargetPort)
 		}
 		backends = append(backends, bcfg)
 	}
@@ -207,7 +214,7 @@ func (c *Client) AddLBTarget(ctx context.Context, lbID, listenerID string, cfg p
 		IP:         cfg.TargetID,
 		Protocol:   prot,
 		SourcePort: sp,
-		TargetPort: int32(cfg.Port),
+		TargetPort: toPort(cfg.Port),
 	}
 	var backends []civogo.LoadBalancerBackendConfig
 	for _, b := range lb.Backends {
