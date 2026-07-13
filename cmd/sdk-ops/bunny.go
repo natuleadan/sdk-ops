@@ -123,7 +123,7 @@ Region aliases:
 func bunnyClient() *bunny.Client {
 	key := bf.apiKey
 	if key == "" {
-		key = os.Getenv("BUNNY_API_KEY")
+			key = providers.LoadCredentialsFromEnv().BunnyAPIKey
 	}
 	if key == "" {
 		if creds, err := providers.LoadCredentials(); err == nil {

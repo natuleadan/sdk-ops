@@ -1081,7 +1081,7 @@ func newCubePathProvider(apiKey string, projectID int) (providers.Provider, erro
 
 func newHetznerProvider(apiKey string) (providers.Provider, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv("HETZNER_API_TOKEN")
+		apiKey = providers.LoadCredentialsFromEnv().HetznerAPIToken
 	}
 	if apiKey == "" {
 		creds, _ := providers.LoadCredentials()
@@ -1097,7 +1097,7 @@ func newHetznerProvider(apiKey string) (providers.Provider, error) {
 
 func newDigitalOceanProvider(apiKey string) (providers.Provider, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv("DIGITALOCEAN_TOKEN")
+		apiKey = providers.LoadCredentialsFromEnv().DigitalOceanToken
 	}
 	if apiKey == "" {
 		creds, _ := providers.LoadCredentials()
@@ -1113,7 +1113,7 @@ func newDigitalOceanProvider(apiKey string) (providers.Provider, error) {
 
 func newVultrProvider(apiKey string) (providers.Provider, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv("VULTR_API_KEY")
+		apiKey = providers.LoadCredentialsFromEnv().VultrAPIKey
 	}
 	if apiKey == "" {
 		creds, _ := providers.LoadCredentials()
@@ -1128,7 +1128,7 @@ func newVultrProvider(apiKey string) (providers.Provider, error) {
 }
 
 func newAWSProvider() (providers.Provider, error) {
-	region := os.Getenv("AWS_REGION")
+	region := providers.LoadCredentialsFromEnv().AWSRegion
 	if region == "" {
 		creds, _ := providers.LoadCredentials()
 		if creds != nil {
@@ -1147,7 +1147,7 @@ func newAWSProvider() (providers.Provider, error) {
 
 func newCivoProvider(apiKey, region string) (providers.Provider, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv("CIVO_API_KEY")
+		apiKey = providers.LoadCredentialsFromEnv().CivoAPIKey
 	}
 	if apiKey == "" {
 		creds, _ := providers.LoadCredentials()
