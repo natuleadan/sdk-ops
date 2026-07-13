@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"fmt"
@@ -185,8 +186,13 @@ func RunTest(name, dir string) error {
 	if !strings.HasPrefix(cleanScript, cleanDir) {
 		return fmt.Errorf("test script path escapes template directory")
 	}
-	cmd := exec.CommandContext(context.Background(), "/bin/sh", cleanScript)
+	data, err := os.ReadFile(cleanScript)
+	if err != nil {
+		return fmt.Errorf("read test script: %w", err)
+	}
+	cmd := exec.CommandContext(context.Background(), "/bin/sh")
 	cmd.Dir = dir
+	cmd.Stdin = bytes.NewReader(data)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
