@@ -628,24 +628,11 @@ sdk-ops db list [--node IP]                   # List databases on a node
 sdk-ops db remove <name> [--node IP]          # Remove a database
 ```
 
-## sdk-ops agent — On-VPS monitoring agent
+## sdk-ops agent — Remote daemon status
 
 ```bash
-sdk-ops agent install [--node IP] [flags]     # Deploy agent (systemd default)
-  --runtime string   Runtime: bare (default), docker
-sdk-ops agent status [--node IP]              # Check agent health
-sdk-ops agent logs [--node IP] [--tail N]     # Show agent logs
-sdk-ops agent uninstall [--node IP] [flags]   # Remove agent
-  --yes              Skip confirmation prompt
-  --purge            Also remove agent data (audit, metrics, schedules)
-sdk-ops agent update [--node IP] [flags]      # Check and apply update
-  --force            Rebuild even if no update
-sdk-ops agent schedule add <name> [flags]     # Add scheduled task
-  --cron string      Cron expression (required)
-  --task string      Task type: shell, backup-services, backup-database, docker-cleanup
-  --config string    Task configuration (JSON)
-sdk-ops agent schedule list [--node IP]       # List scheduled tasks
-sdk-ops agent schedule rm <id> [--node IP]    # Remove a scheduled task
+sdk-ops agent status [--node IP]              # Check daemon health
+sdk-ops agent status [--node IP] --agt    # Check remote daemon health (REST API)
 ```
 
 ## sdk-ops compose — Docker Compose management

@@ -19,7 +19,7 @@
 | Docker operations | `docker/` |
 | k3s operations | `k3s/` |
 | Deploy engine | `deploy/` |
-| Agent (on-VPS) | `agent/` |
+| Remote daemon | `--agt` flag (see commands docs) |
 | DB provisioning | `deploy/database.go` |
 | Secrets rotation | `deploy/rotate.go` |
 | State tracking | `cmd/sdk-ops/state.go` |
@@ -47,7 +47,7 @@
 ## Entrypoints
 
 - `cmd/sdk-ops/` — CLI entrypoint (Cobra command tree, 18 commands)
-- `agent/` — On-VPS monitoring agent (systemd or Docker, API :9000)
+
 - `server.go` / `config.go` — High-level `ops.Server` API + YAML config
 - `ssh/` — SSH client abstraction (public SDK)
 - `hardening/` — VPS hardening (packages → user → kernel → fail2ban → SSH → nftables → node_exporter)
@@ -78,6 +78,8 @@ CLI ──API──→ Create VPS ──user-data──→          Boot → clo
                                                   (hardening + Docker + k3s)
 ```
 
+
+
 ## Commands
 
 Full reference: `docs/commands.md`. Categories:
@@ -90,7 +92,7 @@ Full reference: `docs/commands.md`. Categories:
 | **TLS** | `infra cert install/info` |
 | **Logs** | `infra logs install/remove` |
 | **Alerts** | `infra alerts install/remove/rule add` |
-| **Operations** | `node list/info/top/exec`, `agent install/status/logs/update/schedule` |
+| **Operations** | `node list/info/top/exec`, `agent status` |
 | **Deploy** | `deploy init/push`, `deploy encrypt/decrypt`, `service status/logs/restart/rollback/rotate` |
 | **Cluster** | `cluster nodes/pods/.../token/events/helm/node-ssh` (29 commands) |
 | **Databases** | `db create/list/remove` (postgres, mysql, redis, mongodb) |

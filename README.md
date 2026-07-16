@@ -459,17 +459,6 @@ sdk-ops provider k8s delete <cluster-uuid>
 ## 9. Project Structure
 
 ```
-├── agent/                # On-VPS monitoring agent (systemd or Docker)
-│   ├── main.go           # Agent entrypoint: lifecycle + API server on :9000
-│   ├── api.go            # HTTP API: /health, /metrics, /schedules, /exec, /inventory
-│   ├── health.go         # 10 monitors: containers, disk, SSL, network, temperature
-│   ├── metrics.go        # CPU, RAM, disk, Docker stats collection
-│   ├── scheduler.go      # Cron scheduler (robfig/cron)
-│   ├── notify.go         # Notification sending from agent
-│   ├── events.go         # Docker event watcher + log pattern watcher
-│   ├── update.go         # Self-update from GitHub releases
-│   ├── config.go         # Agent config loading
-│   └── db.go             # SQLite storage (metrics, audit, schedules)
 ├── cmd/sdk-ops/          # CLI entrypoint (Cobra)
 │   ├── main.go           # Root command, 15 subcommands, newSSHClient
 │   ├── infra.go          # infra init/join/adopt/status/remove/backup/restore/firewall/cert/logs/alerts

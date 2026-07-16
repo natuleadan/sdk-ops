@@ -2,46 +2,35 @@
 
 ## Overview
 
-sdk-ops is a single binary CLI (`sdk-ops`) that provisions and operates servers via SSH. It has an optional on-VPS monitoring agent (systemd or Docker) for health checks, metrics, and scheduled tasks.
+sdk-ops is a CLI tool that provisions and operates servers via SSH.
 
 ```
-┌────────────────┐
+┌─────────────────┐
 │   sdk-ops CLI      │
-│  (your laptop) │
-└───────┬────────┘
+│  (your laptop)   │
+└───────┬──────────┘
         │ SSH (golang.org/x/crypto/ssh)
         ▼
 ┌───────────────────────────────────────┐
-│           VPS / Bare Metal            │
+│            VPS / Bare Metal            │
 │  ┌─────────┐  ┌──────┐  ┌─────────┐  │
 │  │ nftables │  │ k3s  │  │ Agent   │  │
 │  │ fail2ban │  │      │  │ :9000   │  │
-│  │ sysctl   │  │      │  │ 10 mon  │  │
-│  │ node_exp │  │ Docker│  │ SQLite  │  │
+│  │ sysctl   │  │      │  │         │  │
+│  │ node_exp │  │ Docker│  │         │  │
 │  └─────────┘  └──────┘  └─────────┘  │
 │                                       │
 │  /opt/sdk-ops/                        │
-│  ├── services/    ← deployed apps     │
-│  ├── agent-data/  ← metrics + audit   │
-│  ├── backups/     ← service backups   │
-│  └── logs/        ← service logs      │
+│  ├── services/                        │
+│  ├── backups/                         │
+│  └── logs/                            │
 └───────────────────────────────────────┘
 ```
 
 ## Package Structure (SDK)
 
-```
-agent/               ← On-VPS monitoring agent
-├── main.go          ← Entrypoint: lifecycle + API server (:9000)
-├── api.go           ← HTTP API: /health, /metrics, /audit, /schedules, /events, /exec, /inventory
-├── health.go        ← 10 monitors: containers, disk, SSL, network, temperature
-├── metrics.go       ← CPU, RAM, disk, Docker stats (gopsutil)
-├── scheduler.go     ← Cron scheduler (robfig/cron)
-├── notify.go        ← Notification sending from agent
-├── events.go        ← Docker event watcher + log pattern watcher
-├── update.go        ← GitHub release checker
-├── config.go        ← Config loading
-└── db.go            ← SQLite storage (metrics, audit, schedules, events)
+
+
 
 cmd/sdk-ops/          ← Cobra CLI root + all subcommands (18 commands)
 ├── main.go          ← Root command, 15 subcommands
