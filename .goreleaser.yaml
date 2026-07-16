@@ -25,12 +25,11 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+    files:
+      - ThirdPartyNotices.txt
 
 checksum:
   name_template: "checksums.txt"
-
-extra_files:
-  - glob: ThirdPartyNotices.txt
 
 changelog:
   use: github-native
