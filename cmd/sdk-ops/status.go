@@ -183,13 +183,18 @@ func statusFetchOne(nw nodeWork) statusResult {
 
 	agentOut, _, _ := ssh.Run(conn, `curl -s --max-time 3 http://localhost:9000/health 2>/dev/null || echo 'unreachable'`)
 	agentOut = strings.TrimSpace(agentOut)
-	switch {
-	case strings.Contains(agentOut, `"status":"ok"`):
+
+	// Fallback: check agt-swarm if agent is unreachable
+	if agentOut == "unreachable" {
+		agtOut, _, _ := ssh.Run(conn, `curl -s --max-time 3 http://127.0.0.1:44227/system/health 2>/dev/null || echo 'unreachable'`)
+		agtOut = strings.TrimSpace(agtOut)
+		if agtOut == "OK" {
+			r.agent = "healthy (agt)"
+		} else {
+			r.agent = "offline"
+		}
+	} else {
 		r.agent = "healthy"
-	case agentOut == "unreachable":
-		r.agent = "offline"
-	default:
-		r.agent = "unknown"
 	}
 
 	return r
