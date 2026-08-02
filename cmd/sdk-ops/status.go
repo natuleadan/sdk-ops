@@ -154,7 +154,11 @@ func statusFetchOne(nw nodeWork) statusResult {
 		r.err = fmt.Errorf("ssh: %w", err)
 		return r
 	}
-	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "status: conn close error: %v\n", err) } }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "status: conn close error: %v\n", err)
+		}
+	}()
 
 	r.hostname, _, err = ssh.Run(conn, "hostname 2>/dev/null | tr -d '\n'")
 	if err != nil {
@@ -201,7 +205,9 @@ func statusFetchOne(nw nodeWork) statusResult {
 }
 
 func statusRenderAll(c *cobra.Command, nodes []nodeWork, results []statusResult) {
-	if _, err := fmt.Fprintf(c.OutOrStdout(), "\n  %ssdk-ops status — %d node(s)%s\n\n", colorBold, len(nodes), colorReset); err != nil { log.Printf("status: write error: %v", err) }
+	if _, err := fmt.Fprintf(c.OutOrStdout(), "\n  %ssdk-ops status — %d node(s)%s\n\n", colorBold, len(nodes), colorReset); err != nil {
+		log.Printf("status: write error: %v", err)
+	}
 
 	totalServices := 0
 	healthyNodes := 0
@@ -211,10 +217,14 @@ func statusRenderAll(c *cobra.Command, nodes []nodeWork, results []statusResult)
 	for _, r := range results {
 		totalServices += len(r.services)
 
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s━━━ %s ━━━%s\n", colorCyan, r.ip, colorReset); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s━━━ %s ━━━%s\n", colorCyan, r.ip, colorReset); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 		if r.err != nil {
 			criticalNodes++
-			if _, fErr := fmt.Fprintf(c.OutOrStdout(), "  %s✗ %s%s\n\n", colorRed, r.err, colorReset); fErr != nil { log.Printf("status: write error: %v", fErr) }
+			if _, fErr := fmt.Fprintf(c.OutOrStdout(), "  %s✗ %s%s\n\n", colorRed, r.err, colorReset); fErr != nil {
+				log.Printf("status: write error: %v", fErr)
+			}
 			continue
 		}
 
@@ -232,7 +242,9 @@ func statusRenderAll(c *cobra.Command, nodes []nodeWork, results []statusResult)
 		default:
 			healthyNodes++
 		}
-		if _, err := fmt.Fprintln(c.OutOrStdout()); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintln(c.OutOrStdout()); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
 
 	statusRenderSummary(c, nodes, totalServices, healthyNodes, warnNodes, criticalNodes)
@@ -266,7 +278,9 @@ func statusRenderNodeHeader(c *cobra.Command, r statusResult) {
 	default:
 		hostLabel += fmt.Sprintf("  %sagent ?%s", colorYellow, colorReset)
 	}
-	if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s%s%s\n", colorBold, hostLabel, colorReset); err != nil { log.Printf("status: write error: %v", err) }
+	if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s%s%s\n", colorBold, hostLabel, colorReset); err != nil {
+		log.Printf("status: write error: %v", err)
+	}
 }
 
 func statusRenderNodeStats(c *cobra.Command, r statusResult) {
@@ -278,18 +292,28 @@ func statusRenderNodeStats(c *cobra.Command, r statusResult) {
 	memPct := parsePercent(s.Memory)
 	diskPct := parsePercentStr(s.Disk)
 
-	if _, err := fmt.Fprintf(c.OutOrStdout(), "  CPU:    %s%.0f%%%s  load: %s\n", colorForPct(cpuPct), cpuPct, colorReset, s.CPULoad); err != nil { log.Printf("status: write error: %v", err) }
+	if _, err := fmt.Fprintf(c.OutOrStdout(), "  CPU:    %s%.0f%%%s  load: %s\n", colorForPct(cpuPct), cpuPct, colorReset, s.CPULoad); err != nil {
+		log.Printf("status: write error: %v", err)
+	}
 	if s.MemUsed != "" && s.MemTotal != "" {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Mem:    %s%.0f%%%s  (%s / %s)\n", colorForPct(memPct), memPct, colorReset, s.MemUsed, s.MemTotal); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Mem:    %s%.0f%%%s  (%s / %s)\n", colorForPct(memPct), memPct, colorReset, s.MemUsed, s.MemTotal); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
 	if s.DiskUsed != "" && s.DiskSize != "" {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Disk:   %s%.0f%%%s  (%s / %s)\n", colorForPct(diskPct), diskPct, colorReset, s.DiskUsed, s.DiskSize); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Disk:   %s%.0f%%%s  (%s / %s)\n", colorForPct(diskPct), diskPct, colorReset, s.DiskUsed, s.DiskSize); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
 	if s.Kernel != "" {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Kernel: %s\n", s.Kernel); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Kernel: %s\n", s.Kernel); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
 	if s.Uptime != "" {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Uptime: %s\n", s.Uptime); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Uptime: %s\n", s.Uptime); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
 }
 
@@ -298,16 +322,22 @@ func statusRenderRuntime(c *cobra.Command, r statusResult) {
 		return
 	}
 	if r.rt.DockerVer != "" {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Docker: %s  (running: %s)\n", r.rt.DockerVer, r.rt.DockerOK); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Docker: %s  (running: %s)\n", r.rt.DockerVer, r.rt.DockerOK); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
 	if r.rt.K3sVersion != "" {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  k3s:    %s  (running: %s)\n", r.rt.K3sVersion, r.rt.K3sRunning); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  k3s:    %s  (running: %s)\n", r.rt.K3sVersion, r.rt.K3sRunning); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
 }
 
 func statusRenderServices(c *cobra.Command, r statusResult) {
 	if len(r.services) > 0 {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Services (%d):\n", len(r.services)); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Services (%d):\n", len(r.services)); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 		for i, svc := range r.services {
 			icon := "?"
 			svcColor := colorYellow
@@ -320,10 +350,14 @@ func statusRenderServices(c *cobra.Command, r statusResult) {
 					svcColor = colorRed
 				}
 			}
-			if _, err := fmt.Fprintf(c.OutOrStdout(), "    %s%s %s%s\n", svcColor, icon, svc, colorReset); err != nil { log.Printf("status: write error: %v", err) }
+			if _, err := fmt.Fprintf(c.OutOrStdout(), "    %s%s %s%s\n", svcColor, icon, svc, colorReset); err != nil {
+				log.Printf("status: write error: %v", err)
+			}
 		}
 	} else {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %sServices: none%s\n", colorYellow, colorReset); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %sServices: none%s\n", colorYellow, colorReset); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
 }
 
@@ -343,21 +377,35 @@ func statusClassifyNode(r statusResult) (crit, warn bool) {
 }
 
 func statusRenderSummary(c *cobra.Command, nodes []nodeWork, totalServices, healthyNodes, warnNodes, criticalNodes int) {
-	if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s━━━ Summary ━━━%s\n", colorBold, colorReset); err != nil { log.Printf("status: write error: %v", err) }
-	if _, err := fmt.Fprintf(c.OutOrStdout(), "  Nodes:    %d total\n", len(nodes)); err != nil { log.Printf("status: write error: %v", err) }
+	if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s━━━ Summary ━━━%s\n", colorBold, colorReset); err != nil {
+		log.Printf("status: write error: %v", err)
+	}
+	if _, err := fmt.Fprintf(c.OutOrStdout(), "  Nodes:    %d total\n", len(nodes)); err != nil {
+		log.Printf("status: write error: %v", err)
+	}
 	if healthyNodes > 0 {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s  %d healthy%s\n", colorGreen, healthyNodes, colorReset); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s  %d healthy%s\n", colorGreen, healthyNodes, colorReset); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
 	if warnNodes > 0 {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s  %d warning%s\n", colorYellow, warnNodes, colorReset); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s  %d warning%s\n", colorYellow, warnNodes, colorReset); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
 	if criticalNodes > 0 {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s  %d critical%s\n", colorRed, criticalNodes, colorReset); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s  %d critical%s\n", colorRed, criticalNodes, colorReset); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
 	if totalServices > 0 {
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Services: %d total\n", totalServices); err != nil { log.Printf("status: write error: %v", err) }
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  Services: %d total\n", totalServices); err != nil {
+			log.Printf("status: write error: %v", err)
+		}
 	}
-	if _, err := fmt.Fprintln(c.OutOrStdout()); err != nil { log.Printf("status: write error: %v", err) }
+	if _, err := fmt.Fprintln(c.OutOrStdout()); err != nil {
+		log.Printf("status: write error: %v", err)
+	}
 
 	if criticalNodes > 0 {
 		os.Exit(1)

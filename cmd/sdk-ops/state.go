@@ -98,7 +98,9 @@ func stateRecord(resType, name, nodeIP, version, runtime, status string, meta ma
 			Metadata:  meta,
 		})
 	}
-	if err := saveState(s); err != nil { log.Printf("state: save error: %v", err) }
+	if err := saveState(s); err != nil {
+		log.Printf("state: save error: %v", err)
+	}
 }
 
 func newStateCmd() *cobra.Command {
@@ -246,7 +248,11 @@ func syncSingleNode(nt syncNodeTask, mu *sync.Mutex) int {
 		fmt.Printf("  %s✗ %s: ssh failed%s\n", colorRed, nt.ip, colorReset)
 		return 0
 	}
-	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "state: conn close error: %v\n", err) } }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "state: conn close error: %v\n", err)
+		}
+	}()
 
 	dockerOK := ""
 	k3sOK := ""

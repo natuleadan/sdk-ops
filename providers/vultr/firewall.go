@@ -3,9 +3,91 @@ package vultr
 import (
 	"context"
 	"fmt"
+	"net"
+	"strings"
 
 	"github.com/vultr/govultr/v3"
 )
+
+// allowlistGroupDescription identifies the firewall group managed by sdk-ops.
+const allowlistGroupDescription = "sdk-ops-allowlist"
+
+// SyncFirewallAllowlist replaces the 80/443 cloud firewall rules with the
+// given IPv4 and IPv6 CIDR allowlists. Creates the managed firewall group on
+// first run.
+func (c *Client) SyncFirewallAllowlist(ctx context.Context, v4, v6 []string) error {
+	groupID, err := c.ensureAllowlistGroup(ctx)
+	if err != nil {
+		return err
+	}
+
+	rules, err := c.ListFirewallRules(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	for _, r := range rules {
+		if err := c.DeleteFirewallRule(ctx, groupID, r.ID); err != nil {
+			return fmt.Errorf("vultr delete firewall rule %d: %w", r.ID, err)
+		}
+	}
+
+	type entry struct {
+		subnet string
+		size   int
+		ipType string
+	}
+	var entries []entry
+	for _, cidr := range append(append([]string{}, v4...), v6...) {
+		ip, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			ip = net.ParseIP(cidr)
+			if ip == nil {
+				return fmt.Errorf("vultr firewall: invalid CIDR %q", cidr)
+			}
+			ones, bits := 32, 32
+			if ip.To4() == nil {
+				ones, bits = 128, 128
+			}
+			ipNet = &net.IPNet{IP: ip, Mask: net.CIDRMask(ones, bits)}
+		}
+		if ip.To4() != nil {
+			entries = append(entries, entry{subnet: ipNet.IP.String(), size: cidrBits(ipNet.Mask), ipType: "v4"})
+		} else {
+			entries = append(entries, entry{subnet: ipNet.IP.String(), size: cidrBits(ipNet.Mask), ipType: "v6"})
+		}
+	}
+
+	for _, e := range entries {
+		for _, port := range []string{"80", "443"} {
+			if _, err := c.CreateFirewallRule(ctx, groupID, e.ipType, "tcp", e.subnet, port, "sdk-ops allowlist", "", e.size); err != nil {
+				return fmt.Errorf("vultr create firewall rule: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Client) ensureAllowlistGroup(ctx context.Context) (string, error) {
+	groups, err := c.ListFirewallGroups(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, g := range groups {
+		if strings.TrimSpace(g.Description) == allowlistGroupDescription {
+			return g.ID, nil
+		}
+	}
+	g, err := c.CreateFirewallGroup(ctx, allowlistGroupDescription)
+	if err != nil {
+		return "", err
+	}
+	return g.ID, nil
+}
+
+func cidrBits(mask net.IPMask) int {
+	ones, _ := mask.Size()
+	return ones
+}
 
 type FirewallGroup struct {
 	ID        string `json:"id"`

@@ -40,6 +40,7 @@ func Apply(client *goss.Client, cfg Config) error {
 		label string
 		fn    func(*goss.Client, Config) error
 	}{
+		{"swap", setupSwap},
 		{"install_packages", installPackages},
 		{"create_user", createUser},
 		{"kernel_tuning", kernelTuning},
@@ -68,9 +69,12 @@ func Apply(client *goss.Client, cfg Config) error {
 }
 
 func Check(client *goss.Client) (string, error) {
+	// Allowlist-aware: when the provider allowlist is installed, the input
+	// chain is gated by allow4/admin4 sets instead of plain dport rules, so
+	// the port checks adapt to the active firewall profile.
 	checks := []string{
 		"sudo systemctl is-active nftables --quiet && echo 'nftables: OK' || echo 'nftables: MISSING'",
-		"sudo nft list table inet filter 2>/dev/null | grep -q 'tcp dport 6443' && echo 'nftables-6443: OK' || echo 'nftables-6443: MISSING'; sudo nft list table inet filter 2>/dev/null | grep -q 'tcp dport 22' && echo 'nftables-22: OK' || echo 'nftables-22: MISSING'",
+		"if sudo nft list table inet filter 2>/dev/null | grep -q 'set allow4'; then echo 'allowlist: installed'; sudo nft list table inet filter 2>/dev/null | grep -q 'ip saddr @allow4 accept' && echo 'allowlist-gate4: OK' || echo 'allowlist-gate4: MISSING'; sudo nft list table inet filter 2>/dev/null | grep -q 'ip6 saddr @allow6 accept' && echo 'allowlist-gate6: OK' || echo 'allowlist-gate6: MISSING'; else echo 'allowlist: not installed'; sudo nft list table inet filter 2>/dev/null | grep -q 'tcp dport 6443' && echo 'nftables-6443: OK' || echo 'nftables-6443: MISSING'; sudo nft list table inet filter 2>/dev/null | grep -q 'tcp dport 22' && echo 'nftables-22: OK' || echo 'nftables-22: MISSING'; fi",
 		"sudo systemctl is-active fail2ban --quiet && echo 'fail2ban: OK' || echo 'fail2ban: MISSING'",
 		"sudo systemctl is-active ssh 2>/dev/null || sudo systemctl is-active sshd --quiet && echo 'sshd: OK' || echo 'sshd: MISSING'",
 		"sudo grep -q '^PasswordAuthentication no' /etc/ssh/sshd_config && echo 'pw-auth: OK' || echo 'pw-auth: FAIL'",

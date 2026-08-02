@@ -46,3 +46,43 @@ load setup
   # May fail if k3s is not installed (non-zero exit is OK)
   echo "$output"
 }
+
+# NOTE: cf-strict is intentionally NOT tested here — it locks SSH to the
+# allowlist and must only be exercised manually with --yes and a reachable
+# admin IP.
+
+@test "firewall allowlist: cf-normal installs and gates ports" {
+  run sdk_ssh infra firewall cf-normal --source cf --node "$TEST_IP"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "allowlist updated"
+  echo "$output" | grep -q "allow4"
+}
+
+@test "firewall allowlist: status shows last sync" {
+  run sdk_ssh infra firewall allowlist status --node "$TEST_IP"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "last_sync"
+}
+
+@test "firewall allowlist: refresh keeps SSH reachable" {
+  run sdk_ssh infra firewall allowlist refresh --node "$TEST_IP"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "allowlist updated"
+  run sdk_ssh node exec "$TEST_IP" -- hostname
+  [ "$status" -eq 0 ]
+}
+
+@test "firewall allowlist: admin add + remove" {
+  run sdk_ssh infra firewall allowlist admin add "203.0.113.99" --node "$TEST_IP"
+  [ "$status" -eq 0 ]
+  run sdk_ssh infra firewall allowlist admin remove "203.0.113.99" --node "$TEST_IP"
+  [ "$status" -eq 0 ]
+}
+
+@test "firewall allowlist: remove restores pre-allowlist config" {
+  run sdk_ssh infra firewall allowlist remove --node "$TEST_IP"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "allowlist removed"
+  run sdk_ssh infra firewall list --node "$TEST_IP"
+  [ "$status" -eq 0 ]
+}

@@ -39,7 +39,11 @@ func newBackupCreateCmd(user, key *string, port *int) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err)
+				}
+			}()
 
 			path, err := deploy.BackupServices(conn, ".")
 			if err != nil {
@@ -94,7 +98,11 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err)
+				}
+			}()
 
 			path, err := deploy.BackupDatabase(conn, dbType, dbName, containerName, ".")
 			if err != nil {
@@ -160,7 +168,11 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err)
+				}
+			}()
 
 			var s3Cfg *deploy.S3Config
 			if envCfg := deploy.S3ConfigFromEnv(); envCfg.Bucket != "" {
@@ -171,9 +183,14 @@ Examples:
 				return err
 			}
 			stateRecord("backup_schedule", string(backupType), nodeIP, cronExpr, "", "active", map[string]string{
-				"db_name":    dbName,
-				"container":  containerName,
-				"s3_bucket":  func() string { if s3Cfg != nil { return s3Cfg.Bucket }; return "" }(),
+				"db_name":   dbName,
+				"container": containerName,
+				"s3_bucket": func() string {
+					if s3Cfg != nil {
+						return s3Cfg.Bucket
+					}
+					return ""
+				}(),
 			})
 			fmt.Printf("✅ Backup scheduled\n")
 			return nil
@@ -214,7 +231,11 @@ func newBackupUnscheduleCmd(user, key *string, port *int) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err)
+				}
+			}()
 
 			return deploy.UnscheduleBackup(conn, backupType)
 		},
@@ -242,7 +263,11 @@ func newBackupListSchedulesCmd(user, key *string, port *int) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err)
+				}
+			}()
 
 			schedules, err := deploy.ListBackupSchedules(conn)
 			if err != nil {
@@ -278,7 +303,11 @@ func newBackupRestoreCmd(user, key *string, port *int) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("ssh: %w", err)
 			}
-			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err) } }()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "backup: conn close error: %v\n", err)
+				}
+			}()
 
 			if err := deploy.RestoreServices(conn, args[1]); err != nil {
 				return err

@@ -59,3 +59,12 @@ type Provider interface {
 	ListSSHKeys(ctx context.Context) ([]SSHKey, error)
 	DeleteSSHKey(ctx context.Context, id string) error
 }
+
+// CloudFirewall is an optional capability implemented by providers that can
+// sync an IP allowlist into their own cloud firewall. Providers that do not
+// implement it are skipped with a warning by the CLI.
+type CloudFirewall interface {
+	// SyncFirewallAllowlist replaces the provider cloud firewall rules for
+	// ports 80/443 with the given IPv4 and IPv6 CIDR allowlists.
+	SyncFirewallAllowlist(ctx context.Context, v4, v6 []string) error
+}

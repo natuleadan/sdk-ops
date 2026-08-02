@@ -15,13 +15,11 @@ import (
 	golang_ssh "golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 
-	"github.com/natuleadan/sdk-ops/cloudinit"
 	"github.com/natuleadan/sdk-ops/deploy"
 	"github.com/natuleadan/sdk-ops/docker"
 	"github.com/natuleadan/sdk-ops/hardening"
 	"github.com/natuleadan/sdk-ops/hooks"
 	"github.com/natuleadan/sdk-ops/k3s"
-	"github.com/natuleadan/sdk-ops/plan"
 	"github.com/natuleadan/sdk-ops/providers"
 	"github.com/natuleadan/sdk-ops/providers/aws"
 	"github.com/natuleadan/sdk-ops/providers/civo"
@@ -33,22 +31,23 @@ import (
 )
 
 type infraFlags struct {
-	user          string
-	key           string
-	port          int
-	mode          string // k3s, docker, bare
-	crowdsec      bool
-	cloudInit     bool
-	cloudInitOnly bool
-	airgap        bool
-	monitor       bool
-	auditd        bool
-	lynis         bool
-	usg           bool
-	lockRoot      bool
-	hardSSHPort   int
-	logsURL       string
-	alertsURL     string
+	user              string
+	key               string
+	port              int
+	mode              string // k3s, docker, bare
+	crowdsec          bool
+	airgap            bool
+	monitor           bool
+	auditd            bool
+	lynis             bool
+	usg               bool
+	lockRoot          bool
+	hardSSHPort       int
+	logsURL           string
+	alertsURL         string
+	firewallAllowlist string
+	adminIPs          string
+	noTraefik         bool
 	// k3s-specific
 	disableTraefik        bool
 	secretsEncryption     bool
@@ -92,13 +91,13 @@ func newInfraCmd() *cobra.Command {
 	cmd.AddCommand(newInfraAdoptCmd(&f))
 	cmd.AddCommand(newInfraRemoveCmd(&f))
 	cmd.AddCommand(newInfraFirewallCmd(&f))
+	cmd.AddCommand(newSwapCmd(&f))
 	cmd.AddCommand(newInfraBackupCmd(&f))
 	cmd.AddCommand(newInfraRestoreCmd(&f))
 	cmd.AddCommand(newInfraCertCmd(&f))
 	cmd.AddCommand(newInfraLogsCmd(&f))
 	cmd.AddCommand(newInfraAlertsCmd(&f))
-	cmd.AddCommand(planCmd())
-	cmd.AddCommand(applyCmd())
+	cmd.AddCommand(newProvisionCmd())
 	cmd.AddCommand(proxyCmd)
 
 	return cmd
@@ -154,6 +153,9 @@ Examples:
 	cmd.Flags().IntVar(&f.hardSSHPort, "ssh-port", 0, "Migrate SSH to custom port (0=keep port 22)")
 	cmd.Flags().StringVar(&f.logsURL, "logs", "", "Install Promtail and ship logs to this Loki URL")
 	cmd.Flags().StringVar(&f.alertsURL, "alerts", "", "Install Alertmanager with this Slack webhook URL")
+	cmd.Flags().StringVar(&f.firewallAllowlist, "firewall-allowlist", "", "Install provider IP allowlist after hardening: cf, url:<url>, dns:<fqdn>, or strict / strict:<source>")
+	cmd.Flags().StringVar(&f.adminIPs, "admin-ips", "", "Explicit admin IPs/CIDRs for the allowlist (comma-separated, v4 and v6). No auto-seeding")
+	cmd.Flags().BoolVar(&f.noTraefik, "no-traefik", false, "Do not install Traefik as the default reverse proxy (catch-all 404)")
 	cmd.Flags().BoolVar(&f.disableTraefik, "disable-traefik", false, "Disable Traefik ingress in k3s")
 	cmd.Flags().BoolVar(&f.secretsEncryption, "secrets-encryption", false, "Enable secrets encryption at rest in etcd (CIS)")
 	cmd.Flags().BoolVar(&f.protectKernelDefaults, "protect-kernel-defaults", false, "Protect kubelet kernel defaults (CIS)")
@@ -179,8 +181,6 @@ Examples:
 	cmd.Flags().StringVar(&f.sshKeyIDs, "ssh-key-ids", "", "SSH key IDs (comma-separated)")
 	cmd.Flags().StringVar(&f.apiKey, "api-key", "", "Provider API key (or provider-specific env var)")
 	cmd.Flags().IntVar(&f.projectID, "project-id", 0, "Provider project ID")
-	cmd.Flags().BoolVar(&f.cloudInit, "cloud-init", false, "Use cloud-init instead of SSH-based provisioning")
-	cmd.Flags().BoolVar(&f.cloudInitOnly, "cloud-init-only", false, "Generate and print cloud-init user-data only")
 	cmd.Flags().BoolVar(&f.airgap, "airgap", false, "Pre-download k3s binary and copy via SSH (no internet on target)")
 
 	cmd.PreRunE = func(cobraCmd *cobra.Command, args []string) error {
@@ -302,7 +302,64 @@ func newInfraFirewallCmd(f *infraFlags) *cobra.Command {
 	cmd.AddCommand(newInfraFirewallOpenCmd(f))
 	cmd.AddCommand(newInfraFirewallCloseCmd(f))
 	cmd.AddCommand(newInfraFirewallListCmd(f))
+	cmd.AddCommand(newInfraFirewallCfNormalCmd(f))
+	cmd.AddCommand(newInfraFirewallCfStrictCmd(f))
+	cmd.AddCommand(newInfraFirewallAllowlistCmd(f))
+	cmd.AddCommand(newInfraFirewallBanCmd(f))
+	cmd.AddCommand(newInfraFirewallUnbanCmd(f))
+	cmd.AddCommand(newInfraFirewallBansCmd(f))
 
+	return cmd
+}
+
+// ban/unban/bans: explicit IP handling via the node's fail2ban jail. IPs are
+// always literal — no auto-detection.
+func newInfraFirewallBanCmd(f *infraFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ban <ip>",
+		Short: "Ban an IP via fail2ban (explicit IP, no auto-detection)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return runAllowlistSimple(f, cobraCmd, func(conn *golang_ssh.Client) error {
+				return hardening.Fail2banBan(conn, args[0])
+			})
+		},
+	}
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	return cmd
+}
+
+func newInfraFirewallUnbanCmd(f *infraFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "unban <ip>",
+		Short: "Unban an IP via fail2ban (explicit IP, no auto-detection)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return runAllowlistSimple(f, cobraCmd, func(conn *golang_ssh.Client) error {
+				return hardening.Fail2banUnban(conn, args[0])
+			})
+		},
+	}
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	return cmd
+}
+
+func newInfraFirewallBansCmd(f *infraFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "bans",
+		Short: "List IPs banned by fail2ban on the node",
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return runAllowlistSimple(f, cobraCmd, func(conn *golang_ssh.Client) error {
+				out, err := hardening.Fail2banBans(conn)
+				if err != nil {
+					return err
+				}
+				fmt.Print(out)
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
 	return cmd
 }
 
@@ -434,6 +491,611 @@ func newInfraFirewallListCmd(f *infraFlags) *cobra.Command {
 	cmd.Flags().StringP("node", "n", "", "Target node IP")
 
 	return cmd
+}
+
+// allowlistFlags holds the shared flags for cf-normal / cf-strict.
+type allowlistFlags struct {
+	node          string
+	source        string
+	cloudFirewall string
+	yes           bool
+	adminIPs      string
+}
+
+func addAllowlistFlags(cmd *cobra.Command, aw *allowlistFlags, strict bool) {
+	cmd.Flags().StringVarP(&aw.node, "node", "n", "", "Target node IP")
+	cmd.Flags().StringVar(&aw.source, "source", "cf", "IP list source: cf, url:<url>, dns:<fqdn>")
+	cmd.Flags().StringVar(&aw.cloudFirewall, "cloud-firewall", "", "Also sync the allowlist to a provider cloud firewall (vultr, digitalocean, hetzner, ...)")
+	cmd.Flags().StringVar(&aw.adminIPs, "admin-ips", "", "Explicit admin IPs/CIDRs (comma-separated, v4 and v6). No auto-seeding: pass your IPs explicitly to get permanent access")
+	if strict {
+		cmd.Flags().BoolVar(&aw.yes, "yes", false, "Confirm the lockout risk warning and proceed")
+	}
+}
+
+// parseAdminIPs splits a comma-separated IP/CIDR list into v4 and v6 entries.
+func parseAdminIPs(raw string) (admin4, admin6 []string, err error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil, nil
+	}
+	for _, part := range strings.Split(raw, ",") {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		ip := hardening.NormalizeCIDR(strings.TrimSpace(part))
+		if _, verr := hardening.ValidateCIDR(ip); verr != nil {
+			return nil, nil, fmt.Errorf("admin IP %q: %w", part, verr)
+		}
+		if isV6, _ := hardening.ValidateCIDR(ip); isV6 {
+			admin6 = append(admin6, ip)
+		} else {
+			admin4 = append(admin4, ip)
+		}
+	}
+	return admin4, admin6, nil
+}
+
+func newInfraFirewallCfNormalCmd(f *infraFlags) *cobra.Command {
+	var aw allowlistFlags
+	cmd := &cobra.Command{
+		Use:   "cf-normal",
+		Short: "Restrict all inbound traffic to provider IPs, except SSH",
+		Long: `Restrict ALL inbound traffic to the provider allowlist (Cloudflare by
+default), keeping only SSH open from any IP.
+
+  --source cf              Cloudflare ranges (default)
+  --source url:<url>       Plain-text CIDR list (one per line)
+  --source dns:<fqdn>      DNS TXT records with include: chains (Google style)
+
+Installs a systemd timer on the node that refreshes the ranges daily.
+Pass --admin-ips "ip1,ip2" to grant explicit IPs permanent access
+(no auto-seeding of the operator IP).`,
+		Args: cobra.NoArgs,
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return runAllowlistInstall(f, hardening.AllowlistNormal, aw)
+		},
+	}
+	addAllowlistFlags(cmd, &aw, false)
+	return cmd
+}
+
+func newInfraFirewallCfStrictCmd(f *infraFlags) *cobra.Command {
+	var aw allowlistFlags
+	cmd := &cobra.Command{
+		Use:   "cf-strict",
+		Short: "Restrict ALL inbound traffic to provider IPs, including SSH",
+		Long: `Restrict ALL inbound traffic, INCLUDING SSH, to the provider allowlist
+(Cloudflare by default).
+
+WARNING: you can be locked out if your public IP changes or the refresh
+fails. This command requires --yes AND --admin-ips with at least one IP
+(the install aborts without explicit admin IPs).`,
+		Args: cobra.NoArgs,
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return runAllowlistInstall(f, hardening.AllowlistStrict, aw)
+		},
+	}
+	addAllowlistFlags(cmd, &aw, true)
+	return cmd
+}
+
+// printAdminSummary shows which admin IPs were seeded.
+func printAdminSummary(raw string, admin4, admin6 []string) {
+	if len(admin4)+len(admin6) == 0 {
+		fmt.Println("  → No admin IPs seeded (pass --admin-ips to grant yourself permanent access)")
+		return
+	}
+	fmt.Printf("→ Admin IPs: %s\n", raw)
+}
+
+func runAllowlistInstall(f *infraFlags, profile hardening.AllowlistProfile, aw allowlistFlags) error {
+	ctx := context.Background()
+	if aw.node == "" {
+		return fmt.Errorf("no node specified. Use --node or register one")
+	}
+
+	if profile == hardening.AllowlistStrict && !aw.yes {
+		return fmt.Errorf(`cf-strict restricts ALL inbound traffic, INCLUDING SSH, to the allowlist. You can be locked out if your public IP changes or the refresh fails. Re-run with --yes to confirm`)
+	}
+
+	admin4, admin6, err := parseAdminIPs(aw.adminIPs)
+	if err != nil {
+		return err
+	}
+	if profile == hardening.AllowlistStrict && len(admin4)+len(admin6) == 0 {
+		return fmt.Errorf(`cf-strict requires explicit admin IPs (--admin-ips "ip1,ip2") so you are never locked out`)
+	}
+
+	conn, err := infraConnect(aw.node, f)
+	if err != nil {
+		return err
+	}
+	defer closeConn(conn)
+
+	src, err := hardening.ParseSource(aw.source)
+	if err != nil {
+		return err
+	}
+
+	v4, v6, err := hardening.FetchCIDRs(ctx, src)
+	if err != nil {
+		return err
+	}
+	if len(v4)+len(v6) < 4 {
+		return fmt.Errorf("source %q returned too few ranges (%d v4, %d v6)", aw.source, len(v4), len(v6))
+	}
+	fmt.Printf("→ Source %s: %d IPv4 + %d IPv6 ranges\n", aw.source, len(v4), len(v6))
+
+	cfg := hardening.AllowlistConfig{
+		Profile:  profile,
+		SSHPorts: hardening.CurrentSSHPorts(conn, f.port),
+		Source:   src,
+		Admin4:   admin4,
+		Admin6:   admin6,
+	}
+	printAdminSummary(aw.adminIPs, admin4, admin6)
+
+	fmt.Printf("→ Installing allowlist on %s...\n", aw.node)
+	if err := installAndVerifyAllowlist(conn, aw.node, f, cfg); err != nil {
+		return err
+	}
+
+	if aw.cloudFirewall != "" {
+		if err := syncCloudFirewall(ctx, aw.cloudFirewall, v4, v6); err != nil {
+			return err
+		}
+	}
+
+	out, err := hardening.AllowlistStatus(conn)
+	if err != nil {
+		return err
+	}
+	fmt.Print(out)
+	return nil
+}
+
+// parseAllowlistFlag parses --firewall-allowlist values: a plain source
+// (cf, url:..., dns:...) installs the normal profile; "strict" or
+// "strict:<source>" installs the strict profile.
+func parseAllowlistFlag(raw string) (hardening.AllowlistProfile, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "strict" {
+		return hardening.AllowlistStrict, "cf", nil
+	}
+	if strings.HasPrefix(raw, "strict:") {
+		src := strings.TrimPrefix(raw, "strict:")
+		if _, err := hardening.ParseSource(src); err != nil {
+			return hardening.AllowlistNormal, "", fmt.Errorf("--firewall-allowlist: %w", err)
+		}
+		return hardening.AllowlistStrict, src, nil
+	}
+	if _, err := hardening.ParseSource(raw); err != nil {
+		return hardening.AllowlistNormal, "", fmt.Errorf("--firewall-allowlist: %w", err)
+	}
+	return hardening.AllowlistNormal, raw, nil
+}
+
+// createSDKOpsStructure creates the /opt/sdk-ops/ layout on the node.
+func createSDKOpsStructure(conn *golang_ssh.Client) {
+	if _, _, err := ssh.Run(conn, `sudo mkdir -p /opt/sdk-ops/services /opt/sdk-ops/backups /opt/sdk-ops/logs && echo "sdk-ops-init" | sudo tee /opt/sdk-ops/.version > /dev/null`); err != nil {
+		log.Printf("infra: ssh run error: %v", err)
+	}
+}
+
+// registerInitNode saves the node in ~/.sdk-ops/config.yaml after init.
+func registerInitNode(ip string, f infraFlags, hardCfg hardening.Config, arch string) {
+	cfg, _ := loadConfig()
+	found := false
+	for i, n := range cfg.Nodes {
+		if n.IP == ip {
+			cfg.Nodes[i].Role = "server"
+			cfg.Nodes[i].Arch = arch
+			found = true
+			break
+		}
+	}
+	if !found {
+		cfg.Nodes = append(cfg.Nodes, NodeConfig{
+			IP:   ip,
+			User: hardCfg.User,
+			Key:  f.key,
+			Port: hardCfg.SSHPort,
+			Mode: f.mode,
+			Role: "server",
+			Arch: arch,
+		})
+		if err := saveConfig(cfg); err != nil {
+			log.Printf("infra: save config error: %v", err)
+		}
+		fmt.Printf("  → Registered node in %s\n", configPath())
+	} else if err := saveConfig(cfg); err != nil {
+		log.Printf("infra: save config error: %v", err)
+	}
+}
+
+// installTraefikPhase installs Docker (if missing) and Traefik with the
+// catch-all 404 as the node's default reverse proxy.
+func installTraefikPhase(conn *golang_ssh.Client) error {
+	fmt.Println("\n  → Installing Traefik (default reverse proxy, catch-all 404)...")
+	if err := docker.Install(conn); err != nil {
+		return fmt.Errorf("traefik needs docker: %w", err)
+	}
+	if err := docker.EnsureNetworking(conn); err != nil {
+		return err
+	}
+	if err := deploy.NewProxy(deploy.ProxyTraefik).Install(conn, deploy.ProxyConfig{}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// installAllowlistPhase runs the provider allowlist install requested via
+// --firewall-allowlist at the end of infra init.
+func installAllowlistPhase(conn *golang_ssh.Client, ip string, f infraFlags) error {
+	profile, sourceRaw, err := parseAllowlistFlag(f.firewallAllowlist)
+	if err != nil {
+		return err
+	}
+	if profile == hardening.AllowlistStrict {
+		fmt.Println("\n  → Installing strict provider allowlist (all ports, including SSH)...")
+	} else {
+		fmt.Println("\n  → Installing provider allowlist (all ports except SSH)...")
+	}
+	if err := installAllowlistOnNode(conn, ip, &f, profile, sourceRaw); err != nil {
+		return fmt.Errorf("allowlist: %w", err)
+	}
+	return nil
+}
+
+// installAllowlistOnNode runs the full allowlist install (fetch, seed admin,
+// apply, verify, commit) on an existing SSH connection.
+func installAllowlistOnNode(conn *golang_ssh.Client, node string, f *infraFlags, profile hardening.AllowlistProfile, sourceRaw string) error {
+	ctx := context.Background()
+	src, err := hardening.ParseSource(sourceRaw)
+	if err != nil {
+		return err
+	}
+	v4, v6, err := hardening.FetchCIDRs(ctx, src)
+	if err != nil {
+		return err
+	}
+	if len(v4)+len(v6) < 4 {
+		return fmt.Errorf("source %q returned too few ranges (%d v4, %d v6)", sourceRaw, len(v4), len(v6))
+	}
+	fmt.Printf("  → Source %s: %d IPv4 + %d IPv6 ranges\n", sourceRaw, len(v4), len(v6))
+
+	admin4, admin6, err := parseAdminIPs(f.adminIPs)
+	if err != nil {
+		return err
+	}
+	if profile == hardening.AllowlistStrict && len(admin4)+len(admin6) == 0 {
+		return fmt.Errorf(`strict allowlist requires explicit admin IPs (admin_ips in the provision YAML or --admin-ips)`)
+	}
+
+	cfg := hardening.AllowlistConfig{
+		Profile:  profile,
+		SSHPorts: hardening.CurrentSSHPorts(conn, f.port),
+		Source:   src,
+		Admin4:   admin4,
+		Admin6:   admin6,
+	}
+	if len(admin4)+len(admin6) == 0 {
+		fmt.Println("  → No admin IPs seeded (set admin_ips in the provision YAML to grant permanent access)")
+	} else {
+		fmt.Printf("  → Admin IPs: %s\n", f.adminIPs)
+	}
+	return installAndVerifyAllowlist(conn, node, f, cfg)
+}
+
+// installAndVerifyAllowlist applies the config, then opens a NEW SSH connection
+// before trusting the new firewall. On verification failure the node-side
+// auto-rollback restores the previous state automatically.
+func installAndVerifyAllowlist(conn *golang_ssh.Client, node string, f *infraFlags, cfg hardening.AllowlistConfig) error {
+	if err := hardening.InstallAllowlist(conn, cfg); err != nil {
+		return err
+	}
+	fmt.Printf("→ Verifying with a new SSH connection...\n")
+	start := time.Now()
+	verifier := infraSSHClient(node, f.user, f.port, *f)
+	verifierConn, err := verifier.Connect()
+	if err != nil {
+		return fmt.Errorf("new SSH connection failed after %s: %w\n  The node will restore the previous firewall automatically within 30s", time.Since(start).Round(time.Second), err)
+	}
+	defer closeConn(verifierConn)
+	if err := hardening.CommitAllowlist(verifierConn); err != nil {
+		return err
+	}
+	fmt.Printf("→ Verified and committed (new connection OK)\n")
+	return nil
+}
+
+// detectAdminIP resolves the operator public IP for the permanent admin entry.
+// infraConnect opens an SSH session to a node.
+func infraConnect(node string, f *infraFlags) (*golang_ssh.Client, error) {
+	client := infraSSHClient(node, f.user, f.port, *f)
+	conn, err := client.Connect()
+	if err != nil {
+		return nil, fmt.Errorf("ssh: %w", err)
+	}
+	return conn, nil
+}
+
+func closeConn(conn *golang_ssh.Client) {
+	if err := conn.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "infra: conn close error: %v\n", err)
+	}
+}
+
+// syncCloudFirewall pushes the allowlist to a provider cloud firewall when the
+// provider supports it. Providers without support are skipped with a warning.
+func syncCloudFirewall(ctx context.Context, providerName string, v4, v6 []string) error {
+	p, err := getInfraProvider(providerName, "", "", 0)
+	if err != nil {
+		return err
+	}
+	cfw, ok := p.(providers.CloudFirewall)
+	if !ok {
+		fmt.Printf("→ Cloud firewall: provider %q does not support allowlist sync, skipping\n", providerName)
+		return nil
+	}
+	fmt.Printf("→ Syncing %d IPv4 + %d IPv6 ranges to %s cloud firewall...\n", len(v4), len(v6), providerName)
+	if err := cfw.SyncFirewallAllowlist(ctx, v4, v6); err != nil {
+		return err
+	}
+	fmt.Printf("→ %s cloud firewall synced\n", providerName)
+	return nil
+}
+
+func newInfraFirewallAllowlistCmd(f *infraFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "allowlist",
+		Short: "Manage the provider IP allowlist firewall",
+	}
+	cmd.AddCommand(newAllowlistRefreshCmd(f))
+	cmd.AddCommand(newAllowlistStatusCmd(f))
+	cmd.AddCommand(newAllowlistRemoveCmd(f))
+	cmd.AddCommand(newAllowlistAdminCmd(f))
+	cmd.AddCommand(newAllowlistExposeCmd(f))
+	cmd.AddCommand(newAllowlistUnexposeCmd(f))
+	cmd.AddCommand(newAllowlistPortsCmd(f))
+	cmd.AddCommand(newAllowlistPeerCmd(f))
+	return cmd
+}
+
+// newAllowlistPeerCmd: peer add <ip> --ports "a,b" (sugar over expose) and
+// peers (readable map of the ports registry).
+func newAllowlistPeerCmd(f *infraFlags) *cobra.Command {
+	peer := &cobra.Command{
+		Use:   "peer",
+		Short: "Manage peer-to-peer port access (who can reach which ports)",
+	}
+	var ports string
+	var proto string
+	add := &cobra.Command{
+		Use:   "add <ip>",
+		Short: "Allow a peer IP to reach specific ports (one rule per port)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			portList, err := parsePorts(ports)
+			if err != nil {
+				return err
+			}
+			if len(portList) == 0 {
+				return fmt.Errorf("--ports is required (e.g. \"43453,3434\")")
+			}
+			return runAllowlistSimple(f, cobraCmd, func(conn *golang_ssh.Client) error {
+				for _, p := range portList {
+					if err := hardening.AllowlistExposePort(conn, p, proto, hardening.PortScopeIPs, args[0]); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		},
+	}
+	add.Flags().StringVar(&ports, "ports", "", "Comma-separated ports to open for this peer")
+	add.Flags().StringVarP(&proto, "proto", "P", "tcp", "Protocol (tcp, udp)")
+	add.Flags().StringP("node", "n", "", "Target node IP")
+
+	list := &cobra.Command{
+		Use:   "peers",
+		Short: "Show the peer/port access map (ports registry)",
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return runAllowlistSimple(f, cobraCmd, func(conn *golang_ssh.Client) error {
+				out, err := hardening.AllowlistPorts(conn)
+				if err != nil {
+					return err
+				}
+				fmt.Println("port proto scope ips")
+				for _, line := range strings.Split(out, "\n") {
+					fields := strings.Fields(line)
+					if len(fields) >= 3 {
+						ipPart := ""
+						if len(fields) > 3 && fields[2] == string(hardening.PortScopeIPs) {
+							ipPart = fields[3]
+						}
+						fmt.Printf("%-6s %-5s %-7s %s\n", fields[0], fields[1], fields[2], ipPart)
+					}
+				}
+				return nil
+			})
+		},
+	}
+	list.Flags().StringP("node", "n", "", "Target node IP")
+
+	peer.AddCommand(add)
+	peer.AddCommand(list)
+	return peer
+}
+
+func newAllowlistRefreshCmd(f *infraFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "refresh",
+		Short: "Fetch provider ranges and apply them now",
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return runAllowlistSimple(f, cobraCmd, hardening.RefreshAllowlist)
+		},
+	}
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	return cmd
+}
+
+func newAllowlistStatusCmd(f *infraFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show last sync state and live allowlist sets",
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return runAllowlistSimple(f, cobraCmd, func(conn *golang_ssh.Client) error {
+				out, err := hardening.AllowlistStatus(conn)
+				if err != nil {
+					return err
+				}
+				fmt.Print(out)
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	return cmd
+}
+
+func newAllowlistRemoveCmd(f *infraFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "remove",
+		Short: "Restore the pre-allowlist firewall and remove the refresh timer",
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return runAllowlistSimple(f, cobraCmd, hardening.RemoveAllowlist)
+		},
+	}
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	return cmd
+}
+
+func newAllowlistAdminCmd(f *infraFlags) *cobra.Command {
+	admin := &cobra.Command{
+		Use:   "admin",
+		Short: "Manage permanent admin IPs in the allowlist",
+	}
+	admin.AddCommand(newAllowlistAdminModCmd(f, true))
+	admin.AddCommand(newAllowlistAdminModCmd(f, false))
+	return admin
+}
+
+func newAllowlistExposeCmd(f *infraFlags) *cobra.Command {
+	var scope string
+	var global bool
+	var proto string
+	var ips string
+	cmd := &cobra.Command{
+		Use:   "expose <port>",
+		Short: "Expose a port (default: only admin IPs; --global: all IPs; --ips: explicit IP list; --scope traefik: register only)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			ports, err := parsePorts(args[0])
+			if err != nil {
+				return err
+			}
+			if global && ips != "" {
+				return fmt.Errorf("--global and --ips are mutually exclusive")
+			}
+			effectiveScope := hardening.PortScope(scope)
+			var ipList []string
+			if global {
+				effectiveScope = hardening.PortScopeGlobal
+			}
+			if ips != "" {
+				effectiveScope = hardening.PortScopeIPs
+				for _, ip := range strings.Split(ips, ",") {
+					ipList = append(ipList, strings.TrimSpace(ip))
+				}
+			}
+			return runAllowlistSimple(f, cobraCmd, func(conn *golang_ssh.Client) error {
+				if err := precheckNode(conn, firewalledNode(cobraCmd), f, false); err != nil {
+					return err
+				}
+				return hardening.AllowlistExposePort(conn, ports[0], proto, effectiveScope, ipList...)
+			})
+		},
+	}
+	cmd.Flags().StringVarP(&scope, "scope", "s", string(hardening.PortScopeAdmin), "Scope: admin (default), global, ips, traefik")
+	cmd.Flags().BoolVarP(&global, "global", "g", false, "Open to all IPs (shorthand for --scope global)")
+	cmd.Flags().StringVar(&ips, "ips", "", "Explicit IP/CIDR list (comma-separated, v4 and v6) — shorthand for --scope ips")
+	cmd.Flags().StringVarP(&proto, "proto", "P", "tcp", "Protocol (tcp, udp)")
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	return cmd
+}
+
+func newAllowlistUnexposeCmd(f *infraFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "unexpose <port>",
+		Short: "Close an exposed port",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			ports, err := parsePorts(args[0])
+			if err != nil {
+				return err
+			}
+			return runAllowlistSimple(f, cobraCmd, func(conn *golang_ssh.Client) error {
+				return hardening.AllowlistUnexposePort(conn, ports[0])
+			})
+		},
+	}
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	return cmd
+}
+
+func newAllowlistPortsCmd(f *infraFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ports",
+		Short: "List exposed ports and their scope",
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return runAllowlistSimple(f, cobraCmd, func(conn *golang_ssh.Client) error {
+				out, err := hardening.AllowlistPorts(conn)
+				if err != nil {
+					return err
+				}
+				fmt.Print(out)
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	return cmd
+}
+
+func newAllowlistAdminModCmd(f *infraFlags, add bool) *cobra.Command {
+	use, short := "remove <ip>", "Remove a permanent admin IP"
+	if add {
+		use, short = "add <ip>", "Add a permanent admin IP"
+	}
+	cmd := &cobra.Command{
+		Use:   use,
+		Short: short,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return runAllowlistSimple(f, cobraCmd, func(conn *golang_ssh.Client) error {
+				if add {
+					return hardening.AllowlistAdminAdd(conn, args[0])
+				}
+				return hardening.AllowlistAdminRemove(conn, args[0])
+			})
+		},
+	}
+	cmd.Flags().StringP("node", "n", "", "Target node IP")
+	return cmd
+}
+
+// runAllowlistSimple wires a single-node allowlist operation.
+func runAllowlistSimple(f *infraFlags, cobraCmd *cobra.Command, fn func(*golang_ssh.Client) error) error {
+	node := firewalledNode(cobraCmd)
+	if node == "" {
+		return fmt.Errorf("no node specified. Use --node or register one")
+	}
+	conn, err := infraConnect(node, f)
+	if err != nil {
+		return err
+	}
+	defer closeConn(conn)
+	return fn(conn)
 }
 
 func newInfraBackupCmd(f *infraFlags) *cobra.Command {
@@ -968,82 +1630,6 @@ Examples:
 
 var proxyCmd = newProxyCmd()
 
-func planCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "plan <file.yaml>",
-		Short: "Validate and preview an infrastructure plan",
-		Long: `Parse a YAML plan file and show what will be provisioned.
-The plan file defines servers, agents, and SSH options.
-
-Example plan.yaml:
-  mode: k3s
-  parallel: 5
-  server_options:
-    user: root
-    ssh_key: ~/.ssh/id_ed25519
-    k3s_extra_args: "--disable traefik"
-  agent_options:
-    user: root
-  hosts:
-    - name: server-1
-      role: server
-      host: 192.168.1.10
-    - name: agent-1
-      role: agent
-      host: 192.168.1.11`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			p, err := plan.ParseFile(args[0])
-			if err != nil {
-				return fmt.Errorf("invalid plan: %w", err)
-			}
-			fmt.Print(p.Summary())
-			return nil
-		},
-	}
-}
-
-func applyCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "apply <plan.yaml>",
-		Short: "Execute an infrastructure plan",
-		Long: `Provision all hosts defined in a plan file.
-Installs servers first, then joins agents — all in parallel.
-
-Examples:
-  sdk-ops infra apply plan.yaml
-  sdk-ops infra apply plan.yaml --parallel 10`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			p, err := plan.ParseFile(args[0])
-			if err != nil {
-				return fmt.Errorf("invalid plan: %w", err)
-			}
-
-			fmt.Println("📋 Plan:")
-			fmt.Print(p.Summary())
-
-			results := plan.Apply(p, gInsecure)
-
-			errs := 0
-			for _, r := range results {
-				if r.Error != nil {
-					fmt.Printf("  ✗ %s [%s]: %v\n", r.Host, r.Step, r.Error)
-					errs++
-				} else {
-					fmt.Printf("  ✓ %s [%s]: OK\n", r.Host, r.Step)
-				}
-			}
-
-			if errs > 0 {
-				return fmt.Errorf("%d errors during apply", errs)
-			}
-			fmt.Println("\n✅ Plan applied successfully!")
-			return nil
-		},
-	}
-}
-
 func getInfraProvider(name, apiKey, location string, projectID int) (providers.Provider, error) {
 	switch name {
 	case "cubepath":
@@ -1168,21 +1754,7 @@ func infraSSHClient(ip, user string, port int, f infraFlags) *ssh.Client {
 	return newSSHClient(ip, user, port, f.key)
 }
 
-func sshPublicKeys() []string {
-	home, _ := os.UserHomeDir()
-	pubPath := filepath.Join(home, ".ssh", "id_ed25519.pub")
-	data, err := os.ReadFile(filepath.Clean(pubPath))
-	if err != nil {
-		return nil
-	}
-	return []string{strings.TrimSpace(string(data))}
-}
-
 func runInfraInit(ip string, f infraFlags) error {
-	if f.cloudInitOnly {
-		return runInfraInitCloudInitOnly(f)
-	}
-
 	if f.provider != "" {
 		p, err := getInfraProvider(f.provider, f.apiKey, f.location, f.projectID)
 		if err != nil {
@@ -1207,17 +1779,6 @@ func runInfraInit(ip string, f infraFlags) error {
 			}
 		}
 
-		if f.cloudInit {
-			ciCfg := cloudinit.DefaultConfig()
-			ciCfg.Mode = f.mode
-			ciCfg.CrowdSec = f.crowdsec
-			ciCfg.EnableMonitor = f.monitor
-			ciCfg.DisableTraefik = f.disableTraefik
-			userData := cloudinit.Generate(ciCfg)
-			createCfg.UserData = userData
-			fmt.Println("  → Cloud-init user-data generated")
-		}
-
 		fmt.Printf("\n🔧 Creating VPS via %s...\n", f.provider)
 		vps, err := p.CreateVPS(context.Background(), createCfg)
 		if err != nil {
@@ -1232,97 +1793,7 @@ func runInfraInit(ip string, f infraFlags) error {
 	fmt.Printf("   User: %s\n", f.user)
 	fmt.Println()
 
-	if f.cloudInit {
-		return runInfraInitCloudInit(ip, &f)
-	}
-
 	return runInfraInitSSH(ip, f)
-}
-
-func runInfraInitCloudInitOnly(f infraFlags) error {
-	ciCfg := cloudinit.DefaultConfig()
-	ciCfg.SSHKeys = sshPublicKeys()
-	switch f.mode {
-	case "docker":
-		ciCfg.Mode = "docker"
-	case "bare":
-		ciCfg.Mode = "bare"
-	}
-	if f.hardSSHPort > 0 {
-		ciCfg.SSHPort = f.hardSSHPort
-	}
-	ciCfg.CrowdSec = f.crowdsec
-	ciCfg.EnableMonitor = f.monitor
-	ciCfg.DisableTraefik = f.disableTraefik
-	fmt.Println(cloudinit.Generate(ciCfg))
-	return nil
-}
-
-func runInfraInitCloudInit(ip string, f *infraFlags) error {
-	fmt.Println("  → Cloud-init mode: waiting for VPS to boot...")
-	time.Sleep(10 * time.Second)
-
-	ciUser := f.user
-	ciPort := f.port
-	if ciUser == "root" {
-		ciUser = "sdkops"
-		ciPort = 2222
-	}
-	for attempt := 1; attempt <= 30; attempt++ {
-		client := infraSSHClient(ip, ciUser, ciPort, *f)
-		conn, err := client.Connect()
-		if err == nil {
-			if err := conn.Close(); err != nil {
-				log.Printf("infra: conn close error: %v", err)
-			}
-			f.user = ciUser
-			f.port = ciPort
-			break
-		}
-		if attempt == 30 {
-			return fmt.Errorf("cloud-init: VPS not ready after 150s")
-		}
-		time.Sleep(5 * time.Second)
-	}
-
-	client := infraSSHClient(ip, f.user, f.port, *f)
-	conn, err := client.Connect()
-	if err == nil {
-		if _, _, sErr := ssh.Run(conn, `mkdir -p /opt/sdk-ops/services /opt/sdk-ops/backups /opt/sdk-ops/logs 2>/dev/null; echo "sdk-ops-init" > /opt/sdk-ops/.version 2>/dev/null || true`); sErr != nil {
-			log.Printf("infra: ssh run error: %v", sErr)
-		}
-		if err := conn.Close(); err != nil {
-			log.Printf("infra: conn close error: %v", err)
-		}
-	}
-
-	cfg, _ := loadConfig()
-	found := false
-	for _, n := range cfg.Nodes {
-		if n.IP == ip {
-			found = true
-			break
-		}
-	}
-	if !found {
-		cfg.Nodes = append(cfg.Nodes, NodeConfig{
-			IP:   ip,
-			User: ciUser,
-			Key:  f.key,
-			Port: ciPort,
-			Mode: f.mode,
-		})
-		if err := saveConfig(cfg); err != nil {
-			log.Printf("infra: save config error: %v", err)
-		}
-	}
-
-	fmt.Println("\n✅ infra init complete (cloud-init)!")
-	fmt.Printf("   SSH: ssh %s@%s -p %d\n", ciUser, ip, ciPort)
-	if f.mode == "k3s" {
-		fmt.Printf("   Kubeconfig: %s (fetch from server)\n", f.kubeconfig)
-	}
-	return nil
 }
 
 func applyInfraHardening(conn *golang_ssh.Client, f infraFlags) hardening.Config {
@@ -1476,6 +1947,12 @@ func runInfraInitBare(conn *golang_ssh.Client, ip string, f infraFlags, hardCfg 
 }
 
 func runInfraInitPostInstall(conn *golang_ssh.Client, ip string, f infraFlags, hardCfg hardening.Config) error {
+	// After hardening, SSH as root is disabled — follow-up connections
+	// (allowlist verify, etc.) must use the hardened user and SSH port.
+	f.user = hardCfg.User
+	if hardCfg.SSHPort > 0 {
+		f.port = hardCfg.SSHPort
+	}
 	// Phase: Log shipping (Promtail)
 	if f.logsURL != "" {
 		if err := deploy.InstallPromtail(conn, deploy.PromtailConfig{
@@ -1497,44 +1974,14 @@ func runInfraInitPostInstall(conn *golang_ssh.Client, ip string, f infraFlags, h
 
 	// Create /opt/sdk-ops/ structure
 	fmt.Println("  → Creating /opt/sdk-ops/ structure...")
-	if _, _, err := ssh.Run(conn, `mkdir -p /opt/sdk-ops/services /opt/sdk-ops/backups /opt/sdk-ops/logs && echo "sdk-ops-init" > /opt/sdk-ops/.version`); err != nil {
-		log.Printf("infra: ssh run error: %v", err)
-	}
+	createSDKOpsStructure(conn)
 
 	// Detect architecture
 	archOut, _, _ := ssh.Run(conn, "uname -m")
 	arch := strings.TrimSpace(archOut)
 
 	// Auto-register node in ~/.sdk-ops/config.yaml
-	cfg, _ := loadConfig()
-	found := false
-	for i, n := range cfg.Nodes {
-		if n.IP == ip {
-			cfg.Nodes[i].Role = "server"
-			cfg.Nodes[i].Arch = arch
-			found = true
-			break
-		}
-	}
-	if !found {
-		cfg.Nodes = append(cfg.Nodes, NodeConfig{
-			IP:   ip,
-			User: hardCfg.User,
-			Key:  f.key,
-			Port: hardCfg.SSHPort,
-			Mode: f.mode,
-			Role: "server",
-			Arch: arch,
-		})
-		if err := saveConfig(cfg); err != nil {
-			log.Printf("infra: save config error: %v", err)
-		}
-		fmt.Printf("  → Registered node in %s\n", configPath())
-	} else {
-		if err := saveConfig(cfg); err != nil {
-			log.Printf("infra: save config error: %v", err)
-		}
-	}
+	registerInitNode(ip, f, hardCfg, arch)
 
 	// Run post-init hooks
 	if err := hooks.Run(conn, "post-init", map[string]string{
@@ -1546,8 +1993,26 @@ func runInfraInitPostInstall(conn *golang_ssh.Client, ip string, f infraFlags, h
 		log.Printf("infra: hooks error: %v", err)
 	}
 
+	// Phase: Traefik default reverse proxy (catch-all 404). k3s ships its own.
+	if f.mode != "k3s" && !f.noTraefik {
+		if err := installTraefikPhase(conn); err != nil {
+			return err
+		}
+	}
+
+	// Phase: provider IP allowlist (hardening goes hand in hand)
+	if f.firewallAllowlist != "" {
+		if err := installAllowlistPhase(conn, ip, f); err != nil {
+			return err
+		}
+	}
+
 	fmt.Println("\n✅ infra init complete!")
-	fmt.Printf("   SSH: ssh %s@%s -p %d\n", hardCfg.User, ip, hardCfg.SSHPort)
+	sshHint := fmt.Sprintf("   SSH: ssh %s@%s", hardCfg.User, ip)
+	if hardCfg.SSHPort > 0 {
+		sshHint += fmt.Sprintf(" -p %d", hardCfg.SSHPort)
+	}
+	fmt.Println(sshHint)
 	if f.mode == "k3s" {
 		fmt.Printf("   Kubeconfig: %s\n", f.kubeconfig)
 	}

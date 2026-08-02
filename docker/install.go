@@ -37,6 +37,28 @@ func Install(client *goss.Client) error {
 		return fmt.Errorf("docker install failed: %w\noutput: %s", err, out)
 	}
 	fmt.Print(out)
+	return EnsureNetworking(client)
+}
+
+// EnsureNetworking loads the iptables NAT modules and restarts the daemon if
+// the nat table lacks Docker chains. IPv6-only hosts do not auto-load
+// iptable_nat, which breaks `docker run -p` (the DOCKER DNAT chain never gets
+// created and publishes fail with "No chain/target/match by that name").
+func EnsureNetworking(client *goss.Client) error {
+	script := `
+sudo modprobe iptable_nat ip6table_nat 2>/dev/null || true
+if ! sudo nft list table ip nat 2>/dev/null | grep -q 'chain DOCKER'; then
+  echo "  → docker networking: recreating nat chains (restarting docker)..."
+  sudo systemctl restart docker
+  sleep 3
+fi
+echo "docker networking: OK"
+`
+	out, _, err := ssh.Run(client, script)
+	if err != nil {
+		return fmt.Errorf("docker networking: %w\n%s", err, out)
+	}
+	fmt.Print(out)
 	return nil
 }
 

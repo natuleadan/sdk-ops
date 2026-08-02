@@ -15,13 +15,15 @@ func (p *TraefikProxy) Type() ProxyType {
 	return ProxyTraefik
 }
 
-func (p *TraefikProxy) Install(client *goss.Client, cfg ProxyConfig) error {
-	port := cfg.TargetPort
-	if port == 0 {
-		port = 8080
-	}
-
-	appYml := fmt.Sprintf(`http:
+// baseTraefikScript renders the shared Traefik base: config, catch-all 404
+// responder, and the container. An empty domain skips the app router.
+func baseTraefikScript(cfg ProxyConfig) string {
+	appYml := ""
+	summary := ""
+	if cfg.Domain != "" {
+		appYml = fmt.Sprintf(`
+sudo tee /etc/traefik/conf.d/app.yml > /dev/null << 'APPEOF'
+http:
   routers:
     app:
       rule: "Host(\x60%s\x60)"
@@ -35,12 +37,16 @@ func (p *TraefikProxy) Install(client *goss.Client, cfg ProxyConfig) error {
       loadBalancer:
         servers:
           - url: "http://localhost:%d"
-`, cfg.Domain, port)
+APPEOF
+`, cfg.Domain, cfg.TargetPort)
+		summary = " for " + cfg.Domain
+	}
 
-	script := fmt.Sprintf(`
-mkdir -p /opt/traefik /etc/traefik/conf.d
+	return fmt.Sprintf(`
+set -e
+sudo mkdir -p /etc/traefik/conf.d /opt/traefik /srv/traefik-404
 
-cat > /etc/traefik/traefik.yml << 'EOF'
+sudo tee /etc/traefik/traefik.yml > /dev/null << 'EOF'
 global:
   sendAnonymousUsage: false
 api:
@@ -56,25 +62,82 @@ providers:
     watch: true
 EOF
 
-cat > /etc/traefik/conf.d/app.yml << 'EOF'
-%s
+# Catch-all: any undeclared host goes to the 404 responder (port 80).
+sudo tee /etc/traefik/conf.d/00-catchall.yml > /dev/null << 'EOF'
+http:
+  routers:
+    catchall:
+      rule: "HostRegexp(\x60{host:.+}\x60)"
+      priority: 1
+      entryPoints:
+        - web
+      service: notfound
+  services:
+    notfound:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:18080"
 EOF
 
-docker rm -f traefik 2>/dev/null || true
-docker run -d --name traefik \
+sudo tee /srv/traefik-404/server.py > /dev/null << 'PYEOF'
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b"<html><body style=\"font-family:sans-serif;text-align:center;margin-top:20%%\"><h1>404</h1><p>Recurso no disponible</p></body></html>"
+        self.send_response(404)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+HTTPServer(("127.0.0.1", 18080), H).serve_forever()
+PYEOF
+
+sudo tee /etc/systemd/system/traefik-404.service > /dev/null << 'UNITEOF'
+[Unit]
+Description=Traefik catch-all 404 responder
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -u /srv/traefik-404/server.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now traefik-404
+
+sudo docker rm -f traefik 2>/dev/null || true
+sudo docker run -d --name traefik \
   --restart unless-stopped \
   -p 80:80 -p 443:443 \
   -v /etc/traefik:/etc/traefik:ro \
   -v /opt/traefik:/opt/traefik \
-  traefik:v3.0 --configFile=/etc/traefik/traefik.yml 2>/dev/null || docker run -d --name traefik \
+  traefik:v3.0 --configFile=/etc/traefik/traefik.yml 2>/dev/null || sudo docker run -d --name traefik \
   --restart unless-stopped \
   -p 80:80 -p 443:443 \
   -v /etc/traefik:/etc/traefik:ro \
   traefik:v3.0 --configFile=/etc/traefik/traefik.yml
+%s
+sudo docker restart traefik 2>/dev/null || true
+echo "Traefik ready (catch-all 404 active)%s"
+`, appYml, summary)
+}
 
-echo "Traefik configured for %s (-> :%d)"
-`, appYml, cfg.Domain, port)
+func (p *TraefikProxy) Install(client *goss.Client, cfg ProxyConfig) error {
+	port := cfg.TargetPort
+	if port == 0 {
+		port = 8080
+	}
+	cfg.TargetPort = port
 
+	script := baseTraefikScript(cfg)
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
 		return fmt.Errorf("traefik install: %w\n%s", err, out)

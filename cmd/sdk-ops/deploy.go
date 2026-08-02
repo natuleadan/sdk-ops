@@ -17,6 +17,7 @@ import (
 
 	"github.com/natuleadan/sdk-ops/deploy"
 	"github.com/natuleadan/sdk-ops/docker"
+	"github.com/natuleadan/sdk-ops/hardening"
 	"github.com/natuleadan/sdk-ops/hooks"
 	"github.com/natuleadan/sdk-ops/secrets"
 	"github.com/natuleadan/sdk-ops/ssh"
@@ -68,6 +69,7 @@ Examples:
 	deployCmd.Flags().String("sops-key", "", "Auto-decrypt service.yaml with sops (age key)")
 	deployCmd.Flags().Bool("all", false, "Deploy to all registered nodes in parallel")
 	deployCmd.Flags().String("builder", "", "Build method: dockerfile, nixpacks, pack (default: auto-detect)")
+	deployCmd.Flags().Bool("global", false, "Open the service ports to all IPs (default: admin-only)")
 	deployCmd.Flags().Bool("zero-downtime", false, "Blue/green deploy with zero downtime")
 	deployCmd.Flags().String("runtime", "", "Runtime: docker (default), k3s, swarm, bare")
 	deployCmd.Flags().String("domain", "", "Domain for k3s Ingress (required with --runtime k3s)")
@@ -86,6 +88,7 @@ type deployPushFlags struct {
 	zeroDowntime bool
 	runtimeMode  string
 	deployDomain string
+	global       bool
 }
 
 func parseDeployPushFlags(cmd *cobra.Command) deployPushFlags {
@@ -100,10 +103,11 @@ func parseDeployPushFlags(cmd *cobra.Command) deployPushFlags {
 	zeroDowntime, _ := cmd.Flags().GetBool("zero-downtime")
 	runtimeMode, _ := cmd.Flags().GetString("runtime")
 	deployDomain, _ := cmd.Flags().GetString("domain")
+	global, _ := cmd.Flags().GetBool("global")
 	return deployPushFlags{
 		nodeIP: nodeIP, name: name, user: user, key: key, port: port,
 		sopsKey: sopsKey, runAll: runAll, builderType: builderType,
-		zeroDowntime: zeroDowntime, runtimeMode: runtimeMode, deployDomain: deployDomain,
+		zeroDowntime: zeroDowntime, runtimeMode: runtimeMode, deployDomain: deployDomain, global: global,
 	}
 }
 
@@ -190,7 +194,7 @@ func runDeployPush(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return deployToOne(flags.nodeIP, flags.user, flags.key, flags.port, flags.name, sourceDir, flags.runtimeMode, flags.deployDomain, healthURL, healthTimeout, imageRef, flags.zeroDowntime, appPort)
+	return deployToOne(flags.nodeIP, flags.user, flags.key, flags.port, flags.name, sourceDir, flags.runtimeMode, flags.deployDomain, healthURL, healthTimeout, imageRef, flags.zeroDowntime, appPort, flags.global)
 }
 
 func resolveSourceDir(cmd *cobra.Command, args []string) (sourceDir string, cleanup func(), err error) {
@@ -352,6 +356,101 @@ func parseServiceConfig(svcYamlPath, sourceDir string) (appPort int, healthURL s
 	return
 }
 
+// serviceMeta carries the template init command and published ports from
+// service.yaml.
+type serviceMeta struct {
+	initCmd string
+	ports   []int
+}
+
+// parseServiceMeta reads `commands.init` and `ports` from the service.yaml.
+func parseServiceMeta(svcYamlPath string) serviceMeta {
+	var m serviceMeta
+	data, err := os.ReadFile(filepath.Clean(svcYamlPath))
+	if err != nil {
+		return m
+	}
+	inPorts := false
+	for line := range strings.SplitSeq(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "init:") {
+			m.initCmd = strings.TrimSpace(strings.TrimPrefix(trimmed, "init:"))
+			continue
+		}
+		if strings.HasPrefix(trimmed, "ports:") {
+			inPorts = true
+			continue
+		}
+		if inPorts {
+			if trimmed == "" || !strings.HasPrefix(trimmed, "-") {
+				inPorts = false
+				continue
+			}
+			clean := strings.Trim(strings.TrimPrefix(trimmed, "-"), `"' `)
+			if i := strings.Index(clean, ":"); i > 0 {
+				if p, perr := strconv.Atoi(strings.TrimSpace(clean[:i])); perr == nil && p > 0 && p <= 65535 {
+					m.ports = append(m.ports, p)
+				}
+			}
+		}
+	}
+	return m
+}
+
+// normalizeHealthURL builds the node-side health URL, preferring the
+// published port over the app default.
+func normalizeHealthURL(healthURL string, appPort int, published []int) string {
+	if len(published) > 0 && strings.HasPrefix(healthURL, "http://localhost:") {
+		path := strings.TrimPrefix(healthURL, "http://localhost:")
+		if i := strings.IndexByte(path, '/'); i >= 0 {
+			path = path[i:]
+		} else {
+			path = "/"
+		}
+		return fmt.Sprintf("http://localhost:%d%s", published[0], path)
+	}
+	if healthURL != "" && !strings.HasPrefix(healthURL, "http://") && !strings.HasPrefix(healthURL, "https://") {
+		healthPort := appPort
+		if len(published) > 0 {
+			healthPort = published[0]
+		}
+		return fmt.Sprintf("http://localhost:%d%s", healthPort, healthURL)
+	}
+	return healthURL
+}
+
+// runTemplateInit executes the service.yaml init command (e.g. the pg
+// templates' init.sh). Security: an uninitialized service can expose
+// misconfigured endpoints, so this must run after a successful deploy.
+func runTemplateInit(conn *golang_ssh.Client, name string, meta serviceMeta) error {
+	if meta.initCmd == "" {
+		return nil
+	}
+	fmt.Printf("  → Running template init (%s)...\n", meta.initCmd)
+	if _, _, err := ssh.Run(conn, fmt.Sprintf("cd /opt/sdk-ops/services/%s/current && sudo bash -c '%s'", name, meta.initCmd)); err != nil {
+		return fmt.Errorf("service init: %w", err)
+	}
+	return nil
+}
+
+// applyDeployPortPolicy opens the published ports with the firewall policy:
+// admin-only by default, --global for all IPs.
+func applyDeployPortPolicy(conn *golang_ssh.Client, meta serviceMeta, global bool) error {
+	if len(meta.ports) == 0 {
+		return nil
+	}
+	scope := hardening.PortScopeAdmin
+	if global {
+		scope = hardening.PortScopeGlobal
+	}
+	for _, p := range meta.ports {
+		if err := hardening.AllowlistExposePort(conn, p, "tcp", scope); err != nil {
+			return fmt.Errorf("firewall expose %d: %w", p, err)
+		}
+	}
+	return nil
+}
+
 func readServiceYamlData(svcYamlPath string) (hasDB bool, rawData string, err error) {
 	data, err := os.ReadFile(filepath.Clean(svcYamlPath))
 	if err != nil {
@@ -481,7 +580,7 @@ func generateComposeAndServiceYaml(imageRef, name string, appPort int, hasDB boo
 	return nil
 }
 
-func deployToOne(nip, nuser, nkey string, nport int, name, sourceDir, runtimeMode, deployDomain, healthURL string, healthTimeout int, imageRef string, zeroDowntime bool, appPort int) error {
+func deployToOne(nip, nuser, nkey string, nport int, name, sourceDir, runtimeMode, deployDomain, healthURL string, healthTimeout int, imageRef string, zeroDowntime bool, appPort int, globalPorts bool) error {
 	client := newSSHClient(nip, nuser, nport, nkey)
 	conn, err := client.Connect()
 	if err != nil {
@@ -514,7 +613,18 @@ func deployToOne(nip, nuser, nkey string, nport int, name, sourceDir, runtimeMod
 	}
 	stopSpinner("Deployed v" + result.Version)
 
+	meta := parseServiceMeta(filepath.Join(sourceDir, "service.yaml"))
+	healthURL = normalizeHealthURL(healthURL, appPort, meta.ports)
+
 	if err := deployRuntimeOnNode(conn, name, result, runtimeMode, deployDomain, healthURL, healthTimeout, imageRef, zeroDowntime, nip); err != nil {
+		return err
+	}
+
+	if err := runTemplateInit(conn, name, meta); err != nil {
+		return err
+	}
+
+	if err := applyDeployPortPolicy(conn, meta, globalPorts); err != nil {
 		return err
 	}
 
@@ -594,7 +704,7 @@ func runServiceWithHealthCheck(conn *golang_ssh.Client, name, healthURL string, 
 		if err := deploy.RunService(conn, svcCfg); err != nil {
 			log.Printf("deploy: run service error: %v", err)
 		}
-		return fmt.Errorf("health check failed on %s, rolled back", nip)
+		return fmt.Errorf("health check failed on %s: %v", nip, err)
 	}
 	return nil
 }
@@ -608,7 +718,7 @@ func deployToAllNodes(flags deployPushFlags, nodes []NodeConfig, sourceDir strin
 		wg.Add(1)
 		go func(node NodeConfig) {
 			defer wg.Done()
-			if err := deployToOne(node.IP, node.User, node.Key, node.Port, flags.name, sourceDir, flags.runtimeMode, flags.deployDomain, healthURL, healthTimeout, imageRef, flags.zeroDowntime, appPort); err != nil {
+			if err := deployToOne(node.IP, node.User, node.Key, node.Port, flags.name, sourceDir, flags.runtimeMode, flags.deployDomain, healthURL, healthTimeout, imageRef, flags.zeroDowntime, appPort, flags.global); err != nil {
 				errs <- err
 			}
 		}(n)

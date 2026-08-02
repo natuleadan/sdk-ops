@@ -99,6 +99,16 @@ func addToTar(path string, info os.FileInfo, cfg UploadConfig, tw *tar.Writer) e
 	if info.IsDir() {
 		header.Name += "/"
 	}
+	if !info.IsDir() {
+		// Normalize permissions for container mounts: config files must be
+		// world-readable (0644) or containers running as non-root users get
+		// "Permission denied" (e.g. haproxy.cfg). Keep executables at 0755.
+		if info.Mode()&0o111 != 0 {
+			header.Mode = 0o755
+		} else {
+			header.Mode = 0o644
+		}
+	}
 
 	if err := tw.WriteHeader(header); err != nil {
 		return err

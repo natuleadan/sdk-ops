@@ -21,6 +21,7 @@ type Client struct {
 	port     int
 	user     string
 	key      string
+	password string
 	usePW    bool
 	insecure bool
 }
@@ -33,6 +34,12 @@ func WithPort(port int) Option {
 
 func WithKey(key string) Option {
 	return func(c *Client) { c.key = key }
+}
+
+// WithPassword sets a password for authentication (used before hardening, or
+// for servers that only accept password auth).
+func WithPassword(password string) Option {
+	return func(c *Client) { c.password = password }
 }
 
 func WithInsecure() Option {
@@ -50,6 +57,10 @@ func New(host, user string, opts ...Option) *Client {
 	for _, o := range opts {
 		o(c)
 	}
+	// Expand a literal ~/ in the key path before any existence checks.
+	if strings.HasPrefix(c.key, "~/") {
+		c.key = filepath.Join(homeDir, c.key[2:])
+	}
 	if _, err := os.Stat(c.key); os.IsNotExist(err) {
 		c.key = filepath.Join(homeDir, ".ssh", "id_rsa")
 	}
@@ -59,7 +70,10 @@ func New(host, user string, opts ...Option) *Client {
 	return c
 }
 
-func hostKeyCallback() (ssh.HostKeyCallback, error) {
+func (c *Client) hostKeyCallback() (ssh.HostKeyCallback, error) {
+	if c.insecure {
+		return func(hostname string, remote net.Addr, key ssh.PublicKey) error { return nil }, nil
+	}
 	isStrict := os.Getenv("SDK_OPS_SSH_STRICT_HOST_KEY") == "true" || os.Getenv("SDK_OPS_SSH_STRICT_HOST_KEY") == "1"
 	khPath := filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts")
 	cb, err := knownhosts.New(khPath)
@@ -73,7 +87,7 @@ func hostKeyCallback() (ssh.HostKeyCallback, error) {
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error { return nil }, nil
 }
 
-func tryAgentAuth() []ssh.AuthMethod {
+func tryAgentSigners() []ssh.Signer {
 	authSock := os.Getenv("SSH_AUTH_SOCK")
 	if authSock == "" || strings.Contains(authSock, "..") {
 		return nil
@@ -98,7 +112,7 @@ func tryAgentAuth() []ssh.AuthMethod {
 		}
 		return nil
 	}
-	return []ssh.AuthMethod{ssh.PublicKeys(signers...)}
+	return signers
 }
 
 func tryPasswordAuth(user, host string) ([]ssh.AuthMethod, error) {
@@ -111,7 +125,11 @@ func tryPasswordAuth(user, host string) ([]ssh.AuthMethod, error) {
 	return []ssh.AuthMethod{ssh.Password(string(pass))}, nil
 }
 
-func tryKeyAuth(keyPath string) ([]ssh.AuthMethod, error) {
+func tryKeySigner(keyPath string) (ssh.Signer, error) {
+	if strings.HasPrefix(keyPath, "~/") {
+		homeDir, _ := os.UserHomeDir()
+		keyPath = filepath.Join(homeDir, keyPath[2:])
+	}
 	key, err := os.ReadFile(filepath.Clean(keyPath))
 	if err != nil {
 		return nil, fmt.Errorf("read key %s: %w", keyPath, err)
@@ -120,17 +138,30 @@ func tryKeyAuth(keyPath string) ([]ssh.AuthMethod, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse key %s: %w", keyPath, err)
 	}
-	return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
+	return signer, nil
 }
 
 func (c *Client) authMethods() ([]ssh.AuthMethod, error) {
-	if methods := tryAgentAuth(); methods != nil {
-		return methods, nil
+	if c.password != "" {
+		return []ssh.AuthMethod{ssh.Password(c.password)}, nil
 	}
 	if c.usePW {
 		return tryPasswordAuth(c.user, c.host)
 	}
-	return tryKeyAuth(c.key)
+	// Combine agent identities and the explicit key file into ONE PublicKeys
+	// method so the server tries each signer in order (Go's client stops after
+	// a failed method; within a method it moves to the next signer).
+	var signers []ssh.Signer
+	if agentSigners := tryAgentSigners(); len(agentSigners) > 0 {
+		signers = append(signers, agentSigners...)
+	}
+	if keySigner, err := tryKeySigner(c.key); err == nil {
+		signers = append(signers, keySigner)
+	}
+	if len(signers) == 0 {
+		return nil, fmt.Errorf("no usable auth method (no agent identities and no readable key)")
+	}
+	return []ssh.AuthMethod{ssh.PublicKeys(signers...)}, nil
 }
 
 func (c *Client) Connect() (*ssh.Client, error) {
@@ -139,7 +170,7 @@ func (c *Client) Connect() (*ssh.Client, error) {
 		return nil, err
 	}
 
-	hostCallback, err := hostKeyCallback()
+	hostCallback, err := c.hostKeyCallback()
 	if err != nil {
 		return nil, fmt.Errorf("host key callback: %w", err)
 	}

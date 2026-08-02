@@ -29,7 +29,11 @@ type RootConfig struct {
 func configDir() string {
 	homeDir, _ := os.UserHomeDir()
 	dir := filepath.Join(homeDir, ".sdk-ops")
-	func() { if err := os.MkdirAll(dir, 0700); err != nil { fmt.Fprintf(os.Stderr, "mkdir: %v\n", err) } }()
+	func() {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			fmt.Fprintf(os.Stderr, "mkdir: %v\n", err)
+		}
+	}()
 	return dir
 }
 

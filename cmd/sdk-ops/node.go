@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -30,6 +31,19 @@ func nodeFlagsWithConfig(ip, user, key string, port int) (string, string, int) {
 	}
 	if port == 0 {
 		port = 22
+	}
+	// A registered key that no longer exists (moved machine, deleted tree)
+	// must not force the password fallback — drop it and use the default.
+	if key != "" {
+		expanded := key
+		if strings.HasPrefix(expanded, "~/") {
+			homeDir, _ := os.UserHomeDir()
+			expanded = filepath.Join(homeDir, expanded[2:])
+		}
+		if _, err := os.Stat(filepath.Clean(expanded)); err != nil {
+			fmt.Printf("  (ignoring registered key %s: %v)\n", key, err)
+			key = ""
+		}
 	}
 	return user, key, port
 }
@@ -105,7 +119,11 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("ssh connect: %w", err)
 			}
-			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "node: conn close error: %v\n", err) } }()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "node: conn close error: %v\n", err)
+				}
+			}()
 
 			stats, err := monitor.GetStats(conn)
 			if err != nil {
@@ -150,10 +168,16 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("ssh connect: %w", err)
 			}
-			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "node: conn close error: %v\n", err) } }()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "node: conn close error: %v\n", err)
+				}
+			}()
 
 			fmt.Printf("\n  Opening htop on %s...\n\n", ip)
-			if _, _, err := ssh.Run(conn, "command -v htop >/dev/null 2>&1 || apt-get install -y -qq htop 2>&1"); err != nil { log.Printf("node: ssh run error: %v", err) }
+			if _, _, err := ssh.Run(conn, "command -v htop >/dev/null 2>&1 || apt-get install -y -qq htop 2>&1"); err != nil {
+				log.Printf("node: ssh run error: %v", err)
+			}
 			if err := monitor.RunInteractive(conn, "htop"); err != nil {
 				return fmt.Errorf("htop failed: %w", err)
 			}
@@ -217,7 +241,11 @@ func execRunE(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("ssh connect: %w", err)
 	}
-	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "node: conn close error: %v\n", err) } }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "node: conn close error: %v\n", err)
+		}
+	}()
 
 	out, _, err := monitor.RunCommand(conn, command)
 	if err != nil {
@@ -275,7 +303,11 @@ func execOnNodes(cmd *cobra.Command, nodes []NodeConfig, command string) error {
 				errs <- fmt.Errorf("[%s] ssh: %w", node.IP, err)
 				return
 			}
-			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "node: conn close error: %v\n", err) } }()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "node: conn close error: %v\n", err)
+				}
+			}()
 
 			out, _, err := monitor.RunCommand(conn, command)
 			if err != nil {
@@ -289,7 +321,9 @@ func execOnNodes(cmd *cobra.Command, nodes []NodeConfig, command string) error {
 	close(errs)
 
 	for e := range errs {
-		if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", e); err != nil { log.Printf("node: write error: %v", err) }
+		if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", e); err != nil {
+			log.Printf("node: write error: %v", err)
+		}
 	}
 	return nil
 }

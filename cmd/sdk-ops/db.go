@@ -3,10 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/natuleadan/sdk-ops/deploy"
+	"github.com/natuleadan/sdk-ops/hardening"
 )
 
 func newDbCmd() *cobra.Command {
@@ -56,7 +58,9 @@ Examples:
 
 	cmd.Flags().String("name", "", "Database name (default: type name)")
 	cmd.Flags().String("version", "", "Database version (e.g., 17-alpine, 8.0)")
-	cmd.Flags().Int("db-port", 0, "Expose on external port (0 = internal only)")
+	cmd.Flags().Int("db-port", 0, "Expose on external port (0 = internal only; admin-only by default)")
+	cmd.Flags().Bool("db-global", false, "Open the exposed port to all IPs (default: only admin IPs)")
+	cmd.Flags().String("db-ips", "", "Explicit IP/CIDR list allowed to reach the port (comma-separated, v4 and v6)")
 	cmd.Flags().String("db-user", "", "Database user (generated if empty)")
 	cmd.Flags().String("db-pass", "", "Database password (generated if empty)")
 	cmd.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
@@ -66,11 +70,32 @@ Examples:
 	return cmd
 }
 
+// dbExposeScope resolves the firewall scope for a database port.
+func dbExposeScope(dbGlobal bool, dbIPs string) (hardening.PortScope, []string, error) {
+	if dbGlobal && dbIPs != "" {
+		return "", nil, fmt.Errorf("--db-global and --db-ips are mutually exclusive")
+	}
+	if dbGlobal {
+		return hardening.PortScopeGlobal, nil, nil
+	}
+	if dbIPs != "" {
+		var ipList []string
+		for _, ip := range strings.Split(dbIPs, ",") {
+			ipList = append(ipList, strings.TrimSpace(ip))
+		}
+		return hardening.PortScopeIPs, ipList, nil
+	}
+	return hardening.PortScopeAdmin, nil, nil
+}
+
+// dbCreateRunE is the implementation of `db create`.
 func dbCreateRunE(cmd *cobra.Command, args []string) error {
 	dbType := deploy.DBType(args[0])
 	name, _ := cmd.Flags().GetString("name")
 	version, _ := cmd.Flags().GetString("version")
 	exposePort, _ := cmd.Flags().GetInt("db-port")
+	dbGlobal, _ := cmd.Flags().GetBool("db-global")
+	dbIPs, _ := cmd.Flags().GetString("db-ips")
 	nodeIP, _ := cmd.Flags().GetString("node")
 	dbUser, _ := cmd.Flags().GetString("db-user")
 	dbPass, _ := cmd.Flags().GetString("db-pass")
@@ -101,7 +126,16 @@ func dbCreateRunE(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("ssh connect: %w", err)
 	}
-	defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "db: conn close error: %v\n", err) } }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "db: conn close error: %v\n", err)
+		}
+	}()
+
+	// Security prechecks: allowlist + nftables + docker before provisioning.
+	if err := precheckNode(conn, nodeIP, &infraFlags{user: user, key: key, port: port}, true); err != nil {
+		return err
+	}
 
 	cfg := deploy.DBConfig{
 		Type:    dbType,
@@ -115,6 +149,19 @@ func dbCreateRunE(cmd *cobra.Command, args []string) error {
 	result, err := deploy.ProvisionDatabase(conn, cfg)
 	if err != nil {
 		return fmt.Errorf("provision database: %w", err)
+	}
+
+	// Firewall policy: exposed DB ports default to admin-only; --db-global
+	// opens them to every IP; --db-ips restricts to an explicit IP list
+	// (requires the allowlist, installed by the precheck when missing).
+	if result.ExposedPort > 0 {
+		scope, ipList, err := dbExposeScope(dbGlobal, dbIPs)
+		if err != nil {
+			return err
+		}
+		if err := hardening.AllowlistExposePort(conn, result.ExposedPort, "tcp", scope, ipList...); err != nil {
+			return fmt.Errorf("firewall expose %d: %w", result.ExposedPort, err)
+		}
 	}
 
 	fmt.Println()
@@ -177,7 +224,11 @@ func newDbListCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("ssh connect: %w", err)
 			}
-			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "db: conn close error: %v\n", err) } }()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "db: conn close error: %v\n", err)
+				}
+			}()
 
 			dbs, err := deploy.ListDatabases(conn)
 			if err != nil {
@@ -239,7 +290,11 @@ func newDbRemoveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("ssh connect: %w", err)
 			}
-			defer func() { if err := conn.Close(); err != nil { fmt.Fprintf(os.Stderr, "db: conn close error: %v\n", err) } }()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "db: conn close error: %v\n", err)
+				}
+			}()
 
 			if err := deploy.RemoveDatabase(conn, name); err != nil {
 				return err

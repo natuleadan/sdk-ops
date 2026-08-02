@@ -185,10 +185,16 @@ func newProviderCDNCmd() *cobra.Command {
 }
 
 func runCDNList(cmd *cobra.Command, args []string) error {
-	v, err := getVultrClient(); if err != nil { return err }
-	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
+	v, err := getVultrClient()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
 	zones, err := v.ListCDNPullZones(ctx)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	for _, z := range zones {
 		fmt.Printf("%s  %s  %s  %s\n", z.ID, z.Label, z.OriginDomain, z.Status)
 	}
@@ -196,23 +202,37 @@ func runCDNList(cmd *cobra.Command, args []string) error {
 }
 
 func runCDNCreate(cmd *cobra.Command, args []string) error {
-	v, err := getVultrClient(); if err != nil { return err }
-	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
+	v, err := getVultrClient()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
 	z, err := v.CreateCDNPullZone(ctx, args[0], args[1])
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	fmt.Printf("✓ CDN zone created: %s\n", z.ID)
 	return nil
 }
 
 func runCDNDelete(cmd *cobra.Command, args []string) error {
-	v, err := getVultrClient(); if err != nil { return err }
-	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
+	v, err := getVultrClient()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
 	return v.DeleteCDNPullZone(ctx, args[0])
 }
 
 func runCDNPurge(cmd *cobra.Command, args []string) error {
-	v, err := getVultrClient(); if err != nil { return err }
-	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
+	v, err := getVultrClient()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
 	return v.PurgeCDNPullZone(ctx, args[0])
 }
 
@@ -229,10 +249,16 @@ func newProviderBlockStorageCmd() *cobra.Command {
 }
 
 func runBlockList(cmd *cobra.Command, args []string) error {
-	v, err := getVultrClient(); if err != nil { return err }
-	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
+	v, err := getVultrClient()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
 	blocks, err := v.ListBlockStorages(ctx)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	for _, b := range blocks {
 		fmt.Printf("%s  %s  %dGB  %s  attached=%s\n", b.ID, b.Label, b.SizeGB, b.Region, b.AttachedTo)
 	}
@@ -240,31 +266,51 @@ func runBlockList(cmd *cobra.Command, args []string) error {
 }
 
 func runBlockCreate(cmd *cobra.Command, args []string) error {
-	v, err := getVultrClient(); if err != nil { return err }
-	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
+	v, err := getVultrClient()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
 	size, _ := strconv.Atoi(args[2])
-	if size < 10 { size = 10 }
+	if size < 10 {
+		size = 10
+	}
 	b, err := v.CreateBlockStorage(ctx, args[0], args[1], size)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	fmt.Printf("✓ Block storage created: %s\n", b.ID)
 	return nil
 }
 
 func runBlockDelete(cmd *cobra.Command, args []string) error {
-	v, err := getVultrClient(); if err != nil { return err }
-	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
+	v, err := getVultrClient()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
 	return v.DeleteBlockStorage(ctx, args[0])
 }
 
 func runBlockAttach(cmd *cobra.Command, args []string) error {
-	v, err := getVultrClient(); if err != nil { return err }
-	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
+	v, err := getVultrClient()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
 	return v.AttachBlockStorage(ctx, args[0], args[1])
 }
 
 func runBlockDetach(cmd *cobra.Command, args []string) error {
-	v, err := getVultrClient(); if err != nil { return err }
-	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second); defer cancel()
+	v, err := getVultrClient()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
 	return v.DetachBlockStorage(ctx, args[0])
 }
 

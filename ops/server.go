@@ -10,7 +10,6 @@ import (
 
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/natuleadan/sdk-ops/cloudinit"
 	"github.com/natuleadan/sdk-ops/deploy"
 	"github.com/natuleadan/sdk-ops/docker"
 	"github.com/natuleadan/sdk-ops/hardening"
@@ -41,7 +40,6 @@ type ServerConfig struct {
 	Context     string
 	MergeKube   bool
 	InsecureSSH bool
-	CloudInit   bool
 	Provider    providers.Provider
 }
 
@@ -128,9 +126,6 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) Provision(ctx context.Context) error {
-	if s.cfg.CloudInit && s.cfg.Provider != nil {
-		return s.provisionCloudInit(ctx)
-	}
 	return s.provisionSSH(ctx)
 }
 
@@ -238,47 +233,6 @@ func installRuntime(s *Server) error {
 	return nil
 }
 
-func (s *Server) provisionCloudInit(ctx context.Context) error {
-	ciCfg := cloudinit.DefaultConfig()
-	ciCfg.Mode = string(s.cfg.Mode)
-	ciCfg.CrowdSec = s.cfg.CrowdSec
-	ciCfg.EnableMonitor = s.cfg.Monitor
-	userData := cloudinit.Generate(ciCfg)
-
-	vpsCfg := providers.VPSCreateConfig{
-		UserData: userData,
-	}
-	_, err := s.cfg.Provider.CreateVPS(ctx, vpsCfg)
-	if err != nil {
-		return fmt.Errorf("cloud-init create vps: %w", err)
-	}
-
-	time.Sleep(10 * time.Second)
-	ciUser := "sdkops"
-	ciPort := 2222
-	for attempt := 1; attempt <= 30; attempt++ {
-		opts := []ssh.Option{ssh.WithPort(ciPort)}
-		if s.cfg.InsecureSSH {
-			opts = append(opts, ssh.WithInsecure())
-		}
-		client := ssh.New(s.cfg.Host, ciUser, opts...)
-		conn, err := client.Connect()
-		if err == nil {
-			if err := conn.Close(); err != nil {
-				log.Printf("server: conn close error: %v", err)
-			}
-			s.cfg.User = ciUser
-			s.cfg.SSHPort = ciPort
-			return nil
-		}
-		if attempt == 30 {
-			return fmt.Errorf("cloud-init: VPS not ready after 150s")
-		}
-		time.Sleep(5 * time.Second)
-	}
-	return nil
-}
-
 func installCrowdSec(client *gossh.Client) error {
 	fmt.Println("  → Installing CrowdSec...")
 	script := `#!/bin/bash
@@ -304,7 +258,11 @@ func (s *Server) Status() (string, error) {
 	if err := s.connect(); err != nil {
 		return "", err
 	}
-	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
+	defer func() {
+		if err := s.conn.Close(); err != nil {
+			log.Printf("server: conn close error: %v", err)
+		}
+	}()
 
 	var result string
 	sysInfo := `echo "Hostname: $(hostname)"
@@ -341,7 +299,11 @@ func (s *Server) Deploy(sourceDir string) (*deploy.DeployResult, error) {
 	if err := s.connect(); err != nil {
 		return nil, err
 	}
-	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
+	defer func() {
+		if err := s.conn.Close(); err != nil {
+			log.Printf("server: conn close error: %v", err)
+		}
+	}()
 
 	cfg := deploy.UploadConfig{
 		ServiceName: filepath.Base(sourceDir),
@@ -354,7 +316,11 @@ func (s *Server) DeployPush(sourceDir, name string) (*deploy.DeployResult, error
 	if err := s.connect(); err != nil {
 		return nil, err
 	}
-	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
+	defer func() {
+		if err := s.conn.Close(); err != nil {
+			log.Printf("server: conn close error: %v", err)
+		}
+	}()
 
 	reg := deploy.DefaultRegistry()
 	if _, err := deploy.BuildAndPushImage(sourceDir, name, reg); err != nil {
@@ -396,7 +362,11 @@ func (s *Server) Exec(cmd string) (string, error) {
 	if err := s.connect(); err != nil {
 		return "", err
 	}
-	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
+	defer func() {
+		if err := s.conn.Close(); err != nil {
+			log.Printf("server: conn close error: %v", err)
+		}
+	}()
 
 	out, _, err := ssh.Run(s.conn, cmd)
 	return out, err
@@ -406,7 +376,11 @@ func (s *Server) BackupServices(destDir string) (string, error) {
 	if err := s.connect(); err != nil {
 		return "", err
 	}
-	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
+	defer func() {
+		if err := s.conn.Close(); err != nil {
+			log.Printf("server: conn close error: %v", err)
+		}
+	}()
 
 	return deploy.BackupServices(s.conn, destDir)
 }
@@ -415,7 +389,11 @@ func (s *Server) RestoreServices(backupPath string) error {
 	if err := s.connect(); err != nil {
 		return err
 	}
-	defer func() { if err := s.conn.Close(); err != nil { log.Printf("server: conn close error: %v", err) } }()
+	defer func() {
+		if err := s.conn.Close(); err != nil {
+			log.Printf("server: conn close error: %v", err)
+		}
+	}()
 
 	return deploy.RestoreServices(s.conn, backupPath)
 }

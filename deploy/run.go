@@ -78,11 +78,26 @@ func runDockerCompose(client *goss.Client, dir string) error {
 		return buildAndRun(client, dir)
 	}
 	fmt.Println("  → Pulling image from registry and starting...")
-	err = ssh.RunStream(client, fmt.Sprintf("cd %s && sudo docker compose pull && sudo docker compose up -d --remove-orphans", dir))
+	// Stop leftover containers of previous versions of this service — a
+	// failed deploy/rollback can leave them running and holding the ports.
+	err = ssh.RunStream(client, fmt.Sprintf(`cd %s && sudo bash -c 'for c in $(docker ps -aq --filter name=%s- 2>/dev/null); do docker rm -f $c >/dev/null 2>&1; done' && sudo docker compose pull && sudo docker compose up -d --remove-orphans`, dir, projectName(dir)))
 	if err != nil {
 		return fmt.Errorf("docker compose: %w", err)
 	}
 	return nil
+}
+
+// projectName extracts the service name from the service directory
+// (/opt/sdk-ops/services/<name>/current -> <name>).
+func projectName(dir string) string {
+	parts := strings.Split(strings.TrimSuffix(dir, "/"), "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	if parts[len(parts)-1] == "current" && len(parts) >= 2 {
+		return parts[len(parts)-2]
+	}
+	return parts[len(parts)-1]
 }
 
 func buildAndRun(client *goss.Client, dir string) error {
@@ -233,7 +248,7 @@ ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
 	code=$(timeout 5 curl -s -o /dev/null -w '%%{http_code}' '%s' 2>/dev/null)
 	if [ "$code" = "200" ]; then
-		echo "healthy (%s)"
+		echo "healthy"
 		exit 0
 	fi
 	sleep $INTERVAL
@@ -241,7 +256,7 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
 done
 echo "unhealthy after ${TIMEOUT}s"
 exit 1
-`, timeout, healthURL, healthURL)
+`, timeout, healthURL)
 	} else {
 		script = fmt.Sprintf(`
 TIMEOUT=%d

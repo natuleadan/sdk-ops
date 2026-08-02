@@ -88,7 +88,8 @@ Full reference: `docs/commands.md`. Categories:
 |----------|-------------|
 | **Provision** | `infra init/join/adopt/status/remove` |
 | **Backup** | `infra backup/restore`, `backup create/restore/schedule` |
-| **Firewall** | `infra firewall open/close/list` |
+| **Firewall** | `infra firewall open/close/list`, `cf-normal`, `cf-strict`, `allowlist` (status/refresh/remove/expose/unexpose/ports/peer), `ban/unban/bans` |
+| **Provision** | `infra provision <file.yaml>` (fleet: hosts + peers + bans in parallel) |
 | **TLS** | `infra cert install/info` |
 | **Logs** | `infra logs install/remove` |
 | **Alerts** | `infra alerts install/remove/rule add` |
@@ -186,6 +187,25 @@ sdk-ops infra firewall close 9090 --node <ip>
 sdk-ops infra firewall list --node <ip>
 ```
 
+### Provider IP allowlist (cf-normal / cf-strict)
+```
+sdk-ops infra firewall cf-normal --node <ip> --admin-ips "1.2.3.4,2001:db8::1"
+sdk-ops infra firewall cf-strict --yes --node <ip> --admin-ips "1.2.3.4"
+sdk-ops infra firewall allowlist status|refresh|remove --node <ip>
+sdk-ops infra firewall allowlist expose 6432 --node <ip>          # admin-only
+sdk-ops infra firewall allowlist expose 9090 --ips "ip1,ip2" --node <ip>
+sdk-ops infra firewall allowlist ports --node <ip>
+sdk-ops infra firewall ban/unban <ip> --node <ip>
+```
+
+### Provision a whole fleet from a YAML
+```
+sdk-ops infra provision provision.yaml --insecure
+# fleet files: backend/vps-config/ (per-project convention)
+```
+`provision.yaml` supports hosts (per-host overrides), `peers` (per-port
+restricted access between VPSes) and `bans` (fail2ban, applied to every host).
+
 ### TLS certificate (Let's Encrypt + Caddy)
 ```
 sdk-ops infra cert install --domain example.com --email admin@x.com --node <ip>
@@ -266,6 +286,32 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
 ```
 
 ## Gotchas
+
+- **IPs are always explicit** (CLI flags or provision YAML) — there is NO IP
+  auto-detection anywhere (removed on purpose: ISPs rotate egress IPs and
+  auto-seeded admin IPs caused ban lockouts).
+- **After hardening, connect as `sdkops`** (`--user sdkops`) — root login is
+  disabled. Using root generates failed auths that fail2ban counts, which
+  bans the operator IP (recover with `infra firewall unban <ip>` from another
+  allowed path, or via `ssh -A` through a peer node).
+- **fail2ban bans last 1h** (bantime 3600) — banned operator IPs are listed
+  by `infra firewall bans --node <ip>`.
+- **Provision peers/ports must be <= 65535** (the CLI validates).
+- **IPv6-only hosts need `iptable_nat`** — `docker.EnsureNetworking()` handles
+  it (modprobe + daemon restart when the DOCKER nat chain is missing).
+- **Swap rule (bottom-up)**: 0.5x RAM base (always), +0.5x RAM per 10GB of
+  free disk, cap 2x RAM. Operator-managed via `infra swap create|update|remove|status`.
+- **Peers use `peer_ip`** (fallback: `host`) — use IPv6 between servers to
+  keep IPv4 free for public 80/443.
+- **Deploy runs the template `init`** (service.yaml `commands.init`) after
+  compose up — never ship an uninitialized service. `deploy push --global`
+  opens published ports to all IPs (default: admin-only). Uploaded files are
+  normalized to 0644/0755 so container mounts work.
+- **Telegram alerts**: provision YAML `telegram.enabled/api_key/chat_id`
+  writes `/etc/sdk-ops/firewall/notify.env`; the daily allowlist refresh
+  notifies on ABORT.
+- **Retired commands**: `plan`/`apply` (use `infra provision`), `cloud-init`
+  flags (SSH init handles everything), `agent` (daemon removed).
 
 - **SSH port stays on 22** by default after hardening. Only changes if `--ssh-port N` is explicitly set.
 - **nftables is used** (not UFW). Port 22 is always kept open.

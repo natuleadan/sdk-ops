@@ -54,6 +54,14 @@ Flags:
   --crowdsec              Install CrowdSec WAF/IPS
   --logs string           Install Promtail, ship logs to Loki URL
   --alerts string         Install Alertmanager with Slack webhook URL
+  --firewall-allowlist string
+                          Install provider IP allowlist right after hardening:
+                          cf, url:<url>, dns:<fqdn>, or strict / strict:<source>
+                          (normal: all ports gated except SSH; strict: all ports,
+                          including SSH)
+  --no-traefik            Do not install Traefik as the default reverse proxy
+                          (bare/docker modes install Traefik + catch-all 404 by
+                          default; k3s ships its own Traefik ingress)
   --cloud-init            Use cloud-init instead of SSH-based provisioning
   --provider string       Create VPS via provider (cubepath, hetzner, digitalocean, vultr, aws, civo)
   --plan string           VPS plan (default "gp.nano")
@@ -75,7 +83,8 @@ Flags:
 3. Kernel tuning: sysctl (syncookies, rp_filter, ptrace_scope)
 4. fail2ban + unattended-upgrades
 5. SSH hardening: disable password auth, restrict root login
-6. nftables firewall: allow ports 22, 80, 443, 6443 (keep port 22 open)
+6. nftables firewall: allow ports 22, 80, 443, 6443 (keep port 22 open); 9100
+   is also opened when `--monitor` is set
 7. Optional: node_exporter (--monitor), CrowdSec (--crowdsec)
 8. Docker install (unless --bare)
 9. k3s server + Traefik (if --k3s)
@@ -83,6 +92,15 @@ Flags:
 11. Fetch kubeconfig to local machine
 12. Create `/opt/sdk-ops/` structure
 13. Auto-register node in `~/.sdk-ops/config.yaml`
+14. Optional: provider IP allowlist (--firewall-allowlist) — see the firewall
+    section for profiles and behavior
+15. Swap is always created first: 4x RAM, reduced (x2/x1/x0.5) while it would
+    exceed 1% of the free disk, floor at 1.5x RAM (small boxes always get
+    swap). Existing swapfiles are resized to the computed size.
+
+All hardening steps run with sudo, so `infra init` can be re-run idempotently
+as the hardened user (e.g. `sdkops`) after the first provision. After init,
+SSH as root is disabled — connect with `--user sdkops`.
 
 ### join
 
@@ -198,6 +216,166 @@ sdk-ops infra firewall list --node <ip> [flags]
 ```
 
 Add, remove, or list nftables firewall rules on a remote node.
+
+#### Provider IP allowlist (cf-normal / cf-strict)
+
+Restrict inbound traffic to provider IP ranges (Cloudflare by default), kept
+up to date by a systemd timer on the node that refreshes the ranges daily.
+
+```bash
+sdk-ops infra firewall cf-normal --node <ip> [flags]
+  --source string          IP list source (default "cf")
+                           cf | url:<url> | dns:<fqdn>
+  --cloud-firewall string  Also sync allowlist to a provider cloud firewall
+                           (vultr, digitalocean, hetzner, ...)
+  --no-self                Do not add your public IP as a permanent admin entry
+  -n, --node               Target node IP
+
+sdk-ops infra firewall cf-strict --node <ip> [flags]
+  --source string          IP list source (default "cf")
+  --cloud-firewall string  Also sync allowlist to a provider cloud firewall
+  --no-self                Do not add your public IP as a permanent admin entry
+  --yes                    Confirm the lockout risk warning and proceed
+  -n, --node               Target node IP
+```
+
+- `cf-normal` — gates every inbound port to the allowlist **except SSH**, which
+  stays open from any IP. Custom SSH ports are detected from the live ruleset.
+- `cf-strict` — gates every inbound port **including SSH**. Prints a lockout
+  warning and requires `--yes`. Your public IP is always seeded as a permanent
+  admin entry (the install aborts if it cannot be detected, unless `--no-self`).
+- Sources: `cf` (Cloudflare `ips-v4`/`ips-v6`), `url:<url>` (plain-text CIDR
+  list, one per line), `dns:<fqdn>` (DNS TXT records, resolving `include:`
+  chains like Google's `_cloud-netblocks.googleusercontent.com`).
+- The refresh is fail-open: if fetching or validation fails, the last good
+  list is kept and the error is logged to `/var/log/sdk-ops-allowlist.log`.
+- Every install is verified: the CLI opens a **new SSH connection** after
+  applying the config and only then commits. If the new connection fails, a
+  node-side auto-rollback (`systemd-run`, 30s window) restores the previous
+  firewall automatically. The daily refresh also self-heals the permanent
+  `admin4`/`admin6` entries if they are ever missing.
+- The config only manages the `inet filter` table — Docker/iptables tables are
+  never flushed. The `nftables` service is enabled so the allowlist survives
+  reboots.
+
+```bash
+sdk-ops infra firewall allowlist refresh --node <ip>   # fetch and apply now
+sdk-ops infra firewall allowlist status --node <ip>    # last sync + live sets
+sdk-ops infra firewall allowlist remove --node <ip>    # restore pre-allowlist config
+sdk-ops infra firewall allowlist admin add <ip> --node <ip>
+sdk-ops infra firewall allowlist admin remove <ip> --node <ip>
+sdk-ops infra firewall allowlist expose <port> --node <ip>
+  -s, --scope string    admin (default), global, ips, traefik
+  -g, --global          Open to all IPs (shorthand for --scope global)
+      --ips string      Explicit IP/CIDR list (comma-separated, v4 and v6)
+                        — shorthand for --scope ips
+  -P, --proto           tcp, udp (default "tcp")
+sdk-ops infra firewall allowlist unexpose <port> --node <ip>
+sdk-ops infra firewall allowlist ports --node <ip>
+```
+
+Admin entries (`admin4`/`admin6` sets) are permanent bootstrap IPs and are
+never touched by the daily refresh — use them to regain access if your IP
+changes under `cf-strict`.
+
+**Port exposure policy:** `allowlist expose` opens a port under a scope:
+- `admin` (default) — reachable only from the permanent admin IPs, IPv4 and
+  IPv6 (recommended for databases like PgDog/PostgreSQL; blocks Cloudflare
+  too).
+- `ips` / `--ips "ip1,ip2"` — reachable only from an explicit array of
+  IPv4/IPv6 addresses or CIDRs.
+- `global` — reachable from every IP.
+- `traefik` — registered only (no firewall rule); HTTP services are expected
+  to be routed through Traefik instead of exposing ports.
+
+Exposed ports are recorded in `/etc/sdk-ops/firewall/ports.yaml` and
+re-applied automatically after an allowlist reinstall. `allowlist ports`
+lists the registry. `db create` applies this policy automatically: `--db-port`
+exposes admin-only by default, `--db-global` opens to all IPs, and
+`--db-ips` restricts to an explicit IP list.
+
+**Security prechecks:** `db create` and `allowlist expose` verify the node
+before any operation: nftables is enabled, and if the provider allowlist is
+missing it is installed automatically (cf-normal, with the operator IP) so a
+port can never be exposed without the allowlist base.
+
+When `--cloud-firewall` is set, the allowlist is also pushed to the provider's
+own cloud firewall (ports 80/443) via the provider API. Providers without
+`CloudFirewall` support are skipped with a warning. This is a one-shot sync;
+the daily timer only updates nftables on the node.
+
+Note: `cf-normal`/`cf-strict` replace the nftables config (a backup is kept at
+`/etc/sdk-ops/firewall/nftables.conf.bak` and restored by `allowlist remove`).
+The pre-apply live table is snapshotted for the auto-rollback in case the new
+config is applied but connectivity verification fails.
+
+**IP policy — no auto-detection:** every IP (admin, peer, ban) is ALWAYS
+passed explicitly via CLI or YAML. There is no IP auto-detection anywhere in
+the code (no ipify/ifconfig.co/SSH-session sniffing). This prevents ban
+lockouts caused by ISPs that rotate egress IPs between flows: the operator
+must list their own IPs in `admin_ips` / `--admin-ips`.
+
+```bash
+# Ban/unban an explicit IP via the node's fail2ban jail
+sdk-ops infra firewall ban <ip> --node <ip>
+sdk-ops infra firewall unban <ip> --node <ip>
+sdk-ops infra firewall bans --node <ip>
+```
+
+### provision
+
+Provision an entire fleet (N VPSes) from one YAML file: each host runs the
+full init (hardening + swap + Docker + Traefik + optional allowlist) in
+parallel, then peers and bans are applied.
+
+```yaml
+mode: docker                # k3s | docker | bare
+parallel: 3
+firewall_allowlist: cf      # cf | url:... | dns:... | strict | "" (skip)
+admin_ips: "203.0.113.10,2001:db8::1"   # explicit, never auto-detected
+hosts:
+  - name: netcup
+    host: 152.53.169.115    # SSH address
+    peer_ip: 2a0a:4cc0:2000:a9ea:2464:ccff:fedb:f581   # peer channel (IPv6)
+    user: sdkops            # root on first provision, sdkops afterwards
+    ssh_key: ~/.ssh/id_ed25519
+  - name: vps-lite
+    host: 2a03:4000:28:4f9:8ab:80ff:fe09:e007
+    user: sdkops
+    ssh_key: ~/.ssh/id_ed25519
+peers:                      # per-port, per-peer access (restricted by peer_ip)
+                            # peers use peer_ip (fallback: host) — IPv6 between
+                            # servers keeps IPv4 free for public 80/443
+  - from: vps-lite
+    to: netcup
+    ports: [43453]
+bans:                       # explicit IPs banned on every host (fail2ban)
+  - 198.51.100.7
+telegram:                   # alerts when an allowlist refresh fails
+  enabled: true
+  api_key: "123456:ABC..."  # bot token
+  chat_id: "-1001234567890"
+```
+
+```bash
+sdk-ops infra provision <file.yaml> --insecure
+```
+
+The fleet files live in `backend/vps-config/` (per-project convention), so the
+whole VPS network is reproducible with one command.
+
+### swap
+
+```bash
+sdk-ops infra swap create --node <ip>    # create/resize: 0.5x base, +0.5x per 10GB free, cap 2x
+sdk-ops infra swap update --node <ip>    # force resize to the computed size
+sdk-ops infra swap remove --node <ip>    # disable and delete the swap file
+sdk-ops infra swap status --node <ip>    # current swap state
+```
+
+The swap rule is bottom-up: base 0.5x RAM (always created — small VPSes OOM
+otherwise), +0.5x RAM for every 10GB of free disk, capped at 2x RAM. The
+hardening runs it first, and the operator can re-run/create/remove it anytime.
 
 ### cert
 
@@ -619,7 +797,9 @@ sdk-ops db create mysql [flags]               # Provision MySQL
 sdk-ops db create redis [flags]               # Provision Redis
 sdk-ops db create mongodb [flags]             # Provision MongoDB
   --name string      Database name (default: type name)
-  --db-port int      Expose on external port (0 = internal only)
+  --db-port int      Expose on external port (0 = internal only; admin-only by default)
+  --db-global        Open the exposed port to all IPs (default: only admin IPs)
+  --db-ips string    Explicit IP/CIDR list allowed to reach the port (comma-separated, v4 and v6)
   --db-user string   Database user (generated if empty)
   --db-pass string   Database password (generated if empty)
   --version string   Database version (e.g., 17-alpine, 8.0)

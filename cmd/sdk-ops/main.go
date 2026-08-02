@@ -11,6 +11,7 @@ import (
 
 var version = "dev"
 var gInsecure bool
+var gPassword string
 
 func main() {
 	var rootCmd = &cobra.Command{
@@ -32,6 +33,7 @@ Examples:
 	}
 
 	rootCmd.PersistentFlags().BoolVar(&gInsecure, "insecure", false, "Skip SSH host key verification")
+	rootCmd.PersistentFlags().StringVar(&gPassword, "password", "", "SSH password (or env SDK_OPS_PASSWORD; for servers without key auth, before hardening)")
 
 	rootCmd.AddCommand(newInfraCmd())
 	rootCmd.AddCommand(newNodeCmd())
@@ -43,7 +45,6 @@ Examples:
 	rootCmd.AddCommand(newProviderCmd())
 	rootCmd.AddCommand(newNotifyCmd())
 	rootCmd.AddCommand(newDbCmd())
-	rootCmd.AddCommand(newAgentCmd())
 	rootCmd.AddCommand(newComposeCmd())
 	rootCmd.AddCommand(newKeyCmd())
 	rootCmd.AddCommand(newVersionCmd())
@@ -75,6 +76,12 @@ func newSSHClient(host, user string, port int, keyPath string) *ssh.Client {
 	}
 	if gInsecure {
 		opts = append(opts, ssh.WithInsecure())
+	}
+	if gPassword != "" {
+		fmt.Fprintln(os.Stderr, "WARNING: --password is visible in the process list and shell history; prefer SDK_OPS_PASSWORD env var or SSH keys")
+		opts = append(opts, ssh.WithPassword(gPassword))
+	} else if pw := os.Getenv("SDK_OPS_PASSWORD"); pw != "" {
+		opts = append(opts, ssh.WithPassword(pw))
 	}
 	return ssh.New(host, user, opts...)
 }

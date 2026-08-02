@@ -13,12 +13,13 @@ func installPackages(client *goss.Client, cfg Config) error {
 
 	script := `
 for i in $(seq 1 30); do
-    if ! fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock 2>/dev/null; then
+    if ! sudo fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock 2>/dev/null; then
         break
     fi
     sleep 3
 done
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nftables fail2ban unattended-upgrades htop iotop net-tools 2>&1
+DEBIAN_FRONTEND=noninteractive sudo apt-get update -qq 2>&1 | tail -1
+DEBIAN_FRONTEND=noninteractive sudo apt-get install -y -qq nftables fail2ban unattended-upgrades htop iotop net-tools 2>&1
 `
 	return ssh.RunStream(client, script)
 }
@@ -26,13 +27,14 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nftables fail2ban unattend
 func createUser(client *goss.Client, cfg Config) error {
 	script := fmt.Sprintf(`
 if ! id "%s" &>/dev/null; then
-    useradd -m -s /bin/bash -G sudo "%s"
-    echo "%s ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/%[1]s
+    sudo useradd -m -s /bin/bash -G sudo "%s"
+    echo "%s ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/%[1]s > /dev/null
+    sudo chmod 0440 /etc/sudoers.d/%[1]s
 fi
 `, cfg.User, cfg.User, cfg.User)
 
 	if cfg.LockRoot {
-		script += `passwd -l root 2>/dev/null || true
+		script += `sudo passwd -l root 2>/dev/null || true
 `
 	}
 
@@ -47,20 +49,23 @@ fi
 
 func kernelTuning(client *goss.Client, cfg Config) error {
 	fmt.Println("  → Kernel tuning (sysctl)...")
+	// Idempotent: only append keys that are not already present.
 	script := `
-cat >> /etc/sysctl.conf << 'SYSCTL'
-net.ipv4.tcp_syncookies=1
-net.ipv4.conf.all.rp_filter=1
-net.ipv4.conf.default.rp_filter=1
-net.ipv4.conf.all.accept_source_route=0
-net.ipv6.conf.all.accept_source_route=0
-net.ipv4.conf.all.accept_redirects=0
-net.ipv6.conf.all.accept_redirects=0
-net.ipv4.conf.all.send_redirects=0
-net.ipv4.conf.default.send_redirects=0
-kernel.yama.ptrace_scope=1
-SYSCTL
-sysctl -p
+for kv in \
+  "net.ipv4.tcp_syncookies=1" \
+  "net.ipv4.conf.all.rp_filter=1" \
+  "net.ipv4.conf.default.rp_filter=1" \
+  "net.ipv4.conf.all.accept_source_route=0" \
+  "net.ipv6.conf.all.accept_source_route=0" \
+  "net.ipv4.conf.all.accept_redirects=0" \
+  "net.ipv6.conf.all.accept_redirects=0" \
+  "net.ipv4.conf.all.send_redirects=0" \
+  "net.ipv4.conf.default.send_redirects=0" \
+  "kernel.yama.ptrace_scope=1"; do
+    key="${kv%%=*}"
+    sudo grep -q "^${key}" /etc/sysctl.conf || echo "$kv" | sudo tee -a /etc/sysctl.conf > /dev/null
+done
+sudo sysctl -p
 `
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
@@ -77,7 +82,7 @@ func fail2banAndUpgrades(client *goss.Client, cfg Config) error {
 	}
 
 	script := fmt.Sprintf(`
-cat > /etc/fail2ban/jail.local << 'F2B'
+sudo tee /etc/fail2ban/jail.local > /dev/null << 'F2B'
 [DEFAULT]
 bantime = 3600
 findtime = 600
@@ -88,10 +93,10 @@ port = %d
 logpath = %%(sshd_log)s
 backend = %%(sshd_backend)s
 F2B
-systemctl restart fail2ban
+sudo systemctl restart fail2ban
 echo "fail2ban: OK"
 
-cat > /etc/apt/apt.conf.d/20auto-upgrades << 'UP'
+sudo tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null << 'UP'
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Download-Upgradeable-Packages "1";
 APT::Periodic::AutocleanInterval "7";
@@ -111,27 +116,27 @@ echo "unattended-upgrades: OK"
 
 func sshHardening(client *goss.Client, cfg Config) error {
 	script := fmt.Sprintf(`
-cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null
+sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null
 
 # Harden SSH (CIS Level 1)
-sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-sed -i 's/^#MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
-grep -q '^MaxAuthTries' /etc/ssh/sshd_config || echo 'MaxAuthTries 3' >> /etc/ssh/sshd_config
-sed -i 's/^#PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config
-grep -q '^PermitEmptyPasswords' /etc/ssh/sshd_config || echo 'PermitEmptyPasswords no' >> /etc/ssh/sshd_config
+sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo sed -i 's/^#MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
+sudo grep -q '^MaxAuthTries' /etc/ssh/sshd_config || echo 'MaxAuthTries 3' | sudo tee -a /etc/ssh/sshd_config > /dev/null
+sudo sed -i 's/^#PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config
+sudo grep -q '^PermitEmptyPasswords' /etc/ssh/sshd_config || echo 'PermitEmptyPasswords no' | sudo tee -a /etc/ssh/sshd_config > /dev/null
 
 # Copy SSH key to new user
-mkdir -p /home/%s/.ssh
-cp /root/.ssh/authorized_keys /home/%s/.ssh/ 2>/dev/null || true
-chown -R %s:%s /home/%s/.ssh
+sudo mkdir -p /home/%s/.ssh
+sudo cp /root/.ssh/authorized_keys /home/%s/.ssh/ 2>/dev/null || true
+sudo chown -R %s:%s /home/%s/.ssh
 `, cfg.User, cfg.User, cfg.User, cfg.User, cfg.User)
 
 	if cfg.MigrateSSH() {
 		script += fmt.Sprintf(`
 # Add new SSH port %d while keeping port 22
-echo "Port %d" >> /etc/ssh/sshd_config
+echo "Port %d" | sudo tee -a /etc/ssh/sshd_config > /dev/null
 echo "SSH port %d added (port 22 kept)"
 `, cfg.SSHPort, cfg.SSHPort, cfg.SSHPort)
 	} else {
@@ -143,9 +148,9 @@ echo "SSH port 22 (unchanged)"
 	script += `
 # Restart SSH
 if systemctl list-units --type=service 2>/dev/null | grep -q sshd.service; then
-    systemctl restart sshd
+    sudo systemctl restart sshd
 else
-    systemctl restart ssh
+    sudo systemctl restart ssh
 fi
 `
 
@@ -158,14 +163,22 @@ fi
 	return nil
 }
 
+// setupSwap creates swap FIRST in the init, before any heavy install.
+// Rule (bottom-up): 0.5x RAM base (always), +0.5x RAM per 10GB of free disk,
+// capped at 2x RAM. Existing swapfiles are resized to the computed size.
+func setupSwap(client *goss.Client, cfg Config) error {
+	fmt.Println("  → Swap setup (0.5x base, +0.5x per 10GB free, cap 2x)...")
+	return ApplySwap(client)
+}
+
 func removeUnusedServices(client *goss.Client, cfg Config) error {
 	fmt.Println("  → Removing unused services (telnet, ftp, rsh, rpcbind, avahi, cups)...")
 	script := `
 for svc in telnet ftp rsh rpcbind avahi-daemon cups; do
-    systemctl disable --now "$svc" 2>/dev/null || true
+    sudo systemctl disable --now "$svc" 2>/dev/null || true
 done
 for pkg in telnet ftp rsh-client rpcbind avahi-daemon cups; do
-    apt-get remove -y -qq "$pkg" 2>/dev/null || true
+    sudo apt-get remove -y -qq "$pkg" 2>/dev/null || true
 done
 echo "unused-services: OK"
 `
@@ -174,14 +187,21 @@ echo "unused-services: OK"
 
 func nftablesFirewall(client *goss.Client, cfg Config) error {
 	openPorts := "22, 80, 443, 6443"
+	if cfg.EnableMonitor {
+		openPorts = "22, 80, 443, 6443, 9100"
+	}
 	if cfg.MigrateSSH() {
 		openPorts = fmt.Sprintf("22, %d, 80, 443, 6443", cfg.SSHPort)
+		if cfg.EnableMonitor {
+			openPorts += ", 9100"
+		}
 	}
 
+	// The table definition replaces the inet filter table when loaded, so no
+	// `flush ruleset` is used — Docker and other iptables-nft tables survive.
 	script := fmt.Sprintf(`
-cat > /etc/nftables.conf << 'NFT'
+sudo tee /etc/nftables.conf > /dev/null << 'NFT'
 #!/usr/sbin/nft -f
-flush ruleset
 table inet filter {
     chain input {
         type filter hook input priority 0; policy drop;
@@ -195,7 +215,7 @@ table inet filter {
     chain output { type filter hook output priority 0; policy accept; }
 }
 NFT
-systemctl enable nftables && systemctl restart nftables && echo "nftables: OK (ports %s)"
+sudo systemctl enable nftables && sudo systemctl restart nftables && echo "nftables: OK (ports %s)"
 `, openPorts, openPorts)
 
 	fmt.Println("  → nftables (locking down ports)...")
@@ -215,10 +235,10 @@ func installAuditd(client *goss.Client, cfg Config) error {
 	fmt.Println("  → Installing auditd...")
 	script := `
 if ! command -v auditd &>/dev/null; then
-    apt-get install -y -qq auditd audispd-plugins 2>&1 | tail -1
+    sudo apt-get install -y -qq auditd audispd-plugins 2>&1 | tail -1
 fi
-systemctl enable auditd 2>/dev/null || true
-systemctl start auditd 2>/dev/null || true
+sudo systemctl enable auditd 2>/dev/null || true
+sudo systemctl start auditd 2>/dev/null || true
 echo "auditd: OK"
 `
 	return ssh.RunStream(client, script)
@@ -232,7 +252,7 @@ func installLynis(client *goss.Client, cfg Config) error {
 	fmt.Println("  → Installing Lynis security auditor...")
 	script := `
 if ! command -v lynis &>/dev/null; then
-    apt-get install -y -qq lynis 2>&1 | tail -1
+    sudo apt-get install -y -qq lynis 2>&1 | tail -1
 fi
 echo "lynis: OK"
 `
@@ -247,9 +267,9 @@ func installUSG(client *goss.Client, cfg Config) error {
 	fmt.Println("  → Installing Ubuntu Security Guide...")
 	script := `
 if ! command -v usg &>/dev/null; then
-    apt-get install -y -qq ubuntu-advantage-tools 2>&1 | tail -1
-    pro enable usg 2>&1 | tail -1
-    apt-get install -y -qq usg 2>&1 | tail -1
+    sudo apt-get install -y -qq ubuntu-advantage-tools 2>&1 | tail -1
+    sudo pro enable usg 2>&1 | tail -1
+    sudo apt-get install -y -qq usg 2>&1 | tail -1
 fi
 echo "usg: OK"
 `
@@ -272,10 +292,10 @@ fi
 cd /tmp
 curl -fsSLO "https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VER}/node_exporter-${NODE_EXPORTER_VER}.linux-amd64.tar.gz"
 tar xzf "node_exporter-${NODE_EXPORTER_VER}.linux-amd64.tar.gz"
-cp "node_exporter-${NODE_EXPORTER_VER}.linux-amd64/node_exporter" /usr/local/bin/
+sudo cp "node_exporter-${NODE_EXPORTER_VER}.linux-amd64/node_exporter" /usr/local/bin/
 rm -rf "node_exporter-${NODE_EXPORTER_VER}.linux-amd64" "node_exporter-${NODE_EXPORTER_VER}.linux-amd64.tar.gz"
 
-cat > /etc/systemd/system/node_exporter.service << 'SERVICE'
+sudo tee /etc/systemd/system/node_exporter.service > /dev/null << 'SERVICE'
 [Unit]
 Description=Prometheus Node Exporter
 After=network.target
@@ -289,9 +309,9 @@ Restart=always
 WantedBy=multi-user.target
 SERVICE
 
-systemctl daemon-reload
-systemctl enable node_exporter
-systemctl start node_exporter
+sudo systemctl daemon-reload
+sudo systemctl enable node_exporter
+sudo systemctl start node_exporter
 echo "node_exporter: OK (port 9100)"
 `
 	out, _, err := ssh.Run(client, script)

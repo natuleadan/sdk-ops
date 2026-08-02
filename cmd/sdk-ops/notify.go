@@ -31,7 +31,9 @@ func newNotifyCmd() *cobra.Command {
 
 			errs := notify.SendAll(nn, title, message)
 			for _, err := range errs {
-				if _, fErr := fmt.Fprintf(cmd.ErrOrStderr(), "  ⚠️  %v\n", err); fErr != nil { log.Printf("notify: write error: %v", fErr) }
+				if _, fErr := fmt.Fprintf(cmd.ErrOrStderr(), "  ⚠️  %v\n", err); fErr != nil {
+					log.Printf("notify: write error: %v", fErr)
+				}
 			}
 
 			success := len(nn) - len(errs)
@@ -54,7 +56,9 @@ func newNotifyCmd() *cobra.Command {
 
 			errs := notify.SendAll(nn, title, message)
 			for _, err := range errs {
-				if _, fErr := fmt.Fprintf(cmd.ErrOrStderr(), "  ⚠️  %v\n", err); fErr != nil { log.Printf("notify: write error: %v", fErr) }
+				if _, fErr := fmt.Fprintf(cmd.ErrOrStderr(), "  ⚠️  %v\n", err); fErr != nil {
+					log.Printf("notify: write error: %v", fErr)
+				}
 			}
 
 			success := len(nn) - len(errs)
@@ -84,5 +88,3 @@ func newNotifyCmd() *cobra.Command {
 	cmd.AddCommand(testCmd)
 	return cmd
 }
-
-
