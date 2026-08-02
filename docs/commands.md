@@ -364,6 +364,24 @@ sdk-ops infra provision <file.yaml> --insecure
 The fleet files live in `backend/vps-config/` (per-project convention), so the
 whole VPS network is reproducible with one command.
 
+### uninstall
+
+```bash
+sdk-ops infra uninstall <component> --node <ip>
+# components: docker | traefik | allowlist | swap | fail2ban | node-exporter | k3s | security | all
+```
+
+Selective removal of sdk-ops components (e.g. only swap, or only traefik)
+without touching the rest of the stack.
+
+### security
+
+The SSH brute force watcher runs every 5 minutes and notifies Telegram ONLY
+when attempts are detected (IP + attempt count + provider, plus a DDoS alert
+for >50 unique IPs or >100 attempts in the window). Installed automatically
+when `security.enabled: true` in the provision YAML; removed with
+`sdk-ops infra uninstall security --node <ip>`.
+
 ### swap
 
 ```bash

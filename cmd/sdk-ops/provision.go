@@ -26,6 +26,34 @@ type ProvisionFile struct {
 	Peers             []ProvisionPeer `yaml:"peers"`
 	Bans              []string        `yaml:"bans"`
 	Telegram          TelegramConfig  `yaml:"telegram"`
+	Security          SecurityConfig  `yaml:"security"`
+	SSL               SSLConfig       `yaml:"ssl"`
+	Traefik           TraefikConfig   `yaml:"traefik"`
+}
+
+// SecurityConfig enables the SSH brute force notifier (every 5 min).
+type SecurityConfig struct {
+	Enabled   bool `yaml:"enabled"`
+	Threshold int  `yaml:"threshold"`
+}
+
+// SSLConfig carries the Let's Encrypt contact email for Traefik.
+type SSLConfig struct {
+	Email   string `yaml:"email"`
+	Staging bool   `yaml:"staging"`
+}
+
+// TraefikConfig maps domains to local services for auto TLS.
+type TraefikConfig struct {
+	Enabled bool            `yaml:"enabled"`
+	Domains []TraefikDomain `yaml:"domains"`
+}
+
+// TraefikDomain routes a domain to a service on a local port.
+type TraefikDomain struct {
+	Domain  string `yaml:"domain"`
+	Service string `yaml:"service"`
+	Port    int    `yaml:"port"`
 }
 
 // TelegramConfig enables Telegram alerts for allowlist refresh failures.
@@ -128,8 +156,17 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%d/%d hosts failed to provision", failed, len(results))
 	}
 
-	// Peers phase: open the requested ports between hosts, restricted to the
-	// peer IP (requires the allowlist, which the init installed).
+	if err := applyProvisionPhases(pf, names); err != nil {
+		return err
+	}
+
+	fmt.Println("\n✅ Provision complete")
+	return nil
+}
+
+// applyProvisionPhases runs peers, bans, telegram, security and traefik
+// phases after all hosts are initialized.
+func applyProvisionPhases(pf ProvisionFile, names map[string]string) error {
 	if len(pf.Peers) > 0 {
 		fmt.Println("\n→ Configuring peers...")
 		for _, peer := range pf.Peers {
@@ -139,22 +176,150 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println("→ Peers configured")
 	}
-
-	// Bans phase: ban explicit IPs on every host (fail2ban).
 	if len(pf.Bans) > 0 {
 		if err := applyProvisionBans(pf); err != nil {
 			return err
 		}
 	}
-
-	// Telegram phase: write notify.env on every host for refresh alerts.
 	if pf.Telegram.Enabled {
 		if err := applyTelegramNotify(pf); err != nil {
 			return err
 		}
 	}
+	if pf.Security.Enabled {
+		if err := applySecurityWatch(pf); err != nil {
+			return err
+		}
+	}
+	if len(pf.Traefik.Domains) > 0 {
+		if err := applyTraefikDomains(pf); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-	fmt.Println("\n✅ Provision complete")
+// applySecurityWatch installs the brute force notifier on every host.
+func applySecurityWatch(pf ProvisionFile) error {
+	fmt.Println("\n→ Installing security watch...")
+	for _, h := range pf.Hosts {
+		port := h.Port
+		if port == 0 {
+			port = 22
+		}
+		f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+		conn, err := infraConnect(h.Host, &f)
+		if err != nil {
+			return fmt.Errorf("security: connect %s: %w", h.Name, err)
+		}
+		if err := hardening.InstallSecurityWatch(conn, hardening.SecurityWatchConfig{
+			Enabled:   pf.Security.Enabled,
+			Threshold: pf.Security.Threshold,
+		}); err != nil {
+			closeConn(conn)
+			return err
+		}
+		closeConn(conn)
+	}
+	fmt.Println("→ Security watch installed")
+	return nil
+}
+
+// applyTraefikDomains creates Traefik routers (Let's Encrypt) per domain.
+func applyTraefikDomains(pf ProvisionFile) error {
+	fmt.Println("\n→ Configuring Traefik domains...")
+	for _, h := range pf.Hosts {
+		port := h.Port
+		if port == 0 {
+			port = 22
+		}
+		f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+		conn, err := infraConnect(h.Host, &f)
+		if err != nil {
+			return fmt.Errorf("traefik: connect %s: %w", h.Name, err)
+		}
+		// HTTP-01 challenge: Let's Encrypt reaches port 80 from its own ranges.
+		if err := hardening.AllowlistExposePort(conn, 80, "tcp", hardening.PortScopeIPs, "91.198.159.0/24", "51.89.149.0/24"); err != nil {
+			closeConn(conn)
+			return fmt.Errorf("traefik letsencrypt port 80: %w", err)
+		}
+		for _, d := range pf.Traefik.Domains {
+			router := fmt.Sprintf(`http:
+  routers:
+    %[1]s:
+      rule: "Host(\x60%[1]s\x60)"
+      service: %[1]s
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+  services:
+    %[1]s:
+      loadBalancer:
+        servers:
+          - url: "http://localhost:%[2]d"
+`, d.Domain, d.Port)
+			script := fmt.Sprintf(`
+sudo tee /etc/traefik/conf.d/%[1]s.yml > /dev/null << 'ROUTEREOF'
+%[2]s
+ROUTEREOF
+`, strings.ReplaceAll(d.Domain, ".", "_"), router)
+			if _, _, err := ssh.Run(conn, script); err != nil {
+				closeConn(conn)
+				return fmt.Errorf("traefik router %s: %w", d.Domain, err)
+			}
+			fmt.Printf("  → %s -> localhost:%d on %s\n", d.Domain, d.Port, h.Name)
+		}
+		closeConn(conn)
+	}
+	// enable TLS cert resolver with the LE email
+	email := pf.SSL.Email
+	for _, h := range pf.Hosts {
+		port := h.Port
+		if port == 0 {
+			port = 22
+		}
+		f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+		conn, err := infraConnect(h.Host, &f)
+		if err != nil {
+			return fmt.Errorf("traefik: connect %s: %w", h.Name, err)
+		}
+		caServer := "https://acme-v02.api.letsencrypt.org/directory"
+		if pf.SSL.Staging {
+			caServer = "https://acme-staging-v02.api.letsencrypt.org/directory"
+		}
+		script := fmt.Sprintf(`sudo tee /etc/traefik/traefik.yml > /dev/null << 'EOF'
+global:
+  sendAnonymousUsage: false
+api:
+  dashboard: false
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: %[1]s
+      storage: /opt/traefik/acme.json
+      caServer: %[2]s
+      httpChallenge:
+        entryPoint: web
+providers:
+  file:
+    directory: /etc/traefik/conf.d
+    watch: true
+EOF
+sudo docker restart traefik 2>/dev/null || true
+echo "letsencrypt: configured (%[1]s)"`, email, caServer)
+		if _, _, err := ssh.Run(conn, script); err != nil {
+			closeConn(conn)
+			return fmt.Errorf("traefik letsencrypt: %w", err)
+		}
+		closeConn(conn)
+	}
+	fmt.Println("→ Traefik domains configured")
 	return nil
 }
 
@@ -322,17 +487,44 @@ func validateProvision(pf *ProvisionFile) (map[string]string, error) {
 			return nil, fmt.Errorf("peer %s -> %s has no ports", peer.From, peer.To)
 		}
 	}
-	for _, b := range pf.Bans {
-		if _, err := hardening.ValidateCIDR(strings.TrimSpace(b)); err != nil {
-			return nil, fmt.Errorf("bans entry %q is not a valid IP/CIDR: %v", b, err)
-		}
+	if err := validateBansAndTelegram(pf); err != nil {
+		return nil, err
 	}
 	if pf.Telegram.Enabled {
 		if pf.Telegram.APIKey == "" || pf.Telegram.ChatID == "" {
 			return nil, fmt.Errorf("telegram.enabled requires api_key and chat_id")
 		}
 	}
+	if err := validateTraefikDomains(pf); err != nil {
+		return nil, err
+	}
 	return names, nil
+}
+
+// validateBansAndTelegram checks the bans and telegram sections.
+func validateBansAndTelegram(pf *ProvisionFile) error {
+	for _, b := range pf.Bans {
+		if _, err := hardening.ValidateCIDR(strings.TrimSpace(b)); err != nil {
+			return fmt.Errorf("bans entry %q is not a valid IP/CIDR: %v", b, err)
+		}
+	}
+	return nil
+}
+
+// validateTraefikDomains checks the traefik section requirements.
+func validateTraefikDomains(pf *ProvisionFile) error {
+	if len(pf.Traefik.Domains) == 0 {
+		return nil
+	}
+	if pf.SSL.Email == "" {
+		return fmt.Errorf("traefik domains require ssl.email (Let's Encrypt contact)")
+	}
+	for _, d := range pf.Traefik.Domains {
+		if d.Domain == "" || d.Port <= 0 {
+			return fmt.Errorf("traefik domain needs domain and port")
+		}
+	}
+	return nil
 }
 
 // provisionHost runs the full init for one host with the fleet globals.

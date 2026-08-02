@@ -17,7 +17,37 @@ func (p *TraefikProxy) Type() ProxyType {
 
 // baseTraefikScript renders the shared Traefik base: config, catch-all 404
 // responder, and the container. An empty domain skips the app router.
-func baseTraefikScript(cfg ProxyConfig) string {
+func baseTraefikScript(client *goss.Client, cfg ProxyConfig) string {
+	// IPv6-only hosts: the docker bridge has no v4 DNS route, so Traefik must
+	// run on the host network (uses the host's v6 DNS + listeners).
+	netArgs := `
+sudo docker rm -f traefik 2>/dev/null || true
+sudo docker run -d --name traefik \
+  --restart unless-stopped \
+  -p 80:80 -p 443:443 \
+  -v /etc/traefik:/etc/traefik:ro \
+  -v /opt/traefik:/opt/traefik \
+  traefik:v3.0 --configFile=/etc/traefik/traefik.yml 2>/dev/null || sudo docker run -d --name traefik \
+  --restart unless-stopped \
+  -p 80:80 -p 443:443 \
+  -v /etc/traefik:/etc/traefik:ro \
+  traefik:v3.0 --configFile=/etc/traefik/traefik.yml
+`
+	if !hasIPv4(client) {
+		netArgs = `
+sudo docker rm -f traefik 2>/dev/null || true
+sudo docker run -d --name traefik \
+  --restart unless-stopped \
+  --network host \
+  -v /etc/traefik:/etc/traefik:ro \
+  -v /opt/traefik:/opt/traefik \
+  traefik:v3.0 --configFile=/etc/traefik/traefik.yml 2>/dev/null || sudo docker run -d --name traefik \
+  --restart unless-stopped \
+  --network host \
+  -v /etc/traefik:/etc/traefik:ro \
+  traefik:v3.0 --configFile=/etc/traefik/traefik.yml
+`
+	}
 	appYml := ""
 	summary := ""
 	if cfg.Domain != "" {
@@ -113,21 +143,11 @@ UNITEOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now traefik-404
 
-sudo docker rm -f traefik 2>/dev/null || true
-sudo docker run -d --name traefik \
-  --restart unless-stopped \
-  -p 80:80 -p 443:443 \
-  -v /etc/traefik:/etc/traefik:ro \
-  -v /opt/traefik:/opt/traefik \
-  traefik:v3.0 --configFile=/etc/traefik/traefik.yml 2>/dev/null || sudo docker run -d --name traefik \
-  --restart unless-stopped \
-  -p 80:80 -p 443:443 \
-  -v /etc/traefik:/etc/traefik:ro \
-  traefik:v3.0 --configFile=/etc/traefik/traefik.yml
+%s
 %s
 sudo docker restart traefik 2>/dev/null || true
 echo "Traefik ready (catch-all 404 active)%s"
-`, appYml, summary)
+`, netArgs, appYml, summary)
 }
 
 func (p *TraefikProxy) Install(client *goss.Client, cfg ProxyConfig) error {
@@ -137,13 +157,20 @@ func (p *TraefikProxy) Install(client *goss.Client, cfg ProxyConfig) error {
 	}
 	cfg.TargetPort = port
 
-	script := baseTraefikScript(cfg)
+	script := baseTraefikScript(client, cfg)
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
 		return fmt.Errorf("traefik install: %w\n%s", err, out)
 	}
 	fmt.Print(out)
 	return nil
+}
+
+// hasIPv4 reports whether the node has a public IPv4 address (docker0 and
+// other private bridges do not count — IPv6-only hosts must use host network).
+func hasIPv4(client *goss.Client) bool {
+	out, _, err := ssh.Run(client, `ip -4 addr show 2>/dev/null | awk '/inet / && $2 !~ /^127\./ && $2 !~ /^10\./ && $2 !~ /^172\.(1[6-9]|2[0-9]|3[01])\./ && $2 !~ /^192\.168\./' | wc -l`)
+	return err == nil && strings.TrimSpace(out) != "0" && strings.TrimSpace(out) != ""
 }
 
 func (p *TraefikProxy) UpdateTargetPort(client *goss.Client, domain string, port int) error {

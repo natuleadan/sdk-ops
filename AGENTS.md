@@ -312,6 +312,13 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
   notifies on ABORT.
 - **Retired commands**: `plan`/`apply` (use `infra provision`), `cloud-init`
   flags (SSH init handles everything), `agent` (daemon removed).
+- **Selective uninstall**: `infra uninstall docker|traefik|allowlist|swap|fail2ban|node-exporter|k3s|security|all`.
+- **Security watch**: 5-min timer; Telegram alerts ONLY with evidence (IP +
+  attempts + provider; DDoS threshold 50 IPs/100 attempts). No geo.
+- **Traefik on IPv6-only hosts runs with `--network host`** (the docker bridge
+  has no v4 DNS route — ACME/Let's Encrypt would fail otherwise). Containers
+  created by hand should use `--restart unless-stopped` (daemon restarts from
+  `docker.EnsureNetworking` stop them otherwise).
 
 - **SSH port stays on 22** by default after hardening. Only changes if `--ssh-port N` is explicitly set.
 - **nftables is used** (not UFW). Port 22 is always kept open.

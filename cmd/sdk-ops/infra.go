@@ -92,6 +92,7 @@ func newInfraCmd() *cobra.Command {
 	cmd.AddCommand(newInfraRemoveCmd(&f))
 	cmd.AddCommand(newInfraFirewallCmd(&f))
 	cmd.AddCommand(newSwapCmd(&f))
+	cmd.AddCommand(newInfraUninstallCmd(&f))
 	cmd.AddCommand(newInfraBackupCmd(&f))
 	cmd.AddCommand(newInfraRestoreCmd(&f))
 	cmd.AddCommand(newInfraCertCmd(&f))
