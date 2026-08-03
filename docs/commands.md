@@ -229,18 +229,25 @@ sdk-ops infra firewall cf-normal --node <ip> [flags]
   --cloud-firewall string  Also sync allowlist to a provider cloud firewall
                            (vultr, digitalocean, hetzner, ...)
   --no-self                Do not add your public IP as a permanent admin entry
+  --open-web               Open ports 80/443 to every IP (DNS-only hosts not
+                           fronted by a CDN). Default: gated to the allowlist
   -n, --node               Target node IP
 
 sdk-ops infra firewall cf-strict --node <ip> [flags]
   --source string          IP list source (default "cf")
   --cloud-firewall string  Also sync allowlist to a provider cloud firewall
   --no-self                Do not add your public IP as a permanent admin entry
+  --open-web               Open ports 80/443 to every IP (DNS-only hosts)
   --yes                    Confirm the lockout risk warning and proceed
   -n, --node               Target node IP
 ```
 
 - `cf-normal` — gates every inbound port to the allowlist **except SSH**, which
   stays open from any IP. Custom SSH ports are detected from the live ruleset.
+  With `--open-web`, ports 80/443 are opened to every IP (for hosts whose DNS
+  is not fronted by a CDN — the web entry is the reverse proxy on those ports,
+  everything else stays gated). Without it, 80/443 are gated to the allowlist
+  (Cloudflare-mode: the CDN is the only public entry).
 - `cf-strict` — gates every inbound port **including SSH**. Prints a lockout
   warning and requires `--yes`. Your public IP is always seeded as a permanent
   admin entry (the install aborts if it cannot be detected, unless `--no-self`).
@@ -333,16 +340,30 @@ mode: docker                # k3s | docker | bare
 parallel: 3
 firewall_allowlist: cf      # cf | url:... | dns:... | strict | "" (skip)
 admin_ips: "203.0.113.10,2001:db8::1"   # explicit, never auto-detected
+https_mode: cf              # cf (web 80/443 gated to the CDN allowlist, default)
+                            # all (web 80/443 open to every IP — DNS-only hosts)
 hosts:
   - name: netcup
     host: 152.53.169.115    # SSH address
     peer_ip: 2a0a:4cc0:2000:a9ea:2464:ccff:fedb:f581   # peer channel (IPv6)
     user: sdkops            # root on first provision, sdkops afterwards
     ssh_key: ~/.ssh/id_ed25519
+    https_mode: cf          # per-host override (host > group > global)
+    traefik:                # per-host domains (host > group > global)
+      enabled: true
+      domains:
+        - { domain: "web.com", service: hello, port: 8088, container_port: 80 }
+        - { domain: "*.api.com", service: api, port: 8088, container_port: 80, wildcard: true }
   - name: vps-lite
     host: 2a03:4000:28:4f9:8ab:80ff:fe09:e007
     user: sdkops
     ssh_key: ~/.ssh/id_ed25519
+    https_mode: all         # v6-only host without a CDN front
+ssl:
+  email: "admin@x.com"      # Let's Encrypt contact (traefik domains require it)
+  dns01:                    # wildcard certificates (wildcard: true needs this)
+    provider: cloudflare    # cloudflare | bunny
+    api_token: "..."        # CF_DNS_API_TOKEN / BUNNY_API_KEY
 peers:                      # per-port, per-peer access (restricted by peer_ip)
                             # peers use peer_ip (fallback: host) — IPv6 between
                             # servers keeps IPv4 free for public 80/443
@@ -356,6 +377,12 @@ telegram:                   # alerts when an allowlist refresh fails
   api_key: "123456:ABC..."  # bot token
   chat_id: "-1001234567890"
 ```
+
+Traefik router targets are derived from how Traefik runs on the node: bridge
+mode routes to `http://<service>:<container_port>` over the shared
+`sdk-ops-net` docker network; host-network nodes (IPv6-only) route to
+`http://localhost:<port>`. Router config is picked up by the file provider
+(watch: true) — no restarts on domain changes.
 
 ```bash
 sdk-ops infra provision <file.yaml> --insecure

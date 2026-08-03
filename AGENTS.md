@@ -191,6 +191,7 @@ sdk-ops infra firewall list --node <ip>
 ```
 sdk-ops infra firewall cf-normal --node <ip> --admin-ips "1.2.3.4,2001:db8::1"
 sdk-ops infra firewall cf-strict --yes --node <ip> --admin-ips "1.2.3.4"
+sdk-ops infra firewall cf-normal --node <ip> --open-web   # open 80/443 to all IPs
 sdk-ops infra firewall allowlist status|refresh|remove --node <ip>
 sdk-ops infra firewall allowlist expose 6432 --node <ip>          # admin-only
 sdk-ops infra firewall allowlist expose 9090 --ips "ip1,ip2" --node <ip>
@@ -198,13 +199,21 @@ sdk-ops infra firewall allowlist ports --node <ip>
 sdk-ops infra firewall ban/unban <ip> --node <ip>
 ```
 
+Web model: ports 22/80/443 are the public surface. 80/443 are gated to the
+allowlist (Cloudflare) by default (`https_mode: cf`); hosts not fronted by a
+CDN use `https_mode: all` (or `--open-web`), which opens them to every IP.
+Everything else stays closed unless declared (peers, `allowlist expose`).
+
 ### Provision a whole fleet from a YAML
 ```
 sdk-ops infra provision provision.yaml --insecure
 # fleet files: backend/vps-config/ (per-project convention)
 ```
-`provision.yaml` supports hosts (per-host overrides), `peers` (per-port
-restricted access between VPSes) and `bans` (fail2ban, applied to every host).
+`provision.yaml` supports hosts (per-host overrides), `https_mode`
+(`cf`|`all`), per-host/group `traefik` domains (with `container_port` for
+bridge mode and `wildcard: true` for `*.domain`), `peers` (per-port
+restricted access between VPSes), `bans` (fail2ban, applied to every host)
+and `ssl.dns01` (cloudflare|bunny API token for wildcard certificates).
 
 ### TLS certificate (Let's Encrypt + Caddy)
 ```
@@ -319,6 +328,23 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
   has no v4 DNS route — ACME/Let's Encrypt would fail otherwise). Containers
   created by hand should use `--restart unless-stopped` (daemon restarts from
   `docker.EnsureNetworking` stop them otherwise).
+- **Traefik router targets depend on the network mode**: bridge containers
+  cannot reach `http://localhost:PORT` (it is the container itself → 502).
+  The provisioner targets `http://<service>:<container_port>` over the shared
+  `sdk-ops-net` network; host-network nodes use `http://localhost:<port>`.
+- **Never install a catch-all router on :80** — it swallows the ACME
+  challenges and certificates can never renew. Router files are picked up by
+  the file provider (watch: true): no restarts on domain changes.
+- **`AllowlistUnexposePort` matches port boundaries**: unexposing `80` must
+  not delete rules for `8088` (the registry sed uses `^PORT ` — safe — but
+  the nft handle grep must use `dport N([^0-9]|$)`).
+- **Wildcard certificates need `ssl.dns01`** (cloudflare|bunny provider with
+  an API token) — Let's Encrypt does not issue `*.domain` certs over HTTP.
+  The provisioner validates this and renders the wildcard routers with the
+  v3 `HostRegexp` rule (`^[a-z0-9-]+\.dom$`, `\\.` escaped in YAML).
+- **Traefik watchdog**: 5-min systemd timer (`sdk-ops-traefik.timer`)
+  verifying the container, config and `acme.json` permissions; it notifies
+  when the container vanished (the provisioner owns the container).
 
 - **SSH port stays on 22** by default after hardening. Only changes if `--ssh-port N` is explicitly set.
 - **nftables is used** (not UFW). Port 22 is always kept open.
