@@ -154,6 +154,10 @@ self_heal_admin
 update
 `
 
+// AllowlistUpdaterScript returns the updater script content (used by the ops
+// CLI to compare the installed file against the template).
+func AllowlistUpdaterScript() string { return allowlistUpdaterScript }
+
 // InstallAllowlist applies the allowlist nftables config on the node and
 // installs a systemd timer that refreshes the provider ranges daily.
 //

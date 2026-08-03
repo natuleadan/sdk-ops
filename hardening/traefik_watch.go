@@ -17,10 +17,12 @@ import (
 const traefikWatchScript = `#!/bin/bash
 # sdk-ops traefik watchdog — keeps the reverse proxy alive
 # Runs every 5 minutes. Docker's restart policy covers crashes; this covers
-# stopped containers, missing config and broken acme.json permissions.
+# stopped containers, a vanished container (recreated from the stored install
+# template), missing config and broken acme.json permissions.
 LOG=/var/log/sdk-ops-traefik.log
 CFG=/etc/traefik/traefik.yml
 ACME=/opt/traefik/acme.json
+INSTALL=/opt/sdk-ops/traefik/install.sh
 
 [ -f /etc/sdk-ops/firewall/notify.env ] && . /etc/sdk-ops/firewall/notify.env
 
@@ -34,8 +36,17 @@ notify() {
 }
 
 if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'traefik'; then
-  log "container missing"
-  notify "🚨 $(hostname): traefik container is missing — run sdk-ops infra provision"
+  if [ -x "$INSTALL" ]; then
+    if sudo bash "$INSTALL" >/dev/null 2>&1; then
+      log "container recreated from template"
+    else
+      log "recreate FAILED"
+      notify "🚨 $(hostname): traefik recreate FAILED — run sdk-ops infra provision"
+    fi
+  else
+    log "container missing and no install template"
+    notify "🚨 $(hostname): traefik container missing — run sdk-ops infra provision"
+  fi
   exit 0
 fi
 
@@ -59,6 +70,10 @@ fi
 
 log "ok"
 `
+
+// TraefikWatchScript returns the watchdog script content (used by the ops
+// CLI to compare the installed file against the template).
+func TraefikWatchScript() string { return traefikWatchScript }
 
 // InstallTraefikWatch installs the traefik watchdog and its 5-minute systemd
 // timer on the node.

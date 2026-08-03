@@ -36,6 +36,7 @@ Examples:
 	rootCmd.PersistentFlags().StringVar(&gPassword, "password", "", "SSH password (or env SDK_OPS_PASSWORD; for servers without key auth, before hardening)")
 
 	rootCmd.AddCommand(newInfraCmd())
+	rootCmd.AddCommand(newOpsCmd())
 	rootCmd.AddCommand(newNodeCmd())
 	rootCmd.AddCommand(newDeployCmd())
 	rootCmd.AddCommand(newServiceCmd())

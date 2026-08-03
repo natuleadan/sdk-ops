@@ -13,6 +13,7 @@ import (
 
 	golang_ssh "golang.org/x/crypto/ssh"
 
+	"github.com/natuleadan/sdk-ops/deploy"
 	"github.com/natuleadan/sdk-ops/hardening"
 	"github.com/natuleadan/sdk-ops/ssh"
 )
@@ -1024,6 +1025,12 @@ func applyTraefikDomainsOn(conn *golang_ssh.Client, ssl SSLConfig, traefik Traef
 		}
 	}
 
+	// Persist the container creation template the traefik watchdog re-runs
+	// when the container is missing.
+	if err := ensureTraefikTemplate(conn, ssl); err != nil {
+		return err
+	}
+
 	for _, d := range traefik.Domains {
 		rule, tlsBlock, target := traefikRouterConfig(d, hostNet)
 		router := fmt.Sprintf(`http:
@@ -1103,6 +1110,42 @@ echo "letsencrypt: configured (%[1]s)"`, ssl.Email, caServer, challenge)
 // in the file provider YAML).
 func routerName(domain string) string {
 	return strings.ReplaceAll(domain, "*", "wildcard")
+}
+
+// dns01Env builds the Traefik container env for a DNS-01 provider token.
+func dns01Env(ssl SSLConfig) []string {
+	if ssl.DNS01 == nil || ssl.DNS01.APIToken == "" {
+		return nil
+	}
+	name := "CF_DNS_API_TOKEN"
+	if ssl.DNS01.Provider == "bunny" {
+		name = "BUNNY_API_KEY"
+	}
+	return []string{name + "=" + ssl.DNS01.APIToken}
+}
+
+// ensureTraefikTemplate persists the container creation script that the
+// traefik watchdog runs to recreate a vanished container.
+func ensureTraefikTemplate(conn *golang_ssh.Client, ssl SSLConfig) error {
+	script, err := deploy.TraefikCreateScript(conn, deploy.ProxyConfig{Env: dns01Env(ssl)})
+	if err != nil {
+		return fmt.Errorf("traefik template: %w", err)
+	}
+	remote := fmt.Sprintf(`sudo mkdir -p /opt/sdk-ops/traefik
+cat > /tmp/traefik-install.sh << 'EOF'
+%s
+EOF
+sudo cp /tmp/traefik-install.sh /opt/sdk-ops/traefik/install.sh
+sudo chown sdkops:sdkops /opt/sdk-ops/traefik/install.sh
+sudo chmod 0750 /opt/sdk-ops/traefik/install.sh
+echo "traefik install template persisted"
+`, script)
+	out, _, err := ssh.Run(conn, remote)
+	if err != nil {
+		return fmt.Errorf("ensure traefik template: %w\n%s", err, out)
+	}
+	fmt.Print(out)
+	return nil
 }
 
 // traefikRouterConfig computes the rule, TLS block and backend target for one

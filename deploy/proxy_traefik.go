@@ -92,11 +92,34 @@ sudo mkdir -p /etc/traefik/conf.d /opt/traefik /srv/traefik-404
 sudo tee /srv/traefik-404/server.py > /dev/null << 'PYEOF'
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>404 — Not Found</title>
+<style>
+  html,body{margin:0;min-height:100vh}
+  body{display:flex;align-items:center;justify-content:center;background:#0b1220;color:#e5e7eb;
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .wrap{text-align:center;padding:2rem}
+  h1{font-size:4.5rem;line-height:1;margin:0;font-weight:700;letter-spacing:.02em}
+  p{margin:.75rem 0 0;color:#94a3b8;font-size:1.125rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>404</h1>
+  <p>Page not found</p>
+</div>
+</body>
+</html>"""
+
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
-        body = b"<html><body style=\"font-family:sans-serif;text-align:center;margin-top:20%%\"><h1>404</h1><p>Recurso no disponible</p></body></html>"
+        body = PAGE.encode()
         self.send_response(404)
-        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -159,6 +182,22 @@ EOF
 
 %s
 
+# Stored creation template: the traefik watchdog re-runs it when the
+# container is missing (docker's restart policy covers crashes only).
+sudo mkdir -p /opt/sdk-ops/traefik
+sudo tee /opt/sdk-ops/traefik/install.sh > /dev/null << 'INSTALLEOF'
+#!/bin/bash
+set -e
+%s
+sudo docker network create sdk-ops-net >/dev/null 2>&1 || true
+NET=$(docker inspect traefik --format '{{.HostConfig.NetworkMode}}' 2>/dev/null || echo host)
+if [ "$NET" != "host" ]; then
+  sudo docker network connect sdk-ops-net traefik >/dev/null 2>&1 || true
+fi
+INSTALLEOF
+sudo chown sdkops:sdkops /opt/sdk-ops/traefik/install.sh
+sudo chmod 0750 /opt/sdk-ops/traefik/install.sh
+
 # Shared network so bridge-mode Traefik resolves service names (docker DNS).
 sudo docker network create sdk-ops-net >/dev/null 2>&1 || true
 NET=$(docker inspect traefik --format '{{.HostConfig.NetworkMode}}' 2>/dev/null || echo host)
@@ -167,7 +206,7 @@ if [ "$NET" != "host" ]; then
 fi
 %s
 echo "Traefik ready%s"
-`, catchallTarget, containerScript, appYml, summary)
+`, catchallTarget, containerScript, runCmd, appYml, summary)
 }
 
 func (p *TraefikProxy) Install(client *goss.Client, cfg ProxyConfig) error {
@@ -184,6 +223,31 @@ func (p *TraefikProxy) Install(client *goss.Client, cfg ProxyConfig) error {
 	}
 	fmt.Print(out)
 	return nil
+}
+
+// TraefikCreateScript renders the container creation template (run command +
+// shared network attach) for the current node network mode. The provisioner
+// persists it as /opt/sdk-ops/traefik/install.sh so the traefik watchdog can
+// recreate a vanished container without a full provisioning run.
+func TraefikCreateScript(client *goss.Client, cfg ProxyConfig) (string, error) {
+	netArgs := "-p 80:80 -p 443:443"
+	if !hasIPv4(client) {
+		netArgs = "--network host"
+	}
+	envArgs := ""
+	for _, e := range cfg.Env {
+		envArgs += " -e " + e
+	}
+	runCmd := fmt.Sprintf(`sudo docker run -d --name traefik --restart unless-stopped %s%s -v /etc/traefik:/etc/traefik:ro -v /opt/traefik:/opt/traefik traefik:v3.2 --configFile=/etc/traefik/traefik.yml`, netArgs, envArgs)
+	return fmt.Sprintf(`#!/bin/bash
+set -e
+%s
+sudo docker network create sdk-ops-net >/dev/null 2>&1 || true
+NET=$(docker inspect traefik --format '{{.HostConfig.NetworkMode}}' 2>/dev/null || echo host)
+if [ "$NET" != "host" ]; then
+  sudo docker network connect sdk-ops-net traefik >/dev/null 2>&1 || true
+fi
+`, runCmd), nil
 }
 
 // hasIPv4 reports whether the node has a public IPv4 address (docker0 and

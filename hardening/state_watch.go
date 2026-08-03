@@ -69,6 +69,22 @@ else
   fi
 fi
 
+# 4. The exposed chain must cover every registry entry (ports.yaml). This
+# catches lost rules (e.g. an unexpose that matched a sibling port) that the
+# sets never diverge on.
+REGISTRY=/etc/sdk-ops/firewall/ports.yaml
+MISSING_EXPOSED=""
+if [ -f "$REGISTRY" ]; then
+  while read -r port proto scope rest; do
+    [ -z "$port" ] && continue
+    case "$port" in *[!0-9]*) continue ;; esac
+    if ! sudo nft list chain "$TABLE" exposed 2>/dev/null | grep -qE "dport $port([^0-9]|\$)"; then
+      REASON="${REASON} exposed $port missing"
+      MISSING_EXPOSED="$MISSING_EXPOSED $port"
+    fi
+  done < "$REGISTRY"
+fi
+
 if [ -z "$REASON" ]; then
   log "ok"
   exit 0
@@ -114,6 +130,40 @@ if [ -x "$ALLOWLIST" ] && sudo "$ALLOWLIST" >/dev/null 2>&1; then
       fi
     done < "$F"
   done
+  # Re-apply missing exposed rules from the registry (the chain and the
+  # registry can diverge without any set changing).
+  for p in $MISSING_EXPOSED; do
+    if line=$(grep -E "^$p " "$REGISTRY" | tail -1); then
+      set -- $line
+      P=$1; PR=$2; SC=$3; IPS=${4:-}
+      case "$SC" in
+        admin)
+          sudo nft add rule "$TABLE" exposed $PR dport $P ip saddr @admin4 accept >/dev/null 2>&1
+          sudo nft add rule "$TABLE" exposed $PR dport $P ip6 saddr @admin6 accept >/dev/null 2>&1
+          sudo nft add rule "$TABLE" exposed $PR dport $P drop >/dev/null 2>&1 ;;
+        global)
+          sudo nft add rule "$TABLE" exposed $PR dport $P accept >/dev/null 2>&1 ;;
+        ips)
+          IFS=',' read -ra IPARR <<< "$IPS"
+          for ip in "${IPARR[@]}"; do
+            case "$ip" in
+              *:*) sudo nft add rule "$TABLE" exposed $PR dport $P ip6 saddr $ip accept >/dev/null 2>&1 ;;
+              *)   sudo nft add rule "$TABLE" exposed $PR dport $P ip saddr $ip accept >/dev/null 2>&1 ;;
+            esac
+          done
+          sudo nft add rule "$TABLE" exposed $PR dport $P drop >/dev/null 2>&1 ;;
+      esac
+      log "restored exposed rule $P ($SC)"
+    fi
+  done
+  if [ -n "$MISSING_EXPOSED" ]; then
+    sudo sh -c 'nft list table inet filter > /etc/nftables.conf' 2>/dev/null || true
+    STILL_EXPOSED=""
+    for p in $MISSING_EXPOSED; do
+      sudo nft list chain "$TABLE" exposed 2>/dev/null | grep -qE "dport $p([^0-9]|\$)" || STILL_EXPOSED="$STILL_EXPOSED $p"
+    done
+    [ -n "$STILL_EXPOSED" ] && STILL="${STILL} exposed still missing:$STILL_EXPOSED"
+  fi
   if [ $((NOW - LAST)) -lt "$COOLDOWN" ]; then
     log "repair done but notify suppressed (cooldown): $STILL"
   elif [ -z "$STILL" ]; then
@@ -135,6 +185,10 @@ else
   log "repair FAILED: $REASON"
 fi
 `
+
+// StateWatchScript returns the watchdog script content (used by the ops CLI
+// to compare the installed file against the template).
+func StateWatchScript() string { return stateWatchScript }
 
 // InstallStateWatch installs the firewall state watchdog and its 5-minute
 // systemd timer on the node.

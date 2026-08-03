@@ -83,6 +83,10 @@ notify "$MSG"
 log "notified: $NUNIQ IPs, $TOTAL attempts, top: $TOPIPS, ports: $ALLPORTS"
 `
 
+// SecurityWatchScript returns the watcher script content (used by the ops
+// CLI to compare the installed file against the template).
+func SecurityWatchScript() string { return securityWatchScript }
+
 // SecurityWatchConfig configures the SSH brute force notifier.
 type SecurityWatchConfig struct {
 	Enabled   bool
