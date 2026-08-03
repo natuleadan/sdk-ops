@@ -343,8 +343,17 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
   The provisioner validates this and renders the wildcard routers with the
   v3 `HostRegexp` rule (`^[a-z0-9-]+\.dom$`, `\\.` escaped in YAML).
 - **Traefik watchdog**: 5-min systemd timer (`sdk-ops-traefik.timer`)
-  verifying the container, config and `acme.json` permissions; it notifies
-  when the container vanished (the provisioner owns the container).
+  verifying the container, config and `acme.json` permissions; it recreates a
+  vanished container from the stored template (`/opt/sdk-ops/traefik/install.sh`,
+  persisted by the provisioner).
+- **State watchdog self-heal**: it also verifies the `exposed` chain against
+  the ports registry (`/etc/sdk-ops/firewall/ports.yaml`) and restores rules
+  that vanished (e.g. a sibling unexpose) — the registry is the source of truth.
+- **`sdk-ops ops`** is the cron stack CLI: `apply` (content diff — identical
+  scripts are skipped, changed scripts are stopped/rewritten/restarted),
+  `status`, `logs`, `run`, `enable|disable`, `remove` for
+  allowlist/security/state/traefik/logrotate. The allowlist component requires
+  `--provision-yaml` (admin IPs).
 
 - **SSH port stays on 22** by default after hardening. Only changes if `--ssh-port N` is explicitly set.
 - **nftables is used** (not UFW). Port 22 is always kept open.

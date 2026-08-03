@@ -391,6 +391,28 @@ sdk-ops infra provision <file.yaml> --insecure
 The fleet files live in `backend/vps-config/` (per-project convention), so the
 whole VPS network is reproducible with one command.
 
+### ops (cron/watchdog stack)
+
+Manage the node cron stack (allowlist, security, state, traefik, logrotate).
+`apply` compares the installed script against the template: identical scripts
+are skipped; changed scripts are stopped, rewritten and restarted (never
+written mid-execution).
+
+```bash
+sdk-ops ops apply --provision-yaml fleet.yaml [--node <ip>] [--components a,b,c]
+sdk-ops ops status --provision-yaml fleet.yaml            # timers + last runs + logs
+sdk-ops ops logs --node <ip> --component security --lines 20
+sdk-ops ops run --node <ip> --component state             # oneshot once
+sdk-ops ops enable|disable --node <ip> --component state  # toggle a timer
+sdk-ops ops remove --node <ip> --component logrotate      # uninstall a cron
+```
+
+- Components: `allowlist | security | state | traefik | logrotate` (default:
+  all). `--provision-yaml` targets the whole fleet; `--node` filters it or
+  operates a single node without a YAML.
+- `allowlist` requires `--provision-yaml` (its admin IPs come from the fleet).
+- `remove allowlist` restores the pre-allowlist firewall (heavy operation).
+
 ### uninstall
 
 ```bash
