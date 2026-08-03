@@ -34,6 +34,7 @@ type ProvisionFile struct {
 	Bans              []string               `yaml:"bans"`
 	Telegram          TelegramConfig         `yaml:"telegram"`
 	Security          SecurityConfig         `yaml:"security"`
+	Fail2ban          Fail2banConfig         `yaml:"fail2ban"`
 	SSL               SSLConfig              `yaml:"ssl"`
 	Traefik           TraefikConfig          `yaml:"traefik"`
 	Swap              SwapConfig             `yaml:"swap"`
@@ -92,6 +93,14 @@ type ProvisionVLAN struct {
 type SecurityConfig struct {
 	Enabled   bool `yaml:"enabled"`
 	Threshold int  `yaml:"threshold"`
+}
+
+// Fail2banConfig tunes the fail2ban jails owned by sdk-ops. The operator
+// admin IPs are always added to ignoreip (shared-NAT safety).
+type Fail2banConfig struct {
+	SSHBantime      int `yaml:"sshd_bantime,omitempty"`
+	RecidiveBantime int `yaml:"recidive_bantime,omitempty"`
+	MaxRetry        int `yaml:"maxretry,omitempty"`
 }
 
 // SwapConfig controls the swap file (rule is automatic unless SizeMB is set).
@@ -815,24 +824,11 @@ func applyPerHostPhases(pf ProvisionFile) error {
 }
 
 // applyPerHostPhaseOn applies the per-host fleet phases for a single host:
-// security watch, firewall state watchdog, VLAN interface and Traefik domains.
+// security watch, fail2ban jail, firewall state watchdog, logrotate, traefik
+// watchdog, VLAN interface and Traefik domains.
 func applyPerHostPhaseOn(pf ProvisionFile, h ProvisionHost) error {
-	r := resolveHostConfig(&pf, h)
-	if r.security.Enabled {
-		if err := installSecurityOn(pf, h, r.security.Threshold); err != nil {
-			return err
-		}
-	}
-	if err := installStateWatchOn(pf, h); err != nil {
+	if err := applyWatchdogPhasesOn(pf, h); err != nil {
 		return err
-	}
-	if err := installLogRotationOn(pf, h); err != nil {
-		return err
-	}
-	if !pf.NoTraefik {
-		if err := installTraefikWatchOn(pf, h); err != nil {
-			return err
-		}
 	}
 	for _, v := range vlansForHost(pf, h.Name) {
 		for _, a := range v.Hosts {
@@ -844,7 +840,7 @@ func applyPerHostPhaseOn(pf ProvisionFile, h ProvisionHost) error {
 			}
 		}
 	}
-	if len(r.traefik.Domains) > 0 {
+	if len(resolveHostConfig(&pf, h).traefik.Domains) > 0 {
 		port := h.Port
 		if port == 0 {
 			port = 22
@@ -854,11 +850,39 @@ func applyPerHostPhaseOn(pf ProvisionFile, h ProvisionHost) error {
 		if err != nil {
 			return fmt.Errorf("traefik: connect %s: %w", h.Name, err)
 		}
+		r := resolveHostConfig(&pf, h)
 		if err := applyTraefikDomainsOn(conn, pf.SSL, r.traefik, h.Name); err != nil {
 			closeConn(conn)
 			return err
 		}
 		closeConn(conn)
+	}
+	return nil
+}
+
+// applyWatchdogPhasesOn installs the cron/watchdog phases of one host:
+// security watch, fail2ban jail, firewall state watchdog, logrotate and the
+// traefik watchdog.
+func applyWatchdogPhasesOn(pf ProvisionFile, h ProvisionHost) error {
+	r := resolveHostConfig(&pf, h)
+	if r.security.Enabled {
+		if err := installSecurityOn(pf, h, r.security.Threshold); err != nil {
+			return err
+		}
+	}
+	if err := installFail2banJailOn(pf, h); err != nil {
+		return err
+	}
+	if err := installStateWatchOn(pf, h); err != nil {
+		return err
+	}
+	if err := installLogRotationOn(pf, h); err != nil {
+		return err
+	}
+	if !pf.NoTraefik {
+		if err := installTraefikWatchOn(pf, h); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -973,6 +997,37 @@ func installLogRotationOn(pf ProvisionFile, h ProvisionHost) error {
 	}
 	defer closeConn(conn)
 	if err := hardening.InstallLogRotation(conn); err != nil {
+		return err
+	}
+	return nil
+}
+
+// installFail2banJailOn applies the fail2ban jail.local owned by sdk-ops
+// (idempotent: written and reloaded only when the content differs). The
+// operator admin IPs from the fleet are always ignored by fail2ban.
+func installFail2banJailOn(pf ProvisionFile, h ProvisionHost) error {
+	port := h.Port
+	if port == 0 {
+		port = 22
+	}
+	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	conn, err := infraConnect(h.Host, &f)
+	if err != nil {
+		return fmt.Errorf("fail2ban: connect %s: %w", h.Name, err)
+	}
+	defer closeConn(conn)
+	r := resolveHostConfig(&pf, h)
+	cfg := hardening.Fail2banJailConfig{
+		SSHBantime:      pf.Fail2ban.SSHBantime,
+		RecidiveBantime: pf.Fail2ban.RecidiveBantime,
+		MaxRetry:        pf.Fail2ban.MaxRetry,
+	}
+	for _, ip := range strings.Split(r.adminIPs, ",") {
+		if ip = strings.TrimSpace(ip); ip != "" {
+			cfg.IgnoreIPs = append(cfg.IgnoreIPs, hardening.NormalizeCIDR(ip))
+		}
+	}
+	if err := hardening.InstallFail2banJail(conn, cfg); err != nil {
 		return err
 	}
 	return nil
