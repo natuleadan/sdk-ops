@@ -1,6 +1,7 @@
 package hardening
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -155,6 +156,38 @@ func TestGenerateAllowlistConfigEmptyAdmin(t *testing.T) {
 	out := GenerateAllowlistConfig(cfg)
 	if !strings.Contains(out, "set admin4 { type ipv4_addr; flags interval; }") {
 		t.Errorf("admin4 without elements rendered wrong\n%s", out)
+	}
+}
+
+func TestGenerateAllowlistConfigOpenWeb(t *testing.T) {
+	cfg := AllowlistConfig{Profile: AllowlistNormal, SSHPorts: []int{22}, Source: DefaultSource(), OpenWeb: true}
+	out := GenerateAllowlistConfig(cfg)
+	for _, want := range []string{
+		"tcp dport { 80, 443 } accept",
+		"tcp dport { 22 } accept",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("open-web config missing %q\n%s", want, out)
+		}
+	}
+	// cf mode: web ports must NOT be opened directly (gated by the allow sets)
+	cfg.OpenWeb = false
+	out = GenerateAllowlistConfig(cfg)
+	if strings.Contains(out, "tcp dport { 80, 443 } accept") {
+		t.Error("cf mode must not open 80/443 directly")
+	}
+}
+
+func TestAllowlistUnexposeScriptPortBoundary(t *testing.T) {
+	// The unexpose script must match "dport 80" but never "dport 8088".
+	script := fmt.Sprintf(`HANDLES=$(sudo nft --handle list chain inet filter exposed 2>/dev/null | grep -E "dport %d([^0-9]|$)" | grep -oE 'handle [0-9]+' | awk '{print $2}')`, 80)
+	for _, want := range []string{`dport 80([^0-9]|$)`} {
+		if !strings.Contains(script, want) {
+			t.Errorf("unexpose script missing port boundary %q\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, `dport 80"`) {
+		t.Error("unexpose script must not use a bare dport match (matches 8088 too)")
 	}
 }
 

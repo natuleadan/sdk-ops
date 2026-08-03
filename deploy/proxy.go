@@ -21,6 +21,10 @@ type ProxyConfig struct {
 	Email      string
 	TargetPort int
 	Staging    bool
+	// Env are extra container environment variables (e.g. DNS-01 tokens
+	// like CF_DNS_API_TOKEN=...). The container is recreated only when a
+	// declared variable is missing.
+	Env []string
 }
 
 type Proxy interface {

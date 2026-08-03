@@ -228,6 +228,10 @@ type AllowlistConfig struct {
 	Admin4   []string
 	Admin6   []string
 	Source   Source
+	// OpenWeb opens the public web ports 80/443 to every IP (no Cloudflare
+	// gating). Used by hosts not fronted by a CDN (e.g. DNS-only setups).
+	// When false the ports are gated by the allow4/allow6 sets (CDN mode).
+	OpenWeb bool
 }
 
 // GenerateAllowlistConfig renders a full nftables config gated by allow4/allow6
@@ -251,6 +255,9 @@ func GenerateAllowlistConfig(cfg AllowlistConfig) string {
 	b.WriteString("        jump exposed\n")
 	b.WriteString("        ip protocol icmp accept\n")
 	b.WriteString("        ip6 nexthdr icmpv6 accept\n")
+	if cfg.OpenWeb {
+		b.WriteString("        tcp dport { 80, 443 } accept\n")
+	}
 	if cfg.Profile == AllowlistNormal {
 		ports := normalizePorts(cfg.SSHPorts)
 		if len(ports) == 0 {
@@ -262,12 +269,16 @@ func GenerateAllowlistConfig(cfg AllowlistConfig) string {
 	b.WriteString("        ip6 saddr @admin6 accept\n")
 	b.WriteString("        ip saddr @allow4 accept\n")
 	b.WriteString("        ip6 saddr @allow6 accept\n")
+	b.WriteString("        log prefix \"sdk-drop: \" limit rate 10/second burst 20 packets\n")
 	b.WriteString("    }\n")
 	b.WriteString("    chain exposed { }\n")
 	b.WriteString("    chain forward {\n")
 	b.WriteString("        type filter hook forward priority 0; policy drop;\n")
 	b.WriteString("        ct state established,related accept\n")
 	b.WriteString("        jump exposed\n")
+	if cfg.OpenWeb {
+		b.WriteString("        tcp dport { 80, 443 } accept\n")
+	}
 	b.WriteString("        ip saddr 10.0.0.0/8 accept\n")
 	b.WriteString("        ip saddr 172.16.0.0/12 accept\n")
 	b.WriteString("        ip saddr 192.168.0.0/16 accept\n")

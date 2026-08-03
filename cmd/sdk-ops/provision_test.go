@@ -40,11 +40,35 @@ func TestValidateProvision(t *testing.T) {
 		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, DeployOrder: []DeployStep{{Host: "ghost"}}},
 		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, DeployOrder: []DeployStep{{}}},
 		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, Groups: map[string]GroupConfig{"g": {Traefik: &TraefikConfig{Domains: []TraefikDomain{{Domain: "x.com"}}}}}},
+		{Mode: "docker", HTTPSMode: "open", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1", HTTPSMode: "weird"}}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, Traefik: TraefikConfig{Domains: []TraefikDomain{{Domain: "*.x.com", Service: "s", Port: 80, Wildcard: true}}}, SSL: SSLConfig{Email: "a@b.c"}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, Traefik: TraefikConfig{Domains: []TraefikDomain{{Domain: "*.x.com", Service: "s", Port: 80, Wildcard: true}}}, SSL: SSLConfig{Email: "a@b.c", DNS01: &DNS01Config{Provider: "cloudflare"}}},
 	}
 	for i, pf := range bad {
 		if _, err := validateProvision(pf); err == nil {
 			t.Errorf("case %d: expected validation error", i)
 		}
+	}
+}
+
+func TestValidateHTTPSModeAndWildcard(t *testing.T) {
+	// valid: https_mode cf/all + wildcard with dns01 token
+	ok := &ProvisionFile{
+		Mode:      "docker",
+		HTTPSMode: "all",
+		Hosts:     []ProvisionHost{{Name: "a", Host: "1.1.1.1"}},
+		Traefik:   TraefikConfig{Domains: []TraefikDomain{{Domain: "*.x.com", Service: "s", Port: 80, Wildcard: true}}},
+		SSL:       SSLConfig{Email: "a@b.c", DNS01: &DNS01Config{Provider: "cloudflare", APIToken: "tok"}},
+	}
+	if _, err := validateProvision(ok); err != nil {
+		t.Fatalf("valid https_mode/wildcard plan rejected: %v", err)
+	}
+	// host override of https_mode is honoured
+	pf := &ProvisionFile{Mode: "docker", HTTPSMode: "cf", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1", HTTPSMode: "all"}}}
+	r := resolveHostConfig(pf, pf.Hosts[0])
+	if r.httpsMode != "all" {
+		t.Errorf("host https_mode override lost: %q", r.httpsMode)
 	}
 }
 
@@ -104,6 +128,47 @@ func TestSelectHostsByTags(t *testing.T) {
 	}
 	if got := selectHostsByTags(hosts, "nope"); len(got) != 0 {
 		t.Errorf("no match should be empty")
+	}
+}
+
+func TestValidateVLANs(t *testing.T) {
+	hosts := []ProvisionHost{
+		{Name: "a", Host: "1.1.1.1"},
+		{Name: "b", Host: "2.2.2.2"},
+	}
+	ok := &ProvisionFile{
+		Mode:  "docker",
+		Hosts: hosts,
+		VLANs: []ProvisionVLAN{
+			{Name: "internal", CIDR: "10.10.0.0/24", Hosts: []VLANHostAssign{
+				{Name: "a", Iface: "eth1", IP: "10.10.0.1"},
+				{Name: "b", Iface: "eth1", IP: "10.10.0.2"},
+			}},
+		},
+	}
+	if _, err := validateProvision(ok); err != nil {
+		t.Fatalf("valid vlan rejected: %v", err)
+	}
+	if got := vlansForHost(*ok, "b"); len(got) != 1 || got[0].Name != "internal" {
+		t.Errorf("vlansForHost(b) = %+v", got)
+	}
+	if got := vlansForHost(*ok, "ghost"); len(got) != 0 {
+		t.Errorf("vlansForHost(ghost) should be empty")
+	}
+
+	bad := []*ProvisionFile{
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "not-a-cidr", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "10.0.0.1"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "ghost", Iface: "eth1", IP: "10.0.0.1"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "", IP: "10.0.0.1"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "192.168.1.1"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "nope"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "10.0.0.1"}, {Name: "b", Iface: "eth1", IP: "10.0.0.1"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "10.0.0.1"}}}}},
+	}
+	for i, pf := range bad {
+		if _, err := validateProvision(pf); err == nil {
+			t.Errorf("vlan case %d: expected validation error", i)
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,7 @@ type ProvisionFile struct {
 	Parallel          int                    `yaml:"parallel"`
 	FirewallAllowlist string                 `yaml:"firewall_allowlist"`
 	AdminIPs          string                 `yaml:"admin_ips"`
+	HTTPSMode         string                 `yaml:"https_mode"`
 	NoTraefik         bool                   `yaml:"no_traefik"`
 	Groups            map[string]GroupConfig `yaml:"groups"`
 	Hosts             []ProvisionHost        `yaml:"hosts"`
@@ -34,6 +36,7 @@ type ProvisionFile struct {
 	SSL               SSLConfig              `yaml:"ssl"`
 	Traefik           TraefikConfig          `yaml:"traefik"`
 	Swap              SwapConfig             `yaml:"swap"`
+	VLANs             []ProvisionVLAN        `yaml:"vlans"`
 	DeployOrder       []DeployStep           `yaml:"deploy_order"`
 }
 
@@ -49,8 +52,10 @@ type ProvisionHost struct {
 	Port              int             `yaml:"port"`
 	FirewallAllowlist string          `yaml:"firewall_allowlist,omitempty"`
 	AdminIPs          string          `yaml:"admin_ips,omitempty"`
+	HTTPSMode         string          `yaml:"https_mode,omitempty"`
 	SwapSizeMB        int             `yaml:"swap_size_mb,omitempty"`
 	Security          *SecurityConfig `yaml:"security,omitempty"`
+	Traefik           *TraefikConfig  `yaml:"traefik,omitempty"`
 	Tags              []string        `yaml:"tags,omitempty"`
 }
 
@@ -58,11 +63,28 @@ type ProvisionHost struct {
 type GroupConfig struct {
 	FirewallAllowlist string          `yaml:"firewall_allowlist"`
 	AdminIPs          string          `yaml:"admin_ips"`
+	HTTPSMode         string          `yaml:"https_mode"`
 	Security          *SecurityConfig `yaml:"security,omitempty"`
 	Traefik           *TraefikConfig  `yaml:"traefik,omitempty"`
 	Swap              *SwapConfig     `yaml:"swap,omitempty"`
 	Telegram          *TelegramConfig `yaml:"telegram,omitempty"`
 	Tags              []string        `yaml:"tags,omitempty"`
+}
+
+// VLANHostAssign pins a host to a private VLAN interface with a static IP.
+type VLANHostAssign struct {
+	Name  string `yaml:"name"`
+	Iface string `yaml:"iface"`
+	IP    string `yaml:"ip"`
+}
+
+// ProvisionVLAN is an internal L2 network shared by a subset of hosts.
+// Traffic between those hosts stays inside the provider VLAN; the firewall
+// still filters by source IP (peers are declared per IP).
+type ProvisionVLAN struct {
+	Name  string           `yaml:"name"`
+	CIDR  string           `yaml:"cidr"`
+	Hosts []VLANHostAssign `yaml:"hosts"`
 }
 
 // SecurityConfig enables the SSH brute force notifier (every 5 min).
@@ -79,8 +101,16 @@ type SwapConfig struct {
 
 // SSLConfig carries the Let's Encrypt contact email for Traefik.
 type SSLConfig struct {
-	Email   string `yaml:"email"`
-	Staging bool   `yaml:"staging"`
+	Email   string       `yaml:"email"`
+	Staging bool         `yaml:"staging"`
+	DNS01   *DNS01Config `yaml:"dns01,omitempty"`
+}
+
+// DNS01Config enables wildcard certificates through a DNS provider API
+// (cloudflare or bunny). The token is stored in the fleet YAML (private).
+type DNS01Config struct {
+	Provider string `yaml:"provider"`
+	APIToken string `yaml:"api_token"`
 }
 
 // TraefikConfig maps domains to local services for auto TLS.
@@ -94,6 +124,12 @@ type TraefikDomain struct {
 	Domain  string `yaml:"domain"`
 	Service string `yaml:"service"`
 	Port    int    `yaml:"port"`
+	// ContainerPort is the port the service listens on inside its container
+	// (default 80). Only used when Traefik runs on a docker bridge network.
+	ContainerPort int `yaml:"container_port,omitempty"`
+	// Wildcard routes every single-level subdomain (needs ssl.dns01 for the
+	// wildcard certificate).
+	Wildcard bool `yaml:"wildcard,omitempty"`
 }
 
 // TelegramConfig enables Telegram alerts for security/refresh events.
@@ -122,6 +158,7 @@ type resolvedHost struct {
 	host              ProvisionHost
 	firewallAllowlist string
 	adminIPs          string
+	httpsMode         string
 	security          SecurityConfig
 	traefik           TraefikConfig
 	swap              SwapConfig
@@ -276,6 +313,7 @@ func resolveHostConfig(pf *ProvisionFile, h ProvisionHost) resolvedHost {
 		host:              h,
 		firewallAllowlist: pf.FirewallAllowlist,
 		adminIPs:          pf.AdminIPs,
+		httpsMode:         pf.HTTPSMode,
 		security:          pf.Security,
 		traefik:           pf.Traefik,
 		swap:              pf.Swap,
@@ -286,6 +324,9 @@ func resolveHostConfig(pf *ProvisionFile, h ProvisionHost) resolvedHost {
 		}
 		if g.AdminIPs != "" {
 			r.adminIPs = g.AdminIPs
+		}
+		if g.HTTPSMode != "" {
+			r.httpsMode = g.HTTPSMode
 		}
 		if g.Security != nil {
 			r.security = *g.Security
@@ -304,8 +345,14 @@ func resolveHostConfig(pf *ProvisionFile, h ProvisionHost) resolvedHost {
 	if h.AdminIPs != "" {
 		r.adminIPs = h.AdminIPs
 	}
+	if h.HTTPSMode != "" {
+		r.httpsMode = h.HTTPSMode
+	}
 	if h.Security != nil {
 		r.security = *h.Security
+	}
+	if h.Traefik != nil {
+		r.traefik = *h.Traefik
 	}
 	if h.SwapSizeMB > 0 {
 		r.swap.SizeMB = h.SwapSizeMB
@@ -504,10 +551,70 @@ func validateProvision(pf *ProvisionFile) (map[string]string, error) {
 	if err := validateTraefikDomains(pf); err != nil {
 		return nil, err
 	}
+	if err := validateHTTPSMode(pf); err != nil {
+		return nil, err
+	}
 	if err := validateDeployOrder(pf, names); err != nil {
 		return nil, err
 	}
+	if err := validateVLANs(pf); err != nil {
+		return nil, err
+	}
 	return names, nil
+}
+
+// validateVLANs checks VLAN assignments: known hosts, non-empty iface, IP
+// inside the VLAN CIDR and unique per host.
+func validateVLANs(pf *ProvisionFile) error {
+	hosts := map[string]bool{}
+	for _, h := range pf.Hosts {
+		hosts[h.Name] = true
+	}
+	seen := map[string]string{}
+	for _, v := range pf.VLANs {
+		if v.Name == "" {
+			return fmt.Errorf("every vlan needs a name")
+		}
+		_, ipnet, err := net.ParseCIDR(v.CIDR)
+		if err != nil {
+			return fmt.Errorf("vlan %q cidr %q is not a valid CIDR: %v", v.Name, v.CIDR, err)
+		}
+		for _, a := range v.Hosts {
+			if !hosts[a.Name] {
+				return fmt.Errorf("vlan %q references unknown host %q", v.Name, a.Name)
+			}
+			if a.Iface == "" {
+				return fmt.Errorf("vlan %q host %q needs an iface", v.Name, a.Name)
+			}
+			ip := net.ParseIP(strings.TrimSpace(a.IP))
+			if ip == nil {
+				return fmt.Errorf("vlan %q host %q ip %q is not a valid IP", v.Name, a.Name, a.IP)
+			}
+			if !ipnet.Contains(ip) {
+				return fmt.Errorf("vlan %q host %q ip %q is outside %q", v.Name, a.Name, a.IP, v.CIDR)
+			}
+			key := a.Name + ":" + v.Name
+			if prev, ok := seen[a.IP]; ok {
+				return fmt.Errorf("vlan ip %q already assigned to %s (also on %s)", a.IP, prev, key)
+			}
+			seen[a.IP] = key
+		}
+	}
+	return nil
+}
+
+// vlansForHost returns the VLAN assignments of one host.
+func vlansForHost(pf ProvisionFile, hostName string) []ProvisionVLAN {
+	var out []ProvisionVLAN
+	for _, v := range pf.VLANs {
+		for _, a := range v.Hosts {
+			if a.Name == hostName {
+				out = append(out, v)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // validatePeers checks peer references and ports.
@@ -568,18 +675,86 @@ func validateTraefikDomains(pf *ProvisionFile) error {
 	if pf.SSL.Email == "" {
 		return fmt.Errorf("traefik domains require ssl.email (Let's Encrypt contact)")
 	}
-	for _, d := range pf.Traefik.Domains {
-		if d.Domain == "" || d.Port <= 0 {
-			return fmt.Errorf("traefik domain needs domain and port")
+	lists := []struct {
+		domains []TraefikDomain
+		where   string
+	}{
+		{pf.Traefik.Domains, "global"},
+	}
+	for name, g := range pf.Groups {
+		if g.Traefik != nil {
+			lists = append(lists, struct {
+				domains []TraefikDomain
+				where   string
+			}{g.Traefik.Domains, "group " + name})
 		}
 	}
-	for _, g := range pf.Groups {
-		if g.Traefik != nil {
-			for _, d := range g.Traefik.Domains {
-				if d.Domain == "" || d.Port <= 0 {
-					return fmt.Errorf("traefik domain needs domain and port")
-				}
+	for _, h := range pf.Hosts {
+		if h.Traefik != nil {
+			lists = append(lists, struct {
+				domains []TraefikDomain
+				where   string
+			}{h.Traefik.Domains, "host " + h.Name})
+		}
+	}
+	for _, l := range lists {
+		for _, d := range l.domains {
+			if err := validateTraefikDomain(d, l.where, pf.SSL.DNS01); err != nil {
+				return err
 			}
+		}
+	}
+	return validateDNS01Token(pf.SSL.DNS01)
+}
+
+// validateDNS01Token ensures a declared DNS-01 provider has its token.
+func validateDNS01Token(dns01 *DNS01Config) error {
+	if dns01 != nil && dns01.Provider != "" && dns01.APIToken == "" {
+		return fmt.Errorf("ssl.dns01 requires api_token")
+	}
+	return nil
+}
+
+// validateTraefikDomain checks one domain entry: it needs domain + port, and
+// wildcard entries require a DNS-01 provider (wildcards cannot use HTTP).
+func validateTraefikDomain(d TraefikDomain, where string, dns01 *DNS01Config) error {
+	if d.Domain == "" || d.Port <= 0 {
+		return fmt.Errorf("traefik domain needs domain and port (%s)", where)
+	}
+	if !d.Wildcard {
+		return nil
+	}
+	if dns01 == nil || dns01.Provider == "" {
+		return fmt.Errorf("traefik wildcard domain %q requires ssl.dns01 (wildcard certificates cannot be issued over HTTP)", d.Domain)
+	}
+	if dns01.Provider != "cloudflare" && dns01.Provider != "bunny" {
+		return fmt.Errorf("ssl.dns01 provider %q not supported (cloudflare, bunny)", dns01.Provider)
+	}
+	return nil
+}
+
+// validateHTTPSMode checks the https_mode values (cf = web ports gated to the
+// CDN allowlist, all = web ports open to every IP).
+func validateHTTPSMode(pf *ProvisionFile) error {
+	check := func(mode, where string) error {
+		switch mode {
+		case "", "cf", "all":
+			return nil
+		default:
+			return fmt.Errorf("https_mode %q invalid (%s): use cf or all", mode, where)
+		}
+	}
+	if err := check(pf.HTTPSMode, "global"); err != nil {
+		return err
+	}
+	for name, g := range pf.Groups {
+		if err := check(g.HTTPSMode, "group "+name); err != nil {
+			return err
+		}
+	}
+	for _, h := range pf.Hosts {
+		if err := check(h.HTTPSMode, "host "+h.Name); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -631,28 +806,173 @@ func applyProvisionPhases(pf ProvisionFile, names map[string]string) error {
 // using each host's resolved (group-inherited) configuration.
 func applyPerHostPhases(pf ProvisionFile) error {
 	for _, h := range pf.Hosts {
-		r := resolveHostConfig(&pf, h)
-		if r.security.Enabled {
-			if err := installSecurityOn(pf, h, r.security.Threshold); err != nil {
-				return err
+		if err := applyPerHostPhaseOn(pf, h); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyPerHostPhaseOn applies the per-host fleet phases for a single host:
+// security watch, firewall state watchdog, VLAN interface and Traefik domains.
+func applyPerHostPhaseOn(pf ProvisionFile, h ProvisionHost) error {
+	r := resolveHostConfig(&pf, h)
+	if r.security.Enabled {
+		if err := installSecurityOn(pf, h, r.security.Threshold); err != nil {
+			return err
+		}
+	}
+	if err := installStateWatchOn(pf, h); err != nil {
+		return err
+	}
+	if err := installLogRotationOn(pf, h); err != nil {
+		return err
+	}
+	if !pf.NoTraefik {
+		if err := installTraefikWatchOn(pf, h); err != nil {
+			return err
+		}
+	}
+	for _, v := range vlansForHost(pf, h.Name) {
+		for _, a := range v.Hosts {
+			if a.Name == h.Name {
+				if err := applyVLANOn(pf, h, v.Name, a.Iface, a.IP, v.CIDR); err != nil {
+					return err
+				}
+				break
 			}
 		}
-		if len(r.traefik.Domains) > 0 {
-			port := h.Port
-			if port == 0 {
-				port = 22
-			}
-			f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
-			conn, err := infraConnect(h.Host, &f)
-			if err != nil {
-				return fmt.Errorf("traefik: connect %s: %w", h.Name, err)
-			}
-			if err := applyTraefikDomainsOn(conn, pf.SSL, r.traefik, h.Name); err != nil {
-				closeConn(conn)
-				return err
-			}
+	}
+	if len(r.traefik.Domains) > 0 {
+		port := h.Port
+		if port == 0 {
+			port = 22
+		}
+		f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+		conn, err := infraConnect(h.Host, &f)
+		if err != nil {
+			return fmt.Errorf("traefik: connect %s: %w", h.Name, err)
+		}
+		if err := applyTraefikDomainsOn(conn, pf.SSL, r.traefik, h.Name); err != nil {
 			closeConn(conn)
+			return err
 		}
+		closeConn(conn)
+	}
+	return nil
+}
+
+// installStateWatchOn installs the firewall state watchdog on one host.
+func installStateWatchOn(pf ProvisionFile, h ProvisionHost) error {
+	port := h.Port
+	if port == 0 {
+		port = 22
+	}
+	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	conn, err := infraConnect(h.Host, &f)
+	if err != nil {
+		return fmt.Errorf("state watch: connect %s: %w", h.Name, err)
+	}
+	defer closeConn(conn)
+	if err := hardening.InstallStateWatch(conn); err != nil {
+		return err
+	}
+	return nil
+}
+
+// installTraefikWatchOn installs the reverse proxy watchdog on one host.
+func installTraefikWatchOn(pf ProvisionFile, h ProvisionHost) error {
+	port := h.Port
+	if port == 0 {
+		port = 22
+	}
+	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	conn, err := infraConnect(h.Host, &f)
+	if err != nil {
+		return fmt.Errorf("traefik watch: connect %s: %w", h.Name, err)
+	}
+	defer closeConn(conn)
+	if err := hardening.InstallTraefikWatch(conn); err != nil {
+		return err
+	}
+	return nil
+}
+
+// applyVLANOn brings the VLAN interface up, assigns the private IP (runtime,
+// idempotent) and persists it through a netplan drop-in. netplan apply is
+// never run live: the runtime address is enough and a wrong apply could drop
+// the management SSH session.
+func applyVLANOn(pf ProvisionFile, h ProvisionHost, vlanName, iface, ip, cidr string) error {
+	_, ipnet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return fmt.Errorf("vlan %q: %w", vlanName, err)
+	}
+	mask, _ := ipnet.Mask.Size()
+	addr := ip + "/" + fmt.Sprintf("%d", mask)
+	port := h.Port
+	if port == 0 {
+		port = 22
+	}
+	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	conn, err := infraConnect(h.Host, &f)
+	if err != nil {
+		return fmt.Errorf("vlan %q: connect %s: %w", vlanName, h.Name, err)
+	}
+	defer closeConn(conn)
+	conn2, err := infraConnect(h.Host, &f)
+	if err != nil {
+		return fmt.Errorf("vlan %q: connect %s: %w", vlanName, h.Name, err)
+	}
+	closeConn(conn2)
+	script := fmt.Sprintf(`
+set -e
+if ! ip link show %s >/dev/null 2>&1; then
+  echo "vlan %s: iface %s does not exist on %s" >&2
+  exit 1
+fi
+sudo ip link set %s up 2>/dev/null || true
+if ! ip -4 addr show dev %s 2>/dev/null | grep -q "%s"; then
+  sudo ip addr replace %s dev %s
+  echo "vlan %s: %s assigned on %s"
+else
+  echo "vlan %s: %s already on %s"
+fi
+NETPLAN=/etc/netplan/99-sdk-ops-vlan.yaml
+TMP=$(mktemp)
+cat > "$TMP" << NETPLANEOF
+network:
+  version: 2
+  ethernets:
+    %s:
+      addresses:
+        - %s
+NETPLANEOF
+sudo cp "$TMP" "$NETPLAN" && rm -f "$TMP"
+sudo chmod 0600 "$NETPLAN"
+echo "vlan %s: netplan drop-in persisted"
+`, iface, vlanName, iface, h.Name, iface, iface, addr, addr, iface, vlanName, addr, iface, vlanName, addr, iface, iface, addr, vlanName)
+	out, _, err := ssh.Run(conn, script)
+	if err != nil {
+		return fmt.Errorf("vlan %q on %s: %w\n%s", vlanName, h.Name, err, out)
+	}
+	fmt.Print(out)
+	return nil
+}
+
+// installLogRotationOn installs the logrotate policy on one host.
+func installLogRotationOn(pf ProvisionFile, h ProvisionHost) error {
+	port := h.Port
+	if port == 0 {
+		port = 22
+	}
+	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	conn, err := infraConnect(h.Host, &f)
+	if err != nil {
+		return fmt.Errorf("logrotate: connect %s: %w", h.Name, err)
+	}
+	defer closeConn(conn)
+	if err := hardening.InstallLogRotation(conn); err != nil {
+		return err
 	}
 	return nil
 }
@@ -680,26 +1000,46 @@ func installSecurityOn(pf ProvisionFile, h ProvisionHost, threshold int) error {
 
 // applyTraefikDomainsOn creates Traefik routers (Let's Encrypt) per domain
 // on one host, opening port 80 to the LE challenge ranges.
+// applyTraefikDomainsOn writes one router file per domain and the main
+// Traefik config. Routers are picked up by the file provider (watch: true),
+// so no restart is needed. The router target depends on how Traefik runs:
+//   - host network (IPv6-only nodes): http://localhost:<published port>
+//   - docker bridge: http://<service>:<container_port> via the sdk-ops-net
+//     network (docker DNS), which the installer connects Traefik to.
+//
+// Wildcard domains (Wildcard: true) use the v3 HostRegexp rule and request a
+// wildcard certificate, which requires ssl.dns01.
 func applyTraefikDomainsOn(conn *golang_ssh.Client, ssl SSLConfig, traefik TraefikConfig, hostName string) error {
-	if err := hardening.AllowlistExposePort(conn, 80, "tcp", hardening.PortScopeIPs, "91.198.159.0/24", "51.89.149.0/24"); err != nil {
-		return fmt.Errorf("traefik letsencrypt port 80: %w", err)
+	out, _, err := ssh.Run(conn, `docker inspect traefik --format '{{.HostConfig.NetworkMode}}' 2>/dev/null || echo host`)
+	if err != nil {
+		return fmt.Errorf("traefik network mode: %w", err)
 	}
+	hostNet := strings.TrimSpace(out) == "host"
+
+	// Bridge-mode Traefik reaches the 404 responder (traefik-404 on :18080)
+	// through the docker gateway, so the docker subnets must reach that port.
+	if !hostNet {
+		if err := hardening.AllowlistExposePort(conn, 18080, "tcp", hardening.PortScopeIPs, "172.16.0.0/12"); err != nil {
+			return fmt.Errorf("traefik 404 port 18080: %w", err)
+		}
+	}
+
 	for _, d := range traefik.Domains {
+		rule, tlsBlock, target := traefikRouterConfig(d, hostNet)
 		router := fmt.Sprintf(`http:
   routers:
     %[1]s:
-      rule: "Host(\x60%[1]s\x60)"
+      rule: "%[2]s"
       service: %[1]s
       entryPoints:
         - websecure
-      tls:
-        certResolver: letsencrypt
+      %[3]s
   services:
     %[1]s:
       loadBalancer:
         servers:
-          - url: "http://localhost:%[2]d"
-`, d.Domain, d.Port)
+          - url: "%[4]s"
+`, routerName(d.Domain), rule, tlsBlock, target)
 		script := fmt.Sprintf(`
 sudo tee /etc/traefik/conf.d/%[1]s.yml > /dev/null << 'ROUTEREOF'
 %[2]s
@@ -708,12 +1048,16 @@ ROUTEREOF
 		if _, _, err := ssh.Run(conn, script); err != nil {
 			return fmt.Errorf("traefik router %s: %w", d.Domain, err)
 		}
-		fmt.Printf("  → %s -> localhost:%d on %s\n", d.Domain, d.Port, hostName)
+		fmt.Printf("  → %s -> %s on %s\n", d.Domain, target, hostName)
 	}
 
 	caServer := "https://acme-v02.api.letsencrypt.org/directory"
 	if ssl.Staging {
 		caServer = "https://acme-staging-v02.api.letsencrypt.org/directory"
+	}
+	challenge := "      httpChallenge:\n        entryPoint: web"
+	if ssl.DNS01 != nil && ssl.DNS01.Provider != "" {
+		challenge = fmt.Sprintf("      dnsChallenge:\n        provider: %s\n        resolvers:\n          - \"1.1.1.1:53\"\n          - \"8.8.8.8:53\"", ssl.DNS01.Provider)
 	}
 	script := fmt.Sprintf(`sudo tee /etc/traefik/traefik.yml > /dev/null << 'EOF'
 global:
@@ -731,18 +1075,82 @@ certificatesResolvers:
       email: %[1]s
       storage: /opt/traefik/acme.json
       caServer: %[2]s
-      httpChallenge:
-        entryPoint: web
+%[3]s
 providers:
   file:
     directory: /etc/traefik/conf.d
     watch: true
 EOF
-sudo docker restart traefik 2>/dev/null || true
-echo "letsencrypt: configured (%[1]s)"`, ssl.Email, caServer)
+echo "letsencrypt: configured (%[1]s)"`, ssl.Email, caServer, challenge)
 	if _, _, err := ssh.Run(conn, script); err != nil {
 		return fmt.Errorf("traefik letsencrypt: %w", err)
 	}
+
+	// Ensure the container carries the DNS provider token when DNS-01 is used.
+	if ssl.DNS01 != nil && ssl.DNS01.APIToken != "" {
+		envName := "CF_DNS_API_TOKEN"
+		if ssl.DNS01.Provider == "bunny" {
+			envName = "BUNNY_API_KEY"
+		}
+		if err := ensureTraefikEnv(conn, envName, ssl.DNS01.APIToken); err != nil {
+			return fmt.Errorf("traefik dns01 env: %w", err)
+		}
+	}
+	return nil
+}
+
+// routerName maps a domain to a safe router key (the domain itself, as used
+// in the file provider YAML).
+func routerName(domain string) string {
+	return strings.ReplaceAll(domain, "*", "wildcard")
+}
+
+// traefikRouterConfig computes the rule, TLS block and backend target for one
+// domain. Host-network Traefik reaches services via localhost; bridge-mode
+// via the service name on the shared docker network (container_port).
+func traefikRouterConfig(d TraefikDomain, hostNet bool) (rule, tlsBlock, target string) {
+	target = fmt.Sprintf("http://localhost:%d", d.Port)
+	if !hostNet {
+		cp := d.ContainerPort
+		if cp == 0 {
+			cp = 80
+		}
+		target = fmt.Sprintf("http://%s:%d", d.Service, cp)
+	}
+	rule = fmt.Sprintf("Host(`%s`)", d.Domain)
+	tlsBlock = "tls:\n        certResolver: letsencrypt"
+	if d.Wildcard {
+		apex := strings.TrimPrefix(d.Domain, "*.")
+		rule = fmt.Sprintf("HostRegexp(`^[a-z0-9-]+\\.%s$`)", strings.ReplaceAll(apex, ".", `\\.`))
+		tlsBlock = fmt.Sprintf("tls:\n        certResolver: letsencrypt\n        domains:\n          - main: %s\n            sans:\n              - \"*.%s\"", apex, apex)
+	}
+	return rule, tlsBlock, target
+}
+
+// ensureTraefikEnv recreates the Traefik container when the given env var is
+// missing, so DNS-01 provider tokens reach the ACME resolver. Other config is
+// untouched (docker restart policy keeps it running).
+func ensureTraefikEnv(conn *golang_ssh.Client, envName, value string) error {
+	script := fmt.Sprintf(`
+if docker inspect traefik >/dev/null 2>&1 && ! docker inspect traefik --format '{{range .Config.Env}}{{.}}{{"\n"}}{{end}}' | grep -q '^%[1]s='; then
+  echo "traefik: adding %[1]s (recreate)"
+  CMD=$(docker inspect traefik --format '{{.Config.Image}}')
+  NET=$(docker inspect traefik --format '{{.HostConfig.NetworkMode}}')
+  ARGS=""
+  if [ "$NET" = "host" ]; then ARGS="--network host"; else ARGS="-p 80:80 -p 443:443"; fi
+  VOLS=$(docker inspect traefik --format '{{range .Mounts}}-v {{.Source}}:{{.Destination}}{{if .RW}}:ro{{end}} {{end}}' | sed 's/:ro :/: /g')
+  sudo docker rm -f traefik >/dev/null 2>&1 || true
+  sudo docker run -d --name traefik --restart unless-stopped $ARGS -e %[1]s='%[2]s' $VOLS $CMD >/dev/null
+  echo "traefik: recreated with %[1]s"
+else
+  echo "traefik: env %[1]s already set"
+fi
+`, envName, value)
+	out, _, err := ssh.Run(conn, script)
+	if err != nil {
+		return fmt.Errorf("ensure traefik env: %w\n%s", err, out)
+	}
+	fmt.Print(out)
 	return nil
 }
 
@@ -822,6 +1230,8 @@ func applyTelegramNotify(pf ProvisionFile) error {
 export TELEGRAM_API_KEY=%s
 export TELEGRAM_CHAT_ID=%s
 EOF
+EOF
+sudo chown sdkops:sdkops /etc/sdk-ops/firewall/notify.env
 sudo chmod 0600 /etc/sdk-ops/firewall/notify.env
 echo "telegram: %s configured"`, pf.Telegram.APIKey, pf.Telegram.ChatID, h.Name)
 		if _, _, err := ssh.Run(conn, script); err != nil {

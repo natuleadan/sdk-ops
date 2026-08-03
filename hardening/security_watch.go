@@ -13,12 +13,13 @@ import (
 // a Telegram alert per offending IP (IP + attempt count + provider), plus a
 // DDoS alert. It only notifies when there IS evidence in the window.
 const securityWatchScript = `#!/bin/bash
-# sdk-ops security watch — SSH brute force notifications
-# Runs every 5 minutes; notifies ONLY when attempts are detected.
+# sdk-ops security watch — brute force notifications, ALL ports, ranked
+# Runs every 5 minutes. Notifies ONCE per window and ONLY when there were
+# attempts. Sources: sshd journald (port 22) + kernel firewall drops
+# (every other port, prefix "sdk-drop:"). Reported ordered by attempt count.
 LOG=/var/log/sdk-ops-security.log
-SENT_STATE=/etc/sdk-ops/security/sent
-WINDOW=10
-THRESHOLD=${SECURITY_THRESHOLD:-5}
+WINDOW=5
+TOP=10
 
 [ -f /etc/sdk-ops/firewall/notify.env ] && . /etc/sdk-ops/firewall/notify.env
 
@@ -31,47 +32,55 @@ notify() {
     --data-urlencode "text=$1" >/dev/null 2>&1 || true
 }
 
-OUT=$(journalctl -u ssh.service -u sshd.service --since "${WINDOW} minutes ago" --no-pager -o short-iso 2>/dev/null)
-[ -z "$OUT" ] && exit 0
+OUT_S=$(journalctl -u ssh.service -u sshd.service --since "${WINDOW} minutes ago" --no-pager -o short-iso 2>/dev/null)
+OUT_K=$(journalctl -k --since "${WINDOW} minutes ago" --no-pager -o short-iso 2>/dev/null | grep "sdk-drop:")
+[ -z "$OUT_S" ] && [ -z "$OUT_K" ] && exit 0
 
-IPS=$( { echo "$OUT" | grep -oE 'Failed (password|publickey) for [^ ]+ from [0-9a-fA-F:.]+' | grep -oE '[0-9a-fA-F:.]+$'
-        echo "$OUT" | grep -oE 'Invalid user [^ ]+ from [0-9a-fA-F:.]+' | grep -oE '[0-9a-fA-F:.]+$'; } | sort -u )
+declare -A CNT
+declare -A PORTS
 
-[ -z "$IPS" ] && exit 0
+# 1. sshd attempts → port 22
+while IFS= read -r ip; do
+  [ -z "$ip" ] && continue
+  CNT[$ip]=$(( ${CNT[$ip]:-0} + 1 ))
+  PORTS[$ip]="${PORTS[$ip]} 22"
+done < <(echo "$OUT_S" | grep -oE 'Failed (password|publickey) for [^ ]+ from [0-9a-fA-F:.]+|Invalid user [^ ]+ from [0-9a-fA-F:.]+' | grep -oE '[0-9a-fA-F:.]+$')
+
+# 2. firewall drops → every other port (kernel log, prefix sdk-drop:)
+while IFS= read -r line; do
+  ip=$(echo "$line" | grep -oE 'SRC=[0-9a-fA-F:.]+' | cut -d= -f2)
+  dpt=$(echo "$line" | grep -oE 'DPT=[0-9]+' | cut -d= -f2)
+  [ -z "$ip" ] && continue
+  [ -z "$dpt" ] && dpt=0
+  CNT[$ip]=$(( ${CNT[$ip]:-0} + 1 ))
+  PORTS[$ip]="${PORTS[$ip]} $dpt"
+done < <(echo "$OUT_K")
+
+[ ${#CNT[@]} -eq 0 ] && exit 0
 
 TOTAL=0
-for ip in $IPS; do
-  C=$( { echo "$OUT" | grep -oE 'Failed (password|publickey) for [^ ]+ from '"$ip" | wc -l
-         echo "$OUT" | grep -oE 'Invalid user [^ ]+ from '"$ip" | wc -l; } | awk '{s+=$1} END{print s}')
-  TOTAL=$((TOTAL + C))
-done
+for ip in "${!CNT[@]}"; do TOTAL=$((TOTAL + CNT[$ip])); done
+NUNIQ=${#CNT[@]}
 
-# DDoS: more than 50 unique IPs or 100 total attempts in the window
-NUNIQ=$(echo "$IPS" | wc -l)
 if [ "$NUNIQ" -gt 50 ] || [ "$TOTAL" -gt 100 ]; then
   notify "⚠️ DDoS $(hostname): $NUNIQ unique IPs, $TOTAL attempts in ${WINDOW}min"
   log "DDoS: $NUNIQ IPs, $TOTAL attempts"
 fi
 
-mkdir -p /etc/sdk-ops/security
-NOW=$(date +%s)
-for ip in $IPS; do
-  C=$( { echo "$OUT" | grep -oE 'Failed (password|publickey) for [^ ]+ from '"$ip" | wc -l
-         echo "$OUT" | grep -oE 'Invalid user [^ ]+ from '"$ip" | wc -l; } | awk '{s+=$1} END{print s}')
-  [ "$C" -lt "$THRESHOLD" ] && continue
-  LAST=0
-  [ -f "$SENT_STATE" ] && LAST=$(grep "^$ip " "$SENT_STATE" 2>/dev/null | awk '{print $2}' | tail -1)
-  [ -z "$LAST" ] && LAST=0
-  if [ $((NOW - LAST)) -lt 3600 ]; then
-    continue
-  fi
-  # provider (org) only — no geo country
+ALLPORTS=$(for ip in "${!CNT[@]}"; do echo ${PORTS[$ip]}; done | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -n -u | paste -sd,)
+TOPIPS=$(for ip in "${!CNT[@]}"; do echo "${CNT[$ip]} $ip"; done | sort -rn | head -n "$TOP" | awk '{print $2}')
+
+MSG="🔐 $(hostname): $NUNIQ IPs / $TOTAL attempts in ${WINDOW}min — ports: $ALLPORTS"
+for ip in $TOPIPS; do
+  PB=$(echo ${PORTS[$ip]} | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -n | uniq -c | sort -rn | awk '{printf "%s×%s ", $2, $1}' | sed 's/ $//')
   PROV=$(curl -fsS --max-time 5 "http://ip-api.com/line/$ip?fields=org" 2>/dev/null | tr -d '\r')
   [ -z "$PROV" ] && PROV="unknown"
-  notify "🔐 $(hostname): $ip — $C attempts in ${WINDOW}min — $PROV"
-  log "notified $ip ($C attempts, provider $PROV)"
-  echo "$ip $NOW" >> "$SENT_STATE"
+  MSG="$MSG
+$ip — ${CNT[$ip]} attempts ($PB) — $PROV"
 done
+
+notify "$MSG"
+log "notified: $NUNIQ IPs, $TOTAL attempts, top: $TOPIPS, ports: $ALLPORTS"
 `
 
 // SecurityWatchConfig configures the SSH brute force notifier.
@@ -92,6 +101,7 @@ sudo mkdir -p /etc/sdk-ops/security /opt/sdk-ops/security
 sudo tee /opt/sdk-ops/security/watch.sh > /dev/null << 'SCRIPTEOF'
 %[1]s
 SCRIPTEOF
+sudo chown sdkops:sdkops /opt/sdk-ops/security/watch.sh
 sudo chmod 0750 /opt/sdk-ops/security/watch.sh
 echo 'SECURITY_THRESHOLD=%[2]d' | sudo tee /etc/sdk-ops/security/env > /dev/null
 sudo tee /etc/systemd/system/sdk-ops-security.service > /dev/null << 'SERVICEEOF'
@@ -100,6 +110,7 @@ Description=sdk-ops SSH brute force watcher
 
 [Service]
 Type=oneshot
+User=sdkops
 EnvironmentFile=/etc/sdk-ops/security/env
 ExecStart=/opt/sdk-ops/security/watch.sh
 SERVICEEOF
@@ -114,6 +125,9 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 TIMEREOF
+sudo touch /var/log/sdk-ops-security.log 2>/dev/null || true
+sudo chown sdkops:sdkops /var/log/sdk-ops-security.log 2>/dev/null || true
+sudo usermod -aG systemd-journal sdkops 2>/dev/null || true
 sudo systemctl daemon-reload
 sudo systemctl enable --now sdk-ops-security.timer 2>/dev/null
 echo "security watch: installed (threshold %[2]d, every 5 min)"

@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	golang_ssh "golang.org/x/crypto/ssh"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 
 	"github.com/natuleadan/sdk-ops/deploy"
 	"github.com/natuleadan/sdk-ops/docker"
@@ -48,6 +49,7 @@ type infraFlags struct {
 	firewallAllowlist string
 	adminIPs          string
 	noTraefik         bool
+	provisionYAML     string
 	// k3s-specific
 	disableTraefik        bool
 	secretsEncryption     bool
@@ -157,6 +159,7 @@ Examples:
 	cmd.Flags().StringVar(&f.firewallAllowlist, "firewall-allowlist", "", "Install provider IP allowlist after hardening: cf, url:<url>, dns:<fqdn>, or strict / strict:<source>")
 	cmd.Flags().StringVar(&f.adminIPs, "admin-ips", "", "Explicit admin IPs/CIDRs for the allowlist (comma-separated, v4 and v6). No auto-seeding")
 	cmd.Flags().BoolVar(&f.noTraefik, "no-traefik", false, "Do not install Traefik as the default reverse proxy (catch-all 404)")
+	cmd.Flags().StringVar(&f.provisionYAML, "provision-yaml", "", "Fleet YAML to finish the init with per-host phases (security/state watch, VLANs, Traefik domains)")
 	cmd.Flags().BoolVar(&f.disableTraefik, "disable-traefik", false, "Disable Traefik ingress in k3s")
 	cmd.Flags().BoolVar(&f.secretsEncryption, "secrets-encryption", false, "Enable secrets encryption at rest in etcd (CIS)")
 	cmd.Flags().BoolVar(&f.protectKernelDefaults, "protect-kernel-defaults", false, "Protect kubelet kernel defaults (CIS)")
@@ -501,6 +504,7 @@ type allowlistFlags struct {
 	cloudFirewall string
 	yes           bool
 	adminIPs      string
+	openWeb       bool
 }
 
 func addAllowlistFlags(cmd *cobra.Command, aw *allowlistFlags, strict bool) {
@@ -508,6 +512,7 @@ func addAllowlistFlags(cmd *cobra.Command, aw *allowlistFlags, strict bool) {
 	cmd.Flags().StringVar(&aw.source, "source", "cf", "IP list source: cf, url:<url>, dns:<fqdn>")
 	cmd.Flags().StringVar(&aw.cloudFirewall, "cloud-firewall", "", "Also sync the allowlist to a provider cloud firewall (vultr, digitalocean, hetzner, ...)")
 	cmd.Flags().StringVar(&aw.adminIPs, "admin-ips", "", "Explicit admin IPs/CIDRs (comma-separated, v4 and v6). No auto-seeding: pass your IPs explicitly to get permanent access")
+	cmd.Flags().BoolVar(&aw.openWeb, "open-web", false, "Open ports 80/443 to every IP (DNS-only hosts not fronted by a CDN). Default: gated to the allowlist (Cloudflare)")
 	if strict {
 		cmd.Flags().BoolVar(&aw.yes, "yes", false, "Confirm the lockout risk warning and proceed")
 	}
@@ -632,6 +637,7 @@ func runAllowlistInstall(f *infraFlags, profile hardening.AllowlistProfile, aw a
 		Source:   src,
 		Admin4:   admin4,
 		Admin6:   admin6,
+		OpenWeb:  aw.openWeb,
 	}
 	printAdminSummary(aw.adminIPs, admin4, admin6)
 
@@ -1794,7 +1800,88 @@ func runInfraInit(ip string, f infraFlags) error {
 	fmt.Printf("   User: %s\n", f.user)
 	fmt.Println()
 
-	return runInfraInitSSH(ip, f)
+	if err := runInfraInitSSH(ip, f); err != nil {
+		return err
+	}
+	return applyInitFleetPhases(ip, f)
+}
+
+// installAllowlistOn installs the provider allowlist on one host from its
+// resolved (group-inherited) configuration, then verifies with a fresh SSH
+// connection. Used by init --provision-yaml so a fresh node gets the
+// firewall sets AND the admin IPs from the fleet YAML.
+func installAllowlistOn(pf *ProvisionFile, h ProvisionHost) error {
+	r := resolveHostConfig(pf, h)
+	profile, sourceRaw, err := parseAllowlistFlag(r.firewallAllowlist)
+	if err != nil {
+		return fmt.Errorf("allowlist %s: %w", h.Name, err)
+	}
+	src, err := hardening.ParseSource(sourceRaw)
+	if err != nil {
+		return fmt.Errorf("allowlist %s: %w", h.Name, err)
+	}
+	admin4, admin6, err := parseAdminIPs(r.adminIPs)
+	if err != nil {
+		return fmt.Errorf("allowlist %s: %w", h.Name, err)
+	}
+	port := h.Port
+	if port == 0 {
+		port = 22
+	}
+	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	conn, err := infraConnect(h.Host, &f)
+	if err != nil {
+		return fmt.Errorf("allowlist %s: %w", h.Name, err)
+	}
+	defer closeConn(conn)
+	cfg := hardening.AllowlistConfig{
+		Profile:  profile,
+		SSHPorts: hardening.CurrentSSHPorts(conn, port),
+		Source:   src,
+		Admin4:   admin4,
+		Admin6:   admin6,
+		OpenWeb:  r.httpsMode == "all",
+	}
+	return installAndVerifyAllowlist(conn, h.Host, &f, cfg)
+}
+
+// applyInitFleetPhases finishes a fresh init with the per-host fleet phases
+// from the provision YAML: security watch, firewall state watchdog, VLAN
+// interface and Traefik domains — so init leaves the server fully managed
+// by the internal cron jobs, with no agent and no daemons.
+func applyInitFleetPhases(ip string, f infraFlags) error {
+	if f.provisionYAML == "" {
+		return nil
+	}
+	data, err := os.ReadFile(f.provisionYAML)
+	if err != nil {
+		return fmt.Errorf("init --provision-yaml: %w", err)
+	}
+	var pf ProvisionFile
+	if err := yaml.Unmarshal(data, &pf); err != nil {
+		return fmt.Errorf("init --provision-yaml: %w", err)
+	}
+	if _, err := validateProvision(&pf); err != nil {
+		return fmt.Errorf("init --provision-yaml: %w", err)
+	}
+	for _, h := range pf.Hosts {
+		if h.Host != ip {
+			continue
+		}
+		fmt.Printf("\n━━━ Finishing init with fleet phases for %s ━━━\n", h.Name)
+		r := resolveHostConfig(&pf, h)
+		if r.firewallAllowlist != "" {
+			if err := installAllowlistOn(&pf, h); err != nil {
+				return fmt.Errorf("init --provision-yaml: %w", err)
+			}
+		}
+		if err := applyPerHostPhaseOn(pf, h); err != nil {
+			return fmt.Errorf("init --provision-yaml: %w", err)
+		}
+		fmt.Println("✅ Fleet phases applied")
+		return nil
+	}
+	return fmt.Errorf("init --provision-yaml: host %s not found in the fleet YAML", ip)
 }
 
 func applyInfraHardening(conn *golang_ssh.Client, f infraFlags) hardening.Config {

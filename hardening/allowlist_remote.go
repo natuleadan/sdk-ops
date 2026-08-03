@@ -90,16 +90,16 @@ self_heal_admin() {
   if [ -f "$ADMIN4_FILE" ]; then
     v4=$(tr '\n' ' ' < "$ADMIN4_FILE" | sed 's/  */ /g; s/^ //; s/ $//')
     [ -n "$v4" ] && {
-      if ! nft list set inet filter admin4 2>/dev/null | grep -q 'elements'; then
-        nft add element inet filter admin4 { $v4 } 2>/dev/null && log "self-heal: admin4 restored ($v4)"
+      if ! sudo nft list set inet filter admin4 2>/dev/null | grep -q 'elements'; then
+        sudo nft add element inet filter admin4 { $v4 } 2>/dev/null && log "self-heal: admin4 restored ($v4)"
       fi
     }
   fi
   if [ -f "$ADMIN6_FILE" ]; then
     v6=$(tr '\n' ' ' < "$ADMIN6_FILE" | sed 's/  */ /g; s/^ //; s/ $//')
     [ -n "$v6" ] && {
-      if ! nft list set inet filter admin6 2>/dev/null | grep -q 'elements'; then
-        nft add element inet filter admin6 { $v6 } 2>/dev/null && log "self-heal: admin6 restored ($v6)"
+      if ! sudo nft list set inet filter admin6 2>/dev/null | grep -q 'elements'; then
+        sudo nft add element inet filter admin6 { $v6 } 2>/dev/null && log "self-heal: admin6 restored ($v6)"
       fi
     }
   fi
@@ -130,20 +130,20 @@ update() {
     [ "$n6" -gt 0 ] && echo "add element inet filter allow6 { $(paste -sd, "$tmp6") }"
   } > "$fw"
 
-  if ! nft -c -f "$fw" 2>/dev/null; then
+  if ! sudo nft -c -f "$fw" 2>/dev/null; then
     log "ABORT: nft parse failed"
     notify "sdk-ops $(hostname): allowlist refresh ABORTED — nft parse failed"
     rm -f "$tmp4" "$tmp6" "$fw"
     exit 1
   fi
-  if ! nft -f "$fw" 2>/dev/null; then
+  if ! sudo nft -f "$fw" 2>/dev/null; then
     log "ABORT: nft apply failed"
     notify "sdk-ops $(hostname): allowlist refresh ABORTED — nft apply failed"
     rm -f "$tmp4" "$tmp6" "$fw"
     exit 1
   fi
 
-  nft list table inet filter > /etc/nftables.conf 2>/dev/null || true
+  sudo sh -c 'nft list table inet filter > /etc/nftables.conf' 2>/dev/null || true
   printf 'last_sync=%s\ncount_v4=%d\ncount_v6=%d\n' "$(date -u +%FT%TZ)" "$n4" "$n6" > "$STATE_FILE"
   log "updated v4=$n4 v6=$n6"
   echo "allowlist updated: v4=$n4 v6=$n6"
@@ -214,6 +214,7 @@ sudo systemd-run --on-active=30 --unit=sdk-ops-fw-rollback /bin/sh -c 'test -e /
 sudo tee /opt/sdk-ops/firewall/allowlist.sh > /dev/null << 'SCRIPTEOF'
 %[9]s
 SCRIPTEOF
+sudo chown sdkops:sdkops /opt/sdk-ops/firewall/allowlist.sh
 sudo chmod 0750 /opt/sdk-ops/firewall/allowlist.sh
 
 sudo tee /etc/systemd/system/sdk-ops-allowlist.service > /dev/null << 'SERVICEEOF'
@@ -224,6 +225,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+User=sdkops
 ExecStart=/opt/sdk-ops/firewall/allowlist.sh
 SERVICEEOF
 sudo tee /etc/systemd/system/sdk-ops-allowlist.timer > /dev/null << 'TIMEREOF'
@@ -238,6 +240,9 @@ RandomizedDelaySec=300
 [Install]
 WantedBy=timers.target
 TIMEREOF
+sudo touch /var/log/sdk-ops-allowlist.log 2>/dev/null || true
+sudo chown sdkops:sdkops /var/log/sdk-ops-allowlist.log 2>/dev/null || true
+sudo usermod -aG systemd-journal sdkops 2>/dev/null || true
 sudo systemctl daemon-reload
 sudo systemctl enable nftables 2>/dev/null || true
 sudo systemctl enable --now sdk-ops-allowlist.timer 2>/dev/null
@@ -501,6 +506,8 @@ if ! sudo nft list chain inet filter forward 2>/dev/null | grep -q 'jump exposed
   sudo nft insert rule inet filter forward jump exposed
 fi
 %[3]s
+# dedup: one registry line per port/proto/scope, keep the freshest
+sudo sed -i "/^%[2]d %[4]s %[5]s /d" %[1]s 2>/dev/null || true
 echo "%[2]d %[4]s %[5]s %[6]s %[7]s" | sudo tee -a %[1]s > /dev/null
 sudo nft list table inet filter | sudo tee /etc/nftables.conf > /dev/null
 echo "port %[2]d/%[4]s exposed (%[5]s)"
@@ -516,8 +523,9 @@ echo "port %[2]d/%[4]s exposed (%[5]s)"
 
 // AllowlistUnexposePort closes a port and removes it from the registry.
 func AllowlistUnexposePort(client *goss.Client, port int) error {
+	// Word boundary after the port so "80" never matches rules for 8088.
 	script := fmt.Sprintf(`
-HANDLES=$(sudo nft --handle list chain inet filter exposed 2>/dev/null | grep "dport %[1]d" | grep -oE 'handle [0-9]+' | awk '{print $2}')
+HANDLES=$(sudo nft --handle list chain inet filter exposed 2>/dev/null | grep -E "dport %[1]d([^0-9]|$)" | grep -oE 'handle [0-9]+' | awk '{print $2}')
 for h in $HANDLES; do
   sudo nft delete rule inet filter exposed handle $h 2>/dev/null || true
 done
