@@ -305,11 +305,12 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
   allowed path, or via `ssh -A` through a peer node).
 - **fail2ban bans last 1h** (bantime 3600, jail.local owned by the provision —
   the fleet YAML `fail2ban:` section sets sshd_bantime, recidive_bantime (23h
-  after 3 bans in 24h) and maxretry; `ignoreip` always includes the fleet
-  admin IPs so a shared NAT can never lock the operator out. Idempotent:
-  written + reloaded only when the content differs; re-provisioning restores
-  a damaged jail.local). Banned operator IPs are listed by
-  `infra firewall bans --node <ip>`.
+  after 3 bans in 24h) and maxretry; `ignoreip` lives in `[DEFAULT]` so every
+  jail (incl. recidive) inherits the fleet admin IPs — a shared NAT can never
+  lock the operator out. Idempotent: written + reloaded only when the content
+  differs; re-provisioning restores a damaged jail.local; active bans survive
+  node reboots via the fail2ban sqlite database). Banned operator IPs are
+  listed by `infra firewall bans --node <ip>`.
 - **Provision peers/ports must be <= 65535** (the CLI validates).
 - **IPv6-only hosts need `iptable_nat`** — `docker.EnsureNetworking()` handles
   it (modprobe + daemon restart when the DOCKER nat chain is missing).
@@ -342,7 +343,10 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
   the file provider (watch: true): no restarts on domain changes.
 - **`AllowlistUnexposePort` matches port boundaries**: unexposing `80` must
   not delete rules for `8088` (the registry sed uses `^PORT ` — safe — but
-  the nft handle grep must use `dport N([^0-9]|$)`).
+  the nft handle grep must use `dport N([^0-9]|$)`). `AllowlistExposePort`
+  also deletes the existing chain rules for the port before adding, so the
+  live `exposed` chain never accumulates duplicate sets (the registry sed
+  only dedups the file).
 - **Wildcard certificates need `ssl.dns01`** (cloudflare|bunny provider with
   an API token) — Let's Encrypt does not issue `*.domain` certs over HTTP.
   The provisioner validates this and renders the wildcard routers with the

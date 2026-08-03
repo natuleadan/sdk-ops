@@ -37,7 +37,12 @@ func Fail2banJailScript(cfg Fail2banJailConfig) string {
 	if len(cfg.IgnoreIPs) > 0 {
 		ignore += " " + strings.Join(cfg.IgnoreIPs, " ")
 	}
-	return fmt.Sprintf(`[sshd]
+	return fmt.Sprintf(`# Defaults: every jail inherits the operator admin IPs so a shared
+# NAT can never lock the operator out (applies to recidive too).
+[DEFAULT]
+ignoreip = %s
+
+[sshd]
 enabled = true
 port = 22
 logpath = %%(sshd_log)s
@@ -45,7 +50,6 @@ backend = %%(sshd_backend)s
 maxretry = %d
 findtime = 600
 bantime = %d
-ignoreip = %s
 
 # Repeat offenders: 3 bans within 24h get a longer all-ports ban.
 [recidive]
@@ -55,7 +59,7 @@ banaction = %%(banaction_allports)s
 bantime = %d
 findtime = 86400
 maxretry = 3
-`, maxRetry, sshdBantime, ignore, recidiveBantime)
+`, ignore, maxRetry, sshdBantime, recidiveBantime)
 }
 
 // InstallFail2banJail writes jail.local only when the content differs and

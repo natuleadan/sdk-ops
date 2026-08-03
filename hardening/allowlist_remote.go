@@ -509,6 +509,13 @@ fi
 if ! sudo nft list chain inet filter forward 2>/dev/null | grep -q 'jump exposed'; then
   sudo nft insert rule inet filter forward jump exposed
 fi
+# chain dedup: drop existing rules for this port first (the registry sed
+# below dedups the file, but the live chain would otherwise accumulate
+# duplicate sets on every re-expose)
+HANDLES=$(sudo nft --handle list chain inet filter exposed 2>/dev/null | grep -E "dport %[2]d([^0-9]|$)" | grep -oE 'handle [0-9]+' | awk '{print $2}')
+for h in $HANDLES; do
+  sudo nft delete rule inet filter exposed handle $h 2>/dev/null || true
+done
 %[3]s
 # dedup: one registry line per port/proto/scope, keep the freshest
 sudo sed -i "/^%[2]d %[4]s %[5]s /d" %[1]s 2>/dev/null || true
