@@ -303,8 +303,13 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
   disabled. Using root generates failed auths that fail2ban counts, which
   bans the operator IP (recover with `infra firewall unban <ip>` from another
   allowed path, or via `ssh -A` through a peer node).
-- **fail2ban bans last 1h** (bantime 3600) — banned operator IPs are listed
-  by `infra firewall bans --node <ip>`.
+- **fail2ban bans last 1h** (bantime 3600, jail.local owned by the provision —
+  the fleet YAML `fail2ban:` section sets sshd_bantime, recidive_bantime (23h
+  after 3 bans in 24h) and maxretry; `ignoreip` always includes the fleet
+  admin IPs so a shared NAT can never lock the operator out. Idempotent:
+  written + reloaded only when the content differs; re-provisioning restores
+  a damaged jail.local). Banned operator IPs are listed by
+  `infra firewall bans --node <ip>`.
 - **Provision peers/ports must be <= 65535** (the CLI validates).
 - **IPv6-only hosts need `iptable_nat`** — `docker.EnsureNetworking()` handles
   it (modprobe + daemon restart when the DOCKER nat chain is missing).

@@ -364,6 +364,10 @@ ssl:
   dns01:                    # wildcard certificates (wildcard: true needs this)
     provider: cloudflare    # cloudflare | bunny
     api_token: "..."        # CF_DNS_API_TOKEN / BUNNY_API_KEY
+fail2ban:                   # jails owned by the provision (idempotent)
+  sshd_bantime: 3600        # 1h first-offence ban
+  recidive_bantime: 82800   # 23h repeat offenders (3 bans in 24h)
+  maxretry: 5               # the fleet admin_ips are always ignored
 peers:                      # per-port, per-peer access (restricted by peer_ip)
                             # peers use peer_ip (fallback: host) — IPv6 between
                             # servers keeps IPv4 free for public 80/443
