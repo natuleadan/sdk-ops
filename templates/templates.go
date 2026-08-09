@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-//go:embed pg-dockerized kv-dockerized libsql-dockerized
+//go:embed pg-dockerized kv-dockerized libsql-dockerized nats-dockerized
 var infraTemplates embed.FS
 
 type Template struct {
@@ -109,6 +109,12 @@ var Templates = map[string]Template{
 		Description: "libSQL (sqld) primary + 2 replicas + HAProxy TLS",
 		IsDir:       true,
 		DirName:     "libsql-dockerized",
+	},
+	"nats-dockerized": {
+		Name:        "nats-dockerized",
+		Description: "NATS JetStream cluster node (R3, TLS/mTLS, at-rest)",
+		IsDir:       true,
+		DirName:     "nats-dockerized",
 	},
 }
 

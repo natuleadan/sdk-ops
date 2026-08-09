@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -38,6 +39,7 @@ type ProvisionFile struct {
 	SSL               SSLConfig              `yaml:"ssl"`
 	Traefik           TraefikConfig          `yaml:"traefik"`
 	Swap              SwapConfig             `yaml:"swap"`
+	Services          ProvisionServices      `yaml:"services,omitempty"`
 	VLANs             []ProvisionVLAN        `yaml:"vlans"`
 	DeployOrder       []DeployStep           `yaml:"deploy_order"`
 }
@@ -45,32 +47,46 @@ type ProvisionFile struct {
 // ProvisionHost is a single VPS entry. Per-host values override the group
 // and the globals.
 type ProvisionHost struct {
-	Name              string          `yaml:"name"`
-	Host              string          `yaml:"host"`
-	PeerIP            string          `yaml:"peer_ip,omitempty"`
-	Group             string          `yaml:"group,omitempty"`
-	User              string          `yaml:"user"`
-	SSHKey            string          `yaml:"ssh_key"`
-	Port              int             `yaml:"port"`
-	FirewallAllowlist string          `yaml:"firewall_allowlist,omitempty"`
-	AdminIPs          string          `yaml:"admin_ips,omitempty"`
-	HTTPSMode         string          `yaml:"https_mode,omitempty"`
-	SwapSizeMB        int             `yaml:"swap_size_mb,omitempty"`
-	Security          *SecurityConfig `yaml:"security,omitempty"`
-	Traefik           *TraefikConfig  `yaml:"traefik,omitempty"`
-	Tags              []string        `yaml:"tags,omitempty"`
+	Name              string            `yaml:"name"`
+	Host              string            `yaml:"host"`
+	PeerIP            string            `yaml:"peer_ip,omitempty"`
+	Group             string            `yaml:"group,omitempty"`
+	User              string            `yaml:"user"`
+	SSHKey            string            `yaml:"ssh_key"`
+	Port              int               `yaml:"port"`
+	FirewallAllowlist string            `yaml:"firewall_allowlist,omitempty"`
+	AdminIPs          string            `yaml:"admin_ips,omitempty"`
+	HTTPSMode         string            `yaml:"https_mode,omitempty"`
+	SwapSizeMB        int               `yaml:"swap_size_mb,omitempty"`
+	Security          *SecurityConfig   `yaml:"security,omitempty"`
+	Traefik           *TraefikConfig    `yaml:"traefik,omitempty"`
+	Services          ProvisionServices `yaml:"services,omitempty"`
+	Tags              []string          `yaml:"tags,omitempty"`
+}
+
+// ProvisionServices declares which services run on a node and how they are
+// sized. Each value picks a template profile (e.g. lite vs rs). Secrets are
+// NOT stored here — they come from the environment/.env at provision time.
+type ProvisionServices map[string]ServiceConfig
+
+// ServiceConfig is one declared service on a host.
+type ServiceConfig struct {
+	Profile         string   `yaml:"profile"`
+	ServerTags      []string `yaml:"server_tags,omitempty"`
+	ClientAdvertise string   `yaml:"client_advertise,omitempty"`
 }
 
 // GroupConfig is a reusable per-group configuration that hosts inherit.
 type GroupConfig struct {
-	FirewallAllowlist string          `yaml:"firewall_allowlist"`
-	AdminIPs          string          `yaml:"admin_ips"`
-	HTTPSMode         string          `yaml:"https_mode"`
-	Security          *SecurityConfig `yaml:"security,omitempty"`
-	Traefik           *TraefikConfig  `yaml:"traefik,omitempty"`
-	Swap              *SwapConfig     `yaml:"swap,omitempty"`
-	Telegram          *TelegramConfig `yaml:"telegram,omitempty"`
-	Tags              []string        `yaml:"tags,omitempty"`
+	FirewallAllowlist string            `yaml:"firewall_allowlist"`
+	AdminIPs          string            `yaml:"admin_ips"`
+	HTTPSMode         string            `yaml:"https_mode"`
+	Security          *SecurityConfig   `yaml:"security,omitempty"`
+	Traefik           *TraefikConfig    `yaml:"traefik,omitempty"`
+	Services          ProvisionServices `yaml:"services,omitempty"`
+	Swap              *SwapConfig       `yaml:"swap,omitempty"`
+	Telegram          *TelegramConfig   `yaml:"telegram,omitempty"`
+	Tags              []string          `yaml:"tags,omitempty"`
 }
 
 // VLANHostAssign pins a host to a private VLAN interface with a static IP.
@@ -172,6 +188,7 @@ type resolvedHost struct {
 	security          SecurityConfig
 	traefik           TraefikConfig
 	swap              SwapConfig
+	services          ProvisionServices
 	tags              []string
 }
 
@@ -183,6 +200,7 @@ type provisionResult struct {
 
 func newProvisionCmd() *cobra.Command {
 	var tags string
+	var check bool
 	cmd := &cobra.Command{
 		Use:   "provision <file.yaml>",
 		Short: "Provision multiple VPSes from a YAML fleet file",
@@ -228,10 +246,14 @@ Example provision.yaml:
     - host: some-host`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if check {
+				return runProvisionCheck(args[0], tags)
+			}
 			return runProvision(args[0], tags)
 		},
 	}
 	cmd.Flags().StringVar(&tags, "tags", "", "Only provision hosts with any of these tags (comma-separated)")
+	cmd.Flags().BoolVar(&check, "check", false, "Dry-run: parse, resolve and render the services plan without touching any node")
 	return cmd
 }
 
@@ -327,28 +349,43 @@ func resolveHostConfig(pf *ProvisionFile, h ProvisionHost) resolvedHost {
 		security:          pf.Security,
 		traefik:           pf.Traefik,
 		swap:              pf.Swap,
+		services:          cloneServices(pf.Services),
 	}
 	if g, ok := pf.Groups[h.Group]; ok {
-		if g.FirewallAllowlist != "" {
-			r.firewallAllowlist = g.FirewallAllowlist
-		}
-		if g.AdminIPs != "" {
-			r.adminIPs = g.AdminIPs
-		}
-		if g.HTTPSMode != "" {
-			r.httpsMode = g.HTTPSMode
-		}
-		if g.Security != nil {
-			r.security = *g.Security
-		}
-		if g.Traefik != nil {
-			r.traefik = *g.Traefik
-		}
-		if g.Swap != nil {
-			r.swap = *g.Swap
-		}
-		r.tags = append(r.tags, g.Tags...)
+		r.applyGroup(g)
 	}
+	r.applyHost(h)
+	return r
+}
+
+// applyGroup overlays a group config onto the resolved host (host wins later).
+func (r *resolvedHost) applyGroup(g GroupConfig) {
+	if g.FirewallAllowlist != "" {
+		r.firewallAllowlist = g.FirewallAllowlist
+	}
+	if g.AdminIPs != "" {
+		r.adminIPs = g.AdminIPs
+	}
+	if g.HTTPSMode != "" {
+		r.httpsMode = g.HTTPSMode
+	}
+	if g.Security != nil {
+		r.security = *g.Security
+	}
+	if g.Traefik != nil {
+		r.traefik = *g.Traefik
+	}
+	if g.Services != nil {
+		r.services = mergeServices(r.services, g.Services)
+	}
+	if g.Swap != nil {
+		r.swap = *g.Swap
+	}
+	r.tags = append(r.tags, g.Tags...)
+}
+
+// applyHost overlays the host config (highest precedence).
+func (r *resolvedHost) applyHost(h ProvisionHost) {
 	if h.FirewallAllowlist != "" {
 		r.firewallAllowlist = h.FirewallAllowlist
 	}
@@ -364,11 +401,26 @@ func resolveHostConfig(pf *ProvisionFile, h ProvisionHost) resolvedHost {
 	if h.Traefik != nil {
 		r.traefik = *h.Traefik
 	}
+	if h.Services != nil {
+		r.services = mergeServices(r.services, h.Services)
+	}
 	if h.SwapSizeMB > 0 {
 		r.swap.SizeMB = h.SwapSizeMB
 	}
 	r.tags = append(r.tags, h.Tags...)
-	return r
+}
+
+func cloneServices(s ProvisionServices) ProvisionServices {
+	out := ProvisionServices{}
+	maps.Copy(out, s)
+	return out
+}
+
+// mergeServices overlays src onto dst (per key; the overlay wins).
+func mergeServices(dst, src ProvisionServices) ProvisionServices {
+	out := cloneServices(dst)
+	maps.Copy(out, src)
+	return out
 }
 
 // provisionHost runs the full init for one host with its resolved config.
@@ -423,6 +475,18 @@ func hostAlreadyInitialized(h ProvisionHost, f *infraFlags) bool {
 		port = 22
 	}
 	f.port = port
+	// Try the post-init user (sdkops) first: hardened nodes block root login.
+	// A fresh node has no sdkops user, so this returns false and the caller
+	// falls back to the YAML user (root) for the first init.
+	if f.user != "sdkops" {
+		f2 := *f
+		f2.user = "sdkops"
+		if conn, err := infraConnect(h.Host, &f2); err == nil {
+			defer closeConn(conn)
+			out, _, err := ssh.Run(conn, `test -f /opt/sdk-ops/.version && echo yes || echo no`)
+			return err == nil && strings.TrimSpace(out) == "yes"
+		}
+	}
 	conn, err := infraConnect(h.Host, f)
 	if err != nil {
 		return false
@@ -856,6 +920,9 @@ func applyPerHostPhaseOn(pf ProvisionFile, h ProvisionHost) error {
 			return err
 		}
 		closeConn(conn)
+	}
+	if err := applyServicesOn(pf, h); err != nil {
+		return err
 	}
 	return nil
 }

@@ -1,0 +1,13 @@
+name: nats
+description: NATS JetStream cluster node (3-node R3, TLS/mTLS, at-rest)
+ports:
+  - "4222:4222"  # NATS clients (TLS + mTLS)
+  - "6222:6222"  # cluster mesh routes
+  - "8222:8222"  # monitoring (config binds 127.0.0.1)
+health:
+  path: /
+  interval: 15
+commands:
+  backup: bash backup.sh
+  restore: bash restore.sh
+  validate: bash validate.sh

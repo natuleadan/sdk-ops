@@ -349,6 +349,9 @@ hosts:
     user: sdkops            # root on first provision, sdkops afterwards
     ssh_key: ~/.ssh/id_ed25519
     https_mode: cf          # per-host override (host > group > global)
+    services:               # YAML-driven service deploy (provision renders the
+      nats:                 # template, uploads, compose up, exposes ports,
+        profile: lite       # installs timers). Profiles: lite | rs (per template)
     traefik:                # per-host domains (host > group > global)
       enabled: true
       domains:

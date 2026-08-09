@@ -1,0 +1,18 @@
+# nats-dockerized — rendered NATS cluster node. Host networking so the mesh
+# routes (private VLAN or public IPs) and the client port work directly.
+services:
+  nats:
+    image: nats:2.14-alpine
+    restart: unless-stopped
+    network_mode: host
+    command: ["-c", "/etc/nats/nats.conf"]
+    environment:
+      - JS_KEY={{ .JSKey }}
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf:ro
+      - ./certs:/certs:ro
+      - nats-data:/data
+    mem_limit: {{ .MemLimit }}
+    cpus: {{ .Cpus }}
+volumes:
+  nats-data:

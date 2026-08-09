@@ -212,8 +212,31 @@ sdk-ops infra provision provision.yaml --insecure
 `provision.yaml` supports hosts (per-host overrides), `https_mode`
 (`cf`|`all`), per-host/group `traefik` domains (with `container_port` for
 bridge mode and `wildcard: true` for `*.domain`), `peers` (per-port
-restricted access between VPSes), `bans` (fail2ban, applied to every host)
-and `ssl.dns01` (cloudflare|bunny API token for wildcard certificates).
+restricted access between VPSes), `bans` (fail2ban, applied to every host),
+`services` (YAML-driven service deploy: render template → upload → compose →
+expose → timers, sized by `profile`) and `ssl.dns01` (cloudflare|bunny API
+token for wildcard certificates). Run `--check` for a dry-run (parses,
+resolves and renders the services plan without SSH). Secrets NEVER go in the
+YAML — the provision reads them from the environment/.env (e.g.
+`NATS_*_PASSWORD`, `NATS_CERT_DIR`, `S3_*`). Dir templates
+(`templates/<svc>-dockerized/`) support `profiles.yaml` + `{{ .Var }}`
+rendering; `nats-dockerized` deploys a JetStream cluster node (R3) with
+TLS/mTLS, at-rest and per-service authz.
+
+**nats-dockerized gotchas (validated on a 3-node geo cluster):**
+- The app user (`app`) must be able to publish/subscribe the subjects the
+  microservice uses (`$KV.>` for KV, plus e.g. `links.>`, `nats-rpc.>`,
+  `nats-pull.>`) — otherwise the sdk-api KV/RPC/events fail with permissions
+  violations. Adjust the `nats.conf` template allow lists per service.
+- **`docker compose up -d` does NOT restart a container when only a mounted
+  config file changed** — after a `nats.conf` change, restart the container
+  (the provision does not do it yet).
+- The sdk-api KV default is Memory + 256MB (R1) — on a `lite` profile
+  (128MB memory store) bucket creation fails with "insufficient storage".
+  **Pre-create the microservice's KV buckets** with
+  `nats kv add <bucket> --replicas 3 --storage file`; the sdk-api loads them.
+- Server certs must include the `127.0.0.1` SAN so intra-VPS clients
+  (connecting via loopback) verify.
 
 ### TLS certificate (Let's Encrypt + Caddy)
 ```

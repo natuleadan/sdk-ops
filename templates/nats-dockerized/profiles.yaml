@@ -1,0 +1,14 @@
+# nats-dockerized profiles — one scalable template, sized per node.
+# Selected via provision.yaml: services: { nats: { profile: <name> } }
+lite:
+  max_connections: 100
+  max_file_store: 2GB
+  max_memory_store: 128MB
+  mem_limit: 1g
+  cpus: 1
+rs:
+  max_connections: 1000
+  max_file_store: 10GB
+  max_memory_store: 256MB
+  mem_limit: 2g
+  cpus: 2
