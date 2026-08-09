@@ -93,7 +93,10 @@ func syncCert(cfg certSyncConfig) error {
 	if !certDomainRe.MatchString(cfg.Domain) {
 		return fmt.Errorf("invalid domain %q in config", cfg.Domain)
 	}
-	if err := os.MkdirAll(filepath.Clean(cfg.Store), 0o700); err != nil {
+	// Directory and fullchain/cert are public certificate material that the
+	// health/backup scripts (running as the non-root sdkops user) must read for
+	// --tlsca and expiry checks. The privkey below stays 0600 (the real secret).
+	if err := os.MkdirAll(filepath.Clean(cfg.Store), 0o755); err != nil { //nolint:gosec // public cert store, readable by monitoring user
 		return err
 	}
 	fullchain, key, ok, err := extractTraefikCert(cfg.ACMEJSON, cfg.Domain)
@@ -109,8 +112,9 @@ func syncCert(cfg certSyncConfig) error {
 		renewLogf("cert unchanged for %s, skip", cfg.Domain)
 		return nil
 	}
-	_ = os.WriteFile(filepath.Join(cfg.Store, "fullchain.pem"), fullchain, 0o600)
-	_ = os.WriteFile(filepath.Join(cfg.Store, "cert.pem"), fullchain, 0o600)
+	//nolint:gosec // fullchain/cert are public cert data (see MkdirAll above)
+	_ = os.WriteFile(filepath.Join(cfg.Store, "fullchain.pem"), fullchain, 0o644)
+	_ = os.WriteFile(filepath.Join(cfg.Store, "cert.pem"), fullchain, 0o644) //nolint:gosec // public cert data
 	_ = os.WriteFile(filepath.Join(cfg.Store, "privkey.pem"), key, 0o600)
 	renewLogf("cert synced for %s", cfg.Domain)
 	refreshServices(cfg.Store, cfg.Domain, cfg.Services)
