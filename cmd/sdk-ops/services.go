@@ -281,21 +281,9 @@ func natsTopology(pf ProvisionFile, h ProvisionHost, cfg ServiceConfig) (int, in
 	singleVPS := replicas > 1 && nodeCount == 1
 	var routes []string
 	if singleVPS {
-		for i := 1; i < replicas; i++ {
-			routes = append(routes, fmt.Sprintf("nats-%d", i))
-		}
+		routes = singleVPSRoutes(replicas)
 	} else {
-		for _, other := range pf.Hosts {
-			if other.Name == h.Name {
-				continue
-			}
-			// Only peer with hosts that actually run the NATS service; a
-			// consumer-only host (no nats in services) must not appear in the mesh.
-			if _, ok := resolveHostConfig(&pf, other).services["nats"]; !ok {
-				continue
-			}
-			routes = append(routes, peerRouteIP(h, other))
-		}
+		routes = natsSeedRoutes(pf, h, cfg.Seeds)
 	}
 	var containers []int
 	if singleVPS {
@@ -304,6 +292,41 @@ func natsTopology(pf ProvisionFile, h ProvisionHost, cfg ServiceConfig) (int, in
 		}
 	}
 	return replicas, nodeCount, singleVPS, routes, containers
+}
+
+// natsSeedRoutes returns the explicit mesh routes for a node: the first
+// `seeds` peers (default 3, at most nodeCount-1). Gossip discovers the rest.
+func natsSeedRoutes(pf ProvisionFile, h ProvisionHost, seeds int) []string {
+	if seeds <= 0 {
+		seeds = 3
+	}
+	var peers []ProvisionHost
+	for _, other := range pf.Hosts {
+		if other.Name == h.Name {
+			continue
+		}
+		if _, ok := resolveHostConfig(&pf, other).services["nats"]; !ok {
+			continue
+		}
+		peers = append(peers, other)
+	}
+	if seeds > len(peers) {
+		seeds = len(peers)
+	}
+	var routes []string
+	for i := 0; i < seeds; i++ {
+		routes = append(routes, peerRouteIP(h, peers[i]))
+	}
+	return routes
+}
+
+// singleVPSRoutes returns the internal container mesh routes.
+func singleVPSRoutes(replicas int) []string {
+	var routes []string
+	for i := 1; i < replicas; i++ {
+		routes = append(routes, fmt.Sprintf("nats-%d", i))
+	}
+	return routes
 }
 
 // maybeWriteSingleVPS replaces the single-node template output with the

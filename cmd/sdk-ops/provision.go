@@ -77,6 +77,10 @@ type ServiceConfig struct {
 	// satisfied either across N VPS nodes (N hosts with the service) or by a
 	// single VPS running N containers. 0 = default (derived from node count).
 	Replicas        int      `yaml:"replicas,omitempty"`
+	// Seeds is how many explicit mesh routes a node renders (default 3). A
+	// small fleet lists all peers; a large fleet lists a few seeds and gossip
+	// discovers the rest. 0 = default (min(nodeCount, 3)).
+	Seeds           int      `yaml:"seeds,omitempty"`
 	ServerTags      []string `yaml:"server_tags,omitempty"`
 	ClientAdvertise string   `yaml:"client_advertise,omitempty"`
 }
@@ -647,14 +651,30 @@ func validateProvision(pf *ProvisionFile) (map[string]string, error) {
 
 // validateServiceReplicas checks the service replicas declaration. Replicas
 // are satisfied either across N VPS nodes (N hosts with the service) or by a
-// single VPS running N containers — the render picks the mode. Only a negative
-// value is invalid (0 = default).
+// single VPS running N containers — the render picks the mode. A replicas
+// count above the number of NATS nodes (and above the single-VPS container
+// cap) cannot be placed, so it is rejected early.
 func validateServiceReplicas(pf *ProvisionFile) error {
+	nodeCount := 0
+	for _, h := range pf.Hosts {
+		if _, ok := resolveHostConfig(pf, h).services["nats"]; ok {
+			nodeCount++
+		}
+	}
 	for _, h := range pf.Hosts {
 		r := resolveHostConfig(pf, h)
 		for name, svc := range r.services {
 			if svc.Replicas < 0 {
 				return fmt.Errorf("host %q service %q replicas must be >= 0 (0 = default)", h.Name, name)
+			}
+			if svc.Replicas <= 1 {
+				continue
+			}
+			if nodeCount == 1 && svc.Replicas > 9 {
+				return fmt.Errorf("host %q service %q replicas %d exceeds the single-VPS container cap (9)", h.Name, name, svc.Replicas)
+			}
+			if nodeCount > 1 && svc.Replicas > nodeCount {
+				return fmt.Errorf("host %q service %q replicas %d exceeds the %d NATS nodes", h.Name, name, svc.Replicas, nodeCount)
 			}
 		}
 	}
