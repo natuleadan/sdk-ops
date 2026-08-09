@@ -15,8 +15,8 @@ func TestLoadProfiles(t *testing.T) {
 	if p["lite"]["max_connections"] != 100 {
 		t.Errorf("lite max_connections = %v, want 100", p["lite"]["max_connections"])
 	}
-	if p["rs"]["max_file_store"] != "10GB" {
-		t.Errorf("rs max_file_store = %v, want 10GB", p["rs"]["max_file_store"])
+	if p["normal"]["max_file_store"] != "10GB" {
+		t.Errorf("normal max_file_store = %v, want 10GB", p["normal"]["max_file_store"])
 	}
 }
 

@@ -14,7 +14,7 @@ hosts:
     ssh_key: ~/.ssh/id_ed25519
     services:
       nats:
-        profile: lite            # lite (1c/2GB) or rs (bigger)
+        profile: lite            # lite (1c/2GB) or normal (bigger)
         server_tags: [region:mia]
   - name: node-b
     host: 203.0.113.11
