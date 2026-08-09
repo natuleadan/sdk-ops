@@ -78,9 +78,9 @@ func newBackupDBCmd(user, key *string, port *int) *cobra.Command {
 Type must be one of: postgres, mysql, mongodb, redis
 
 Examples:
-  sdk-ops backup db postgres my-postgres --node 1.2.3.4 --db-name myapp
-  sdk-ops backup db mysql my-mysql --node 1.2.3.4
-  sdk-ops backup db redis my-redis --node 1.2.3.4`,
+  sdk-ops backup db postgres my-postgres --node 203.0.113.10 --db-name myapp
+  sdk-ops backup db mysql my-mysql --node 203.0.113.10
+  sdk-ops backup db redis my-redis --node 203.0.113.10`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dbTypeStr := args[0]
 			containerName := args[1]
@@ -138,9 +138,9 @@ func newBackupScheduleCmd(user, key *string, port *int) *cobra.Command {
 Type: services, postgres, mysql, mongodb, redis
 
 Examples:
-  sdk-ops backup schedule services --cron "0 3 * * *" --node 1.2.3.4
-  sdk-ops backup schedule postgres --db-name myapp --container my-postgres --cron "0 */6 * * *" --node 1.2.3.4
-  sdk-ops backup schedule redis --container my-redis --cron "0 * * * *" --node 1.2.3.4`,
+  sdk-ops backup schedule services --cron "0 3 * * *" --node 203.0.113.10
+  sdk-ops backup schedule postgres --db-name myapp --container my-postgres --cron "0 */6 * * *" --node 203.0.113.10
+  sdk-ops backup schedule redis --container my-redis --cron "0 * * * *" --node 203.0.113.10`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			backupType := deploy.BackupType(args[0])

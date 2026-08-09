@@ -24,8 +24,8 @@ func TestParseFile_ValidYAML(t *testing.T) {
 	if p.Hosts[0].Role != "server" {
 		t.Errorf("Hosts[0].Role = %q, want %q", p.Hosts[0].Role, "server")
 	}
-	if p.Hosts[0].Host != "192.168.1.10" {
-		t.Errorf("Hosts[0].Host = %q, want %q", p.Hosts[0].Host, "192.168.1.10")
+	if p.Hosts[0].Host != "198.51.100.10" {
+		t.Errorf("Hosts[0].Host = %q, want %q", p.Hosts[0].Host, "198.51.100.10")
 	}
 	if p.Hosts[0].Name != "server-1" {
 		t.Errorf("Hosts[0].Name = %q, want %q", p.Hosts[0].Name, "server-1")
@@ -84,7 +84,7 @@ func TestValidate_EmptyHosts(t *testing.T) {
 
 func TestValidate_NoServers(t *testing.T) {
 	p := &Plan{Hosts: []Host{
-		{Name: "a1", Role: "agent", Host: "1.2.3.4"},
+		{Name: "a1", Role: "agent", Host: "192.0.2.1"},
 	}}
 	err := p.Validate()
 	if err == nil {
@@ -97,7 +97,7 @@ func TestValidate_NoServers(t *testing.T) {
 
 func TestValidate_MissingName(t *testing.T) {
 	p := &Plan{Hosts: []Host{
-		{Role: "server", Host: "1.2.3.4"},
+		{Role: "server", Host: "192.0.2.1"},
 	}}
 	err := p.Validate()
 	if err == nil {
@@ -120,7 +120,7 @@ func TestValidate_MissingHost(t *testing.T) {
 
 func TestValidate_InvalidRole(t *testing.T) {
 	p := &Plan{Hosts: []Host{
-		{Name: "s1", Role: "master", Host: "1.2.3.4"},
+		{Name: "s1", Role: "master", Host: "192.0.2.1"},
 	}}
 	err := p.Validate()
 	if err == nil {
@@ -133,8 +133,8 @@ func TestValidate_InvalidRole(t *testing.T) {
 
 func TestValidate_Valid(t *testing.T) {
 	p := &Plan{Hosts: []Host{
-		{Name: "s1", Role: "server", Host: "1.2.3.4"},
-		{Name: "a1", Role: "agent", Host: "1.2.3.5"},
+		{Name: "s1", Role: "server", Host: "192.0.2.1"},
+		{Name: "a1", Role: "agent", Host: "192.0.2.5"},
 	}}
 	if err := p.Validate(); err != nil {
 		t.Fatalf("Validate() unexpected error: %v", err)
@@ -169,8 +169,8 @@ func TestFillDefaults_HostOverrides(t *testing.T) {
 		ServerOptions: Options{User: "ubuntu", SSHPort: 2222},
 		AgentOptions:  Options{User: "admin", SSHPort: 2223},
 		Hosts: []Host{
-			{Name: "s1", Role: "server", Host: "1.1.1.1"},
-			{Name: "a1", Role: "agent", Host: "2.2.2.2"},
+			{Name: "s1", Role: "server", Host: "192.0.2.1"},
+			{Name: "a1", Role: "agent", Host: "192.0.2.2"},
 		},
 	}
 	p.fillDefaults()
@@ -193,22 +193,22 @@ func TestSummary(t *testing.T) {
 		Mode:     "k3s",
 		Parallel: 3,
 		Hosts: []Host{
-			{Name: "s1", Role: "server", Host: "1.1.1.1"},
-			{Name: "a1", Role: "agent", Host: "2.2.2.2"},
-			{Name: "a2", Role: "agent", Host: "3.3.3.3"},
+			{Name: "s1", Role: "server", Host: "192.0.2.1"},
+			{Name: "a1", Role: "agent", Host: "192.0.2.2"},
+			{Name: "a2", Role: "agent", Host: "192.0.2.3"},
 		},
 	}
 	s := p.Summary()
 	if !strings.Contains(s, "k3s") {
 		t.Errorf("Summary missing mode")
 	}
-	if !strings.Contains(s, "s1 (1.1.1.1)") {
+	if !strings.Contains(s, "s1 (192.0.2.1)") {
 		t.Errorf("Summary missing server s1")
 	}
-	if !strings.Contains(s, "a1 (2.2.2.2)") {
+	if !strings.Contains(s, "a1 (192.0.2.2)") {
 		t.Errorf("Summary missing agent a1")
 	}
-	if !strings.Contains(s, "a2 (3.3.3.3)") {
+	if !strings.Contains(s, "a2 (192.0.2.3)") {
 		t.Errorf("Summary missing agent a2")
 	}
 }

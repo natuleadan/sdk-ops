@@ -11,13 +11,13 @@ func TestValidateProvision(t *testing.T) {
 		Groups: map[string]GroupConfig{
 			"edge": {
 				Security: &SecurityConfig{Enabled: true, Threshold: 5},
-				Traefik:  &TraefikConfig{Enabled: true, Domains: []TraefikDomain{{Domain: "test.nla.run", Port: 8088}}},
+				Traefik:  &TraefikConfig{Enabled: true, Domains: []TraefikDomain{{Domain: "app.example.com", Port: 8088}}},
 				Tags:     []string{"dmz"},
 			},
 		},
 		Hosts: []ProvisionHost{
-			{Name: "a", Host: "1.1.1.1", Group: "edge"},
-			{Name: "b", Host: "2a03::1"},
+			{Name: "a", Host: "192.0.2.1", Group: "edge"},
+			{Name: "b", Host: "2001:db8::1"},
 		},
 		Peers: []ProvisionPeer{
 			{From: "a", To: "b", Ports: []int{43453}},
@@ -28,22 +28,22 @@ func TestValidateProvision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid plan rejected: %v", err)
 	}
-	if names["b"] != "2a03::1" {
+	if names["b"] != "2001:db8::1" {
 		t.Errorf("names map wrong: %v", names)
 	}
 
 	bad := []*ProvisionFile{
 		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a"}}},
-		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1", Group: "nope"}}},
-		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, Peers: []ProvisionPeer{{From: "x", To: "a", Ports: []int{1}}}},
-		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, Peers: []ProvisionPeer{{From: "a", To: "a"}}},
-		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, DeployOrder: []DeployStep{{Host: "ghost"}}},
-		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, DeployOrder: []DeployStep{{}}},
-		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, Groups: map[string]GroupConfig{"g": {Traefik: &TraefikConfig{Domains: []TraefikDomain{{Domain: "x.com"}}}}}},
-		{Mode: "docker", HTTPSMode: "open", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}},
-		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1", HTTPSMode: "weird"}}},
-		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, Traefik: TraefikConfig{Domains: []TraefikDomain{{Domain: "*.x.com", Service: "s", Port: 80, Wildcard: true}}}, SSL: SSLConfig{Email: "a@b.c"}},
-		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}}, Traefik: TraefikConfig{Domains: []TraefikDomain{{Domain: "*.x.com", Service: "s", Port: 80, Wildcard: true}}}, SSL: SSLConfig{Email: "a@b.c", DNS01: &DNS01Config{Provider: "cloudflare"}}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1", Group: "nope"}}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1"}}, Peers: []ProvisionPeer{{From: "x", To: "a", Ports: []int{1}}}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1"}}, Peers: []ProvisionPeer{{From: "a", To: "a"}}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1"}}, DeployOrder: []DeployStep{{Host: "ghost"}}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1"}}, DeployOrder: []DeployStep{{}}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1"}}, Groups: map[string]GroupConfig{"g": {Traefik: &TraefikConfig{Domains: []TraefikDomain{{Domain: "x.com"}}}}}},
+		{Mode: "docker", HTTPSMode: "open", Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1"}}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1", HTTPSMode: "weird"}}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1"}}, Traefik: TraefikConfig{Domains: []TraefikDomain{{Domain: "*.x.com", Service: "s", Port: 80, Wildcard: true}}}, SSL: SSLConfig{Email: "a@b.c"}},
+		{Mode: "docker", Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1"}}, Traefik: TraefikConfig{Domains: []TraefikDomain{{Domain: "*.x.com", Service: "s", Port: 80, Wildcard: true}}}, SSL: SSLConfig{Email: "a@b.c", DNS01: &DNS01Config{Provider: "cloudflare"}}},
 	}
 	for i, pf := range bad {
 		if _, err := validateProvision(pf); err == nil {
@@ -57,7 +57,7 @@ func TestValidateHTTPSModeAndWildcard(t *testing.T) {
 	ok := &ProvisionFile{
 		Mode:      "docker",
 		HTTPSMode: "all",
-		Hosts:     []ProvisionHost{{Name: "a", Host: "1.1.1.1"}},
+		Hosts:     []ProvisionHost{{Name: "a", Host: "192.0.2.1"}},
 		Traefik:   TraefikConfig{Domains: []TraefikDomain{{Domain: "*.x.com", Service: "s", Port: 80, Wildcard: true}}},
 		SSL:       SSLConfig{Email: "a@b.c", DNS01: &DNS01Config{Provider: "cloudflare", APIToken: "tok"}},
 	}
@@ -65,7 +65,7 @@ func TestValidateHTTPSModeAndWildcard(t *testing.T) {
 		t.Fatalf("valid https_mode/wildcard plan rejected: %v", err)
 	}
 	// host override of https_mode is honoured
-	pf := &ProvisionFile{Mode: "docker", HTTPSMode: "cf", Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1", HTTPSMode: "all"}}}
+	pf := &ProvisionFile{Mode: "docker", HTTPSMode: "cf", Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1", HTTPSMode: "all"}}}
 	r := resolveHostConfig(pf, pf.Hosts[0])
 	if r.httpsMode != "all" {
 		t.Errorf("host https_mode override lost: %q", r.httpsMode)
@@ -75,20 +75,20 @@ func TestValidateHTTPSModeAndWildcard(t *testing.T) {
 func TestResolveHostConfigPrecedence(t *testing.T) {
 	pf := &ProvisionFile{
 		FirewallAllowlist: "cf",
-		AdminIPs:          "1.1.1.1",
+		AdminIPs:          "192.0.2.1",
 		Security:          SecurityConfig{Enabled: true, Threshold: 3},
 		Groups: map[string]GroupConfig{
 			"edge": {
 				FirewallAllowlist: "cf",
-				AdminIPs:          "2.2.2.2",
+				AdminIPs:          "192.0.2.2",
 				Security:          &SecurityConfig{Enabled: true, Threshold: 9},
 				Tags:              []string{"dmz"},
 			},
 		},
 	}
-	host := ProvisionHost{Name: "a", Host: "1.1.1.1", Group: "edge", AdminIPs: "3.3.3.3", SwapSizeMB: 2048}
+	host := ProvisionHost{Name: "a", Host: "192.0.2.1", Group: "edge", AdminIPs: "192.0.2.3", SwapSizeMB: 2048}
 	r := resolveHostConfig(pf, host)
-	if r.adminIPs != "3.3.3.3" {
+	if r.adminIPs != "192.0.2.3" {
 		t.Errorf("host override lost: %q", r.adminIPs)
 	}
 	if r.security.Threshold != 9 {
@@ -101,9 +101,9 @@ func TestResolveHostConfigPrecedence(t *testing.T) {
 		t.Errorf("group tags not inherited: %v", r.tags)
 	}
 
-	plain := ProvisionHost{Name: "b", Host: "2a03::1"}
+	plain := ProvisionHost{Name: "b", Host: "2001:db8::1"}
 	r2 := resolveHostConfig(pf, plain)
-	if r2.adminIPs != "1.1.1.1" {
+	if r2.adminIPs != "192.0.2.1" {
 		t.Errorf("global default lost: %q", r2.adminIPs)
 	}
 	if r2.security.Threshold != 3 {
@@ -133,16 +133,16 @@ func TestSelectHostsByTags(t *testing.T) {
 
 func TestValidateVLANs(t *testing.T) {
 	hosts := []ProvisionHost{
-		{Name: "a", Host: "1.1.1.1"},
-		{Name: "b", Host: "2.2.2.2"},
+		{Name: "a", Host: "192.0.2.1"},
+		{Name: "b", Host: "192.0.2.2"},
 	}
 	ok := &ProvisionFile{
 		Mode:  "docker",
 		Hosts: hosts,
 		VLANs: []ProvisionVLAN{
-			{Name: "internal", CIDR: "10.10.0.0/24", Hosts: []VLANHostAssign{
-				{Name: "a", Iface: "eth1", IP: "10.10.0.1"},
-				{Name: "b", Iface: "eth1", IP: "10.10.0.2"},
+			{Name: "internal", CIDR: "198.51.100.0/24", Hosts: []VLANHostAssign{
+				{Name: "a", Iface: "eth1", IP: "198.51.100.1"},
+				{Name: "b", Iface: "eth1", IP: "198.51.100.2"},
 			}},
 		},
 	}
@@ -157,13 +157,13 @@ func TestValidateVLANs(t *testing.T) {
 	}
 
 	bad := []*ProvisionFile{
-		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "not-a-cidr", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "10.0.0.1"}}}}},
-		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "ghost", Iface: "eth1", IP: "10.0.0.1"}}}}},
-		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "", IP: "10.0.0.1"}}}}},
-		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "192.168.1.1"}}}}},
-		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "nope"}}}}},
-		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "10.0.0.1"}, {Name: "b", Iface: "eth1", IP: "10.0.0.1"}}}}},
-		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "", CIDR: "10.0.0.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "10.0.0.1"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "not-a-cidr", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "198.51.100.1"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "198.51.100.0/24", Hosts: []VLANHostAssign{{Name: "ghost", Iface: "eth1", IP: "198.51.100.1"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "198.51.100.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "", IP: "198.51.100.1"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "198.51.100.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "203.0.113.5"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "198.51.100.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "nope"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "v", CIDR: "198.51.100.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "198.51.100.1"}, {Name: "b", Iface: "eth1", IP: "198.51.100.1"}}}}},
+		{Mode: "docker", Hosts: hosts, VLANs: []ProvisionVLAN{{Name: "", CIDR: "198.51.100.0/24", Hosts: []VLANHostAssign{{Name: "a", Iface: "eth1", IP: "198.51.100.1"}}}}},
 	}
 	for i, pf := range bad {
 		if _, err := validateProvision(pf); err == nil {
@@ -173,11 +173,11 @@ func TestValidateVLANs(t *testing.T) {
 }
 
 func TestParseAdminIPs(t *testing.T) {
-	admin4, admin6, err := parseAdminIPs("181.199.62.245,2a03:4000::1,2001:db8::/32")
+	admin4, admin6, err := parseAdminIPs("203.0.113.10,2001:db8::1,2001:db8::/32")
 	if err != nil {
 		t.Fatalf("parseAdminIPs: %v", err)
 	}
-	if len(admin4) != 1 || admin4[0] != "181.199.62.245/32" {
+	if len(admin4) != 1 || admin4[0] != "203.0.113.10/32" {
 		t.Errorf("admin4 = %v", admin4)
 	}
 	if len(admin6) != 2 {
@@ -195,7 +195,7 @@ func TestParseAdminIPsRejectsBad(t *testing.T) {
 	if _, _, err := parseAdminIPs("  , ,"); err != nil {
 		t.Errorf("whitespace-only should be tolerated: %v", err)
 	}
-	admin4, admin6, err := parseAdminIPs(strings.TrimSpace(" 181.199.62.245 , 2a03::1 "))
+	admin4, admin6, err := parseAdminIPs(strings.TrimSpace(" 203.0.113.10 , 2001:db8::1 "))
 	if err != nil {
 		t.Fatalf("trimmed parse: %v", err)
 	}

@@ -9,7 +9,7 @@ import (
 func TestLoadConfig_ValidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.yaml")
-	content := []byte(`host: 192.168.1.100
+	content := []byte(`host: 192.0.2.100
 user: sdkops
 ssh_key: /home/user/.ssh/id_ed25519
 ssh_port: 2222
@@ -22,8 +22,8 @@ mode: k3s`)
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
 	}
-	if cfg.Host != "192.168.1.100" {
-		t.Errorf("Host = %q, want %q", cfg.Host, "192.168.1.100")
+	if cfg.Host != "192.0.2.100" {
+		t.Errorf("Host = %q, want %q", cfg.Host, "192.0.2.100")
 	}
 	if cfg.User != "sdkops" {
 		t.Errorf("User = %q, want %q", cfg.User, "sdkops")
@@ -39,7 +39,7 @@ mode: k3s`)
 func TestLoadConfig_Defaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.yaml")
-	content := []byte(`host: 10.0.0.1`)
+	content := []byte(`host: 198.51.100.1`)
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ user: root`)
 func TestLoadConfig_InvalidMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.yaml")
-	content := []byte(`host: 10.0.0.1
+	content := []byte(`host: 198.51.100.1
 mode: invalid`)
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		t.Fatal(err)

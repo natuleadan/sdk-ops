@@ -25,21 +25,22 @@ func baseTraefikScript(client *goss.Client, cfg ProxyConfig) string {
 	// IPv6-only hosts: the docker bridge has no v4 DNS route, so Traefik must
 	// run on the host network (uses the host's v6 DNS + listeners).
 	netArgs := "-p 80:80 -p 443:443"
-	catchallTarget := "http://172.17.0.1:18080"
+	catchallTarget := "http://172.17.0.1:18080" // go-check:ignore-ip (docker bridge gateway)
 	if !hasIPv4(client) {
 		netArgs = "--network host"
 		catchallTarget = "http://127.0.0.1:18080"
 	}
-	envArgs := ""
+	var envArgs strings.Builder
 	for _, e := range cfg.Env {
-		envArgs += " -e " + e
+		envArgs.WriteString(" -e " + e)
 	}
-	runCmd := fmt.Sprintf(`sudo docker run -d --name traefik --restart unless-stopped %s%s -v /etc/traefik:/etc/traefik:ro -v /opt/traefik:/opt/traefik traefik:v3.2 --configFile=/etc/traefik/traefik.yml`, netArgs, envArgs)
+	runCmd := fmt.Sprintf(`sudo docker run -d --name traefik --restart unless-stopped %s%s -v /etc/traefik:/etc/traefik:ro -v /opt/traefik:/opt/traefik traefik:v3.2 --configFile=/etc/traefik/traefik.yml`, netArgs, envArgs.String())
 
-	envCheck := "ENVS_OK=1"
+	var envCheck strings.Builder
+	envCheck.WriteString("ENVS_OK=1")
 	for _, e := range cfg.Env {
 		name := strings.SplitN(e, "=", 2)[0]
-		envCheck += fmt.Sprintf(`
+		_, _ = fmt.Fprintf(&envCheck, `
 if ! docker inspect traefik --format '{{range .Config.Env}}{{.}}{{"\n"}}{{end}}' | grep -q '^%s='; then ENVS_OK=0; fi`, name)
 	}
 	containerScript := fmt.Sprintf(`
@@ -55,7 +56,7 @@ if docker inspect traefik >/dev/null 2>&1; then
 else
   %s
 fi
-`, envCheck, runCmd, runCmd)
+`, envCheck.String(), runCmd, runCmd)
 
 	appYml := ""
 	summary := ""
@@ -234,11 +235,11 @@ func TraefikCreateScript(client *goss.Client, cfg ProxyConfig) (string, error) {
 	if !hasIPv4(client) {
 		netArgs = "--network host"
 	}
-	envArgs := ""
+	var envArgs strings.Builder
 	for _, e := range cfg.Env {
-		envArgs += " -e " + e
+		envArgs.WriteString(" -e " + e)
 	}
-	runCmd := fmt.Sprintf(`sudo docker run -d --name traefik --restart unless-stopped %s%s -v /etc/traefik:/etc/traefik:ro -v /opt/traefik:/opt/traefik traefik:v3.2 --configFile=/etc/traefik/traefik.yml`, netArgs, envArgs)
+	runCmd := fmt.Sprintf(`sudo docker run -d --name traefik --restart unless-stopped %s%s -v /etc/traefik:/etc/traefik:ro -v /opt/traefik:/opt/traefik traefik:v3.2 --configFile=/etc/traefik/traefik.yml`, netArgs, envArgs.String())
 	return fmt.Sprintf(`#!/bin/bash
 set -e
 %s

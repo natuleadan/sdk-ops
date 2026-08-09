@@ -12,7 +12,7 @@ sdk-ops completion fish        # Generate fish completion script
 
 ```bash
 sdk-ops status                             # All registered nodes
-sdk-ops status --node 192.168.1.100        # Single node
+sdk-ops status --node 192.0.2.100        # Single node
 ```
 
 Shows per-node: hostname, runtime, agent health, CPU, memory, disk, services.
@@ -22,9 +22,9 @@ Shows per-node: hostname, runtime, agent health, CPU, memory, disk, services.
 ```bash
 sdk-ops state show                         # All tracked resources
 sdk-ops state show --type service          # Filter by type
-sdk-ops state show --node 192.168.1.100    # Filter by node
+sdk-ops state show --node 192.0.2.100    # Filter by node
 sdk-ops state sync                         # Scan all nodes and update inventory
-sdk-ops state sync --node 192.168.1.100    # Scan a single node
+sdk-ops state sync --node 192.0.2.100    # Scan a single node
 ```
 
 Resources are tracked in `~/.sdk-ops/state.yaml` and auto-recorded on
@@ -162,10 +162,10 @@ agent_options:
 hosts:
   - name: server-1
     role: server
-    host: 192.168.1.10
+    host: 192.0.2.10
   - name: agent-1
     role: agent
-    host: 192.168.1.11
+    host: 192.0.2.11
 ```
 
 ### apply
@@ -343,9 +343,9 @@ admin_ips: "203.0.113.10,2001:db8::1"   # explicit, never auto-detected
 https_mode: cf              # cf (web 80/443 gated to the CDN allowlist, default)
                             # all (web 80/443 open to every IP — DNS-only hosts)
 hosts:
-  - name: netcup
-    host: 152.53.169.115    # SSH address
-    peer_ip: 2a0a:4cc0:2000:a9ea:2464:ccff:fedb:f581   # peer channel (IPv6)
+  - name: edge-01
+    host: 203.0.113.20    # SSH address
+    peer_ip: 2001:db8::20   # peer channel (IPv6)
     user: sdkops            # root on first provision, sdkops afterwards
     ssh_key: ~/.ssh/id_ed25519
     https_mode: cf          # per-host override (host > group > global)
@@ -354,8 +354,8 @@ hosts:
       domains:
         - { domain: "web.com", service: hello, port: 8088, container_port: 80 }
         - { domain: "*.api.com", service: api, port: 8088, container_port: 80, wildcard: true }
-  - name: vps-lite
-    host: 2a03:4000:28:4f9:8ab:80ff:fe09:e007
+  - name: edge-02
+    host: 2001:db8::30
     user: sdkops
     ssh_key: ~/.ssh/id_ed25519
     https_mode: all         # v6-only host without a CDN front
@@ -371,9 +371,9 @@ fail2ban:                   # jails owned by the provision (idempotent)
 peers:                      # per-port, per-peer access (restricted by peer_ip)
                             # peers use peer_ip (fallback: host) — IPv6 between
                             # servers keeps IPv4 free for public 80/443
-  - from: vps-lite
-    to: netcup
-    ports: [43453]
+  - from: edge-02
+    to: edge-01
+    ports: [6000]
 bans:                       # explicit IPs banned on every host (fail2ban)
   - 198.51.100.7
 telegram:                   # alerts when an allowlist refresh fails
@@ -416,6 +416,35 @@ sdk-ops ops remove --node <ip> --component logrotate      # uninstall a cron
   operates a single node without a YAML.
 - `allowlist` requires `--provision-yaml` (its admin IPs come from the fleet).
 - `remove allowlist` restores the pre-allowlist firewall (heavy operation).
+
+### certs (Let's Encrypt certificates)
+
+Issue Let's Encrypt certificates using **Traefik's own ACME resolver**
+(`certResolver: letsencrypt`): Traefik obtains and renews the
+certificate with HTTP-01 — no acme.sh, no shell scripts, no provider keys.
+A pure-Go worker syncs the certificate from Traefik's acme.json into each
+consuming service. Per-certificate (no wildcards).
+
+```bash
+sdk-ops certs issue --domain example.com --node <ip> [--services nats,traefik]
+sdk-ops certs status --node <ip> [--domain example.com]           # timer + expiry
+sdk-ops certs logs --node <ip> --lines 20
+sdk-ops certs run --node <ip>                                     # sync once
+sdk-ops certs remove --node <ip>                                  # uninstall timer + worker + store
+sdk-ops certs import --domain example.com --cert-file c.pem --key-file k.pem --node <ip>
+```
+
+- `issue` writes a Traefik router (`Host(example.com)` → the `notfound` 404
+  service, `certResolver: letsencrypt` on websecure) so Traefik issues the
+  certificate, cross-compiles + uploads the sync worker (`/opt/sdk-ops/certs/sdk-ops`),
+  installs the daily systemd timer and syncs the first certificate.
+- The worker (`certs sync`, hidden, run on the node) reads `/opt/traefik/acme.json`,
+  extracts the domain's certificate+key (base64 PEM), writes the central store
+  `/etc/sdk-ops/certs/<domain>/` and refreshes services (idempotent: skips when
+  unchanged). `--services nats` copies to `/opt/sdk-ops/nats/certs/server.{pem,key}`
+  + HUP; `--services traefik` copies to `/opt/traefik/certs/<domain>/` + restart.
+- Port 80 must be reachable by Let's Encrypt (HTTP-01 validation). `import` is
+  for private/own-CA certificates (no renewal timer).
 
 ### uninstall
 

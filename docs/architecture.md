@@ -254,7 +254,7 @@ Hooks are executable scripts placed in `/opt/sdk-ops/hooks/<phase>/` on the VPS.
 
 ```yaml
 nodes:
-  - ip: 192.168.1.100
+  - ip: 192.0.2.100
     user: sdkops
     key: /home/user/.ssh/id_ed25519
     port: 22

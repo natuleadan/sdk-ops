@@ -5,7 +5,7 @@
     {
       "name": "server-1",
       "role": "server",
-      "host": "10.0.0.1"
+      "host": "198.51.100.1"
     }
   ]
 }

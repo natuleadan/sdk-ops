@@ -8,14 +8,15 @@ import (
 )
 
 type Credentials struct {
-	CubePathAPIKey     string `yaml:"cubepath_api_key"`
-	HetznerAPIToken    string `yaml:"hetzner_api_token"`
-	DigitalOceanToken  string `yaml:"digitalocean_token"`
-	VultrAPIKey        string `yaml:"vultr_api_key"`
-	BunnyAPIKey        string `yaml:"bunny_api_key"`
-	CivoAPIKey         string `yaml:"civo_api_key"`
-	AWSRegion          string `yaml:"aws_region"`
-	AWSProfile         string `yaml:"aws_profile"`
+	CubePathAPIKey      string `yaml:"cubepath_api_key"`
+	HetznerAPIToken     string `yaml:"hetzner_api_token"`
+	DigitalOceanToken   string `yaml:"digitalocean_token"`
+	VultrAPIKey         string `yaml:"vultr_api_key"`
+	BunnyAPIKey         string `yaml:"bunny_api_key"`
+	CloudflareAPIToken  string `yaml:"cloudflare_api_token"`
+	CivoAPIKey          string `yaml:"civo_api_key"`
+	AWSRegion           string `yaml:"aws_region"`
+	AWSProfile          string `yaml:"aws_profile"`
 }
 
 func CredentialsPath() string {
@@ -46,6 +47,7 @@ func LoadCredentialsFromEnv() *Credentials {
 		DigitalOceanToken: os.Getenv("DIGITALOCEAN_TOKEN"),
 		VultrAPIKey:       os.Getenv("VULTR_API_KEY"),
 		BunnyAPIKey:       os.Getenv("BUNNY_API_KEY"),
+		CloudflareAPIToken: os.Getenv("CF_API_TOKEN"),
 		CivoAPIKey:        os.Getenv("CIVO_API_KEY"),
 		AWSRegion:         os.Getenv("AWS_REGION"),
 		AWSProfile:        os.Getenv("AWS_PROFILE"),

@@ -90,7 +90,7 @@ Full reference: `docs/commands.md`. Categories:
 | **Backup** | `infra backup/restore`, `backup create/restore/schedule` |
 | **Firewall** | `infra firewall open/close/list`, `cf-normal`, `cf-strict`, `allowlist` (status/refresh/remove/expose/unexpose/ports/peer), `ban/unban/bans` |
 | **Provision** | `infra provision <file.yaml>` (fleet: hosts + peers + bans in parallel) |
-| **TLS** | `infra cert install/info` |
+| **TLS** | `infra cert install/info`, `certs issue/status/logs/run/remove` (provider-agnostic Let's Encrypt via acme.sh) |
 | **Logs** | `infra logs install/remove` |
 | **Alerts** | `infra alerts install/remove/rule add` |
 | **Operations** | `node list/info/top/exec`, `agent status` |
@@ -189,8 +189,8 @@ sdk-ops infra firewall list --node <ip>
 
 ### Provider IP allowlist (cf-normal / cf-strict)
 ```
-sdk-ops infra firewall cf-normal --node <ip> --admin-ips "1.2.3.4,2001:db8::1"
-sdk-ops infra firewall cf-strict --yes --node <ip> --admin-ips "1.2.3.4"
+sdk-ops infra firewall cf-normal --node <ip> --admin-ips "192.0.2.4,2001:db8::1"
+sdk-ops infra firewall cf-strict --yes --node <ip> --admin-ips "192.0.2.4"
 sdk-ops infra firewall cf-normal --node <ip> --open-web   # open 80/443 to all IPs
 sdk-ops infra firewall allowlist status|refresh|remove --node <ip>
 sdk-ops infra firewall allowlist expose 6432 --node <ip>          # admin-only
@@ -363,6 +363,18 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
   `status`, `logs`, `run`, `enable|disable`, `remove` for
   allowlist/security/state/traefik/logrotate. The allowlist component requires
   `--provision-yaml` (admin IPs).
+- **`sdk-ops certs`** issues Let's Encrypt certificates via **Traefik's own
+  ACME resolver**: `issue` writes a router with
+  `certResolver: letsencrypt` (websecure → the `notfound` 404 service), so
+  Traefik obtains/renews the cert with HTTP-01 — no acme.sh, no shell scripts,
+  no provider keys. A pure-Go worker (`certs sync`, cross-compiled + uploaded,
+  daily systemd timer) reads `/opt/traefik/acme.json` and copies the domain's
+  cert+key (base64 PEM) into the services (`nats` = copy + HUP, `traefik` =
+  copy + restart). HTTP-01 requires port 80 reachable by Let's Encrypt.
+  Gotchas: Traefik's internal `acme-http@internal` router (priority max-int)
+  swallows `/.well-known/acme-challenge/` on :80 — third-party HTTP-01 clients
+  (e.g. lego standalone) can never validate through Traefik; only Traefik's own
+  certResolver works. `certs import` is for private/own-CA certs (no renewal).
 
 - **SSH port stays on 22** by default after hardening. Only changes if `--ssh-port N` is explicitly set.
 - **nftables is used** (not UFW). Port 22 is always kept open.

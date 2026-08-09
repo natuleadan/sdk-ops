@@ -35,15 +35,15 @@ Or download a pre-built binary from the [releases page](https://github.com/natul
 ### 2.1 Register a node
 
 ```bash
-sdk-ops config add-node 192.168.1.100 --user root --key ~/.ssh/id_ed25519
+sdk-ops config add-node 192.0.2.100 --user root --key ~/.ssh/id_ed25519
 ```
 
 ### 2.2 Provision a VPS
 
 ```bash
-sdk-ops infra init 192.168.1.100              # hardening + Docker + k3s (default)
-sdk-ops infra init 192.168.1.100 --docker     # Docker only
-sdk-ops infra init 192.168.1.100 --bare       # Hardening only
+sdk-ops infra init 192.0.2.100              # hardening + Docker + k3s (default)
+sdk-ops infra init 192.0.2.100 --docker     # Docker only
+sdk-ops infra init 192.0.2.100 --bare       # Hardening only
 ```
 
 ### 2.3 Deploy a service
@@ -51,7 +51,7 @@ sdk-ops infra init 192.168.1.100 --bare       # Hardening only
 ```bash
 sdk-ops deploy init ./api --template go                  # Scaffold project
 sdk-ops deploy init ./api --template go --ci github      # + CI/CD pipeline
-sdk-ops deploy push ./api --node 192.168.1.100            # Deploy to VPS
+sdk-ops deploy push ./api --node 192.0.2.100            # Deploy to VPS
 sdk-ops service rotate env api --name DB_URL --node ...   # Rotate env vars
 ```
 
@@ -61,37 +61,37 @@ sdk-ops service rotate env api --name DB_URL --node ...   # Rotate env vars
 sdk-ops cluster nodes
 sdk-ops cluster pods
 sdk-ops cluster scale deploy/my-app --replicas 5
-sdk-ops infra status 192.168.1.100
+sdk-ops infra status 192.0.2.100
 ```
 
 ### 2.5 Manage firewall
 
 ```bash
-sdk-ops infra firewall open 8080,9090 --node 192.168.1.100
-sdk-ops infra firewall list --node 192.168.1.100
+sdk-ops infra firewall open 8080,9090 --node 192.0.2.100
+sdk-ops infra firewall list --node 192.0.2.100
 ```
 
 ### 2.6 Backup and restore
 
 ```bash
-sdk-ops infra backup 192.168.1.100
-sdk-ops infra restore 192.168.1.100 ./backup.tar.gz
+sdk-ops infra backup 192.0.2.100
+sdk-ops infra restore 192.0.2.100 ./backup.tar.gz
 ```
 
 ### 2.7 Monitoring agent
 
 ```bash
-sdk-ops agent install --node 192.168.1.100                  # systemd (default)
-sdk-ops agent install --node 192.168.1.100 --runtime docker  # Docker container
-sdk-ops agent status --node 192.168.1.100
+sdk-ops agent install --node 192.0.2.100                  # systemd (default)
+sdk-ops agent install --node 192.0.2.100 --runtime docker  # Docker container
+sdk-ops agent status --node 192.0.2.100
 sdk-ops status                                               # Unified dashboard
 ```
 
 ### 2.8 Provision a database
 
 ```bash
-sdk-ops db create postgres --name mydb --node 192.168.1.100
-sdk-ops db create redis --port 6379 --node 192.168.1.100
+sdk-ops db create postgres --name mydb --node 192.0.2.100
+sdk-ops db create redis --port 6379 --node 192.0.2.100
 ```
 
 ### 2.9 Infrastructure templates
@@ -110,14 +110,14 @@ ssh root@<ip> "cd /root/pg && bash init.sh"
 
 ```bash
 sdk-ops state show
-sdk-ops state sync --node 192.168.1.100
+sdk-ops state sync --node 192.0.2.100
 sdk-ops service rotate db my-postgres --type postgres --node ...
 ```
 
 ### 2.11 Adopt existing server
 
 ```bash
-sdk-ops infra adopt 192.168.1.100 --force
+sdk-ops infra adopt 192.0.2.100 --force
 ```
 
 ### 2.12 Multi-node operations
@@ -220,7 +220,7 @@ s.Provision(ctx)
 
 // Option 2: Programmatic
 cfg := ops.ServerConfig{
-    Host:        "192.168.1.100",
+    Host:        "192.0.2.100",
     User:        "root",
     SSHKey:      "~/.ssh/id_ed25519",
     Mode:        ops.ModeK3s,
@@ -347,9 +347,9 @@ s.Provision(ctx)
 ### 8.3 Firewall management
 
 ```bash
-sdk-ops infra firewall open 9090 --node 192.168.1.100
-sdk-ops infra firewall close 9090 --node 192.168.1.100
-sdk-ops infra firewall list --node 192.168.1.100
+sdk-ops infra firewall open 9090 --node 192.0.2.100
+sdk-ops infra firewall close 9090 --node 192.0.2.100
+sdk-ops infra firewall list --node 192.0.2.100
 ```
 
 ### 8.4 TLS certificate via Caddy
@@ -358,21 +358,21 @@ sdk-ops infra firewall list --node 192.168.1.100
 sdk-ops infra cert install \
   --domain example.com \
   --email admin@example.com \
-  --node 192.168.1.100
+  --node 192.0.2.100
 
 # Use Let's Encrypt staging for testing
 sdk-ops infra cert install \
   --domain example.com \
   --email admin@example.com \
   --staging \
-  --node 192.168.1.100
+  --node 192.0.2.100
 ```
 
 ### 8.5 Log shipping with Promtail
 
 ```bash
 sdk-ops infra logs install \
-  --node 192.168.1.100 \
+  --node 192.0.2.100 \
   --loki http://loki.example.com:3100
 ```
 
@@ -381,17 +381,17 @@ sdk-ops infra logs install \
 ```bash
 # Slack
 sdk-ops infra alerts install \
-  --node 192.168.1.100 \
+  --node 192.0.2.100 \
   --slack https://hooks.slack.com/...
 
 # Telegram
 sdk-ops infra alerts install \
-  --node 192.168.1.100 \
+  --node 192.0.2.100 \
   --bot-token 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11 \
   --chat-id -1001234567890
 
 # Custom alert rules
-sdk-ops infra alerts rule add ./rules.yml --node 192.168.1.100
+sdk-ops infra alerts rule add ./rules.yml --node 192.0.2.100
 ```
 
 ### 8.7 Deploy with secrets
@@ -401,7 +401,7 @@ sdk-ops infra alerts rule add ./rules.yml --node 192.168.1.100
 sdk-ops deploy encrypt service.yaml --age-key age1...
 
 # Deploy with auto-decrypt
-sdk-ops deploy push ./my-service --node 192.168.1.100 --sops-key age1...
+sdk-ops deploy push ./my-service --node 192.0.2.100 --sops-key age1...
 ```
 
 ### 8.8 Multi-node deploy

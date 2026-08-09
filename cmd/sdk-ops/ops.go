@@ -121,7 +121,7 @@ func parseOpsComponents(raw string) ([]string, error) {
 		return out, nil
 	}
 	var out []string
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		name := strings.TrimSpace(part)
 		if _, ok := known[name]; !ok {
 			return nil, fmt.Errorf("unknown component %q (allowlist, security, state, traefik, logrotate)", name)
@@ -325,7 +325,7 @@ LAST=$(systemctl show -p LastTriggerUSec --value `+c.timerName+` 2>/dev/null || 
 LOG=$(tail -1 `+c.logFile+` 2>/dev/null || echo no log)
 echo "timer=$ACT last=$LAST"
 echo "log: $LOG"`)
-					for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+					for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 						fmt.Printf("  %-9s %s\n", name, line)
 					}
 				}

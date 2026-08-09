@@ -70,7 +70,7 @@ Cluster load balancers:
 | Command | Description |
 |---------|-------------|
 | `sdk-ops provider dns list-zones --provider cubepath` | List DNS zones |
-| `sdk-ops provider dns add-record <zone> --type A --name @ --value 1.2.3.4 --ttl 120 --provider cubepath` | Add record |
+| `sdk-ops provider dns add-record <zone> --type A --name @ --value 192.0.2.4 --ttl 120 --provider cubepath` | Add record |
 | `sdk-ops provider dns delete-record <zone> <record> --provider cubepath` | Delete record |
 
 ### SSH Keys

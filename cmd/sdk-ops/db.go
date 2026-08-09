@@ -80,7 +80,7 @@ func dbExposeScope(dbGlobal bool, dbIPs string) (hardening.PortScope, []string, 
 	}
 	if dbIPs != "" {
 		var ipList []string
-		for _, ip := range strings.Split(dbIPs, ",") {
+		for ip := range strings.SplitSeq(dbIPs, ",") {
 			ipList = append(ipList, strings.TrimSpace(ip))
 		}
 		return hardening.PortScopeIPs, ipList, nil

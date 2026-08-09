@@ -25,7 +25,7 @@ func TestVPSStruct(t *testing.T) {
 	vps := VPS{
 		ID:     "123",
 		Name:   "test-vps",
-		IP:     "1.2.3.4",
+		IP:     "192.0.2.1",
 		Status: "active",
 		Plan:   "gp.nano",
 	}
@@ -35,8 +35,8 @@ func TestVPSStruct(t *testing.T) {
 	if vps.Name != "test-vps" {
 		t.Errorf("Name = %q, want %q", vps.Name, "test-vps")
 	}
-	if vps.IP != "1.2.3.4" {
-		t.Errorf("IP = %q, want %q", vps.IP, "1.2.3.4")
+	if vps.IP != "192.0.2.1" {
+		t.Errorf("IP = %q, want %q", vps.IP, "192.0.2.1")
 	}
 }
 
@@ -60,7 +60,7 @@ func TestDNSRecordStruct(t *testing.T) {
 	r := DNSRecord{
 		Type:  "A",
 		Name:  "www",
-		Value: "1.2.3.4",
+		Value: "192.0.2.1",
 		TTL:   300,
 	}
 	if r.Type != "A" {
@@ -69,8 +69,8 @@ func TestDNSRecordStruct(t *testing.T) {
 	if r.Name != "www" {
 		t.Errorf("Name = %q, want %q", r.Name, "www")
 	}
-	if r.Value != "1.2.3.4" {
-		t.Errorf("Value = %q, want %q", r.Value, "1.2.3.4")
+	if r.Value != "192.0.2.1" {
+		t.Errorf("Value = %q, want %q", r.Value, "192.0.2.1")
 	}
 }
 
@@ -78,11 +78,11 @@ func TestLoadBalancerStruct(t *testing.T) {
 	lb := LoadBalancer{
 		ID:     "lb-1",
 		Name:   "my-lb",
-		IP:     "5.6.7.8",
+		IP:     "192.0.2.5",
 		Status: "active",
 	}
-	if lb.IP != "5.6.7.8" {
-		t.Errorf("IP = %q, want %q", lb.IP, "5.6.7.8")
+	if lb.IP != "192.0.2.5" {
+		t.Errorf("IP = %q, want %q", lb.IP, "192.0.2.5")
 	}
 }
 
@@ -100,7 +100,7 @@ func TestBareMetalStruct(t *testing.T) {
 	bm := BareMetal{
 		ID:     "bm-1",
 		Name:   "bare-1",
-		IP:     "10.0.0.1",
+		IP:     "198.51.100.1",
 		Status: "active",
 	}
 	if bm.Name != "bare-1" {

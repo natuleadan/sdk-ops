@@ -373,8 +373,8 @@ func parseServiceMeta(svcYamlPath string) serviceMeta {
 	inPorts := false
 	for line := range strings.SplitSeq(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "init:") {
-			m.initCmd = strings.TrimSpace(strings.TrimPrefix(trimmed, "init:"))
+		if after, ok := strings.CutPrefix(trimmed, "init:"); ok {
+			m.initCmd = strings.TrimSpace(after)
 			continue
 		}
 		if strings.HasPrefix(trimmed, "ports:") {

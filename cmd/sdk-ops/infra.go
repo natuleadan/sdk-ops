@@ -523,7 +523,7 @@ func parseAdminIPs(raw string) (admin4, admin6 []string, err error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil, nil
 	}
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		if strings.TrimSpace(part) == "" {
 			continue
 		}
@@ -668,8 +668,8 @@ func parseAllowlistFlag(raw string) (hardening.AllowlistProfile, string, error) 
 	if raw == "strict" {
 		return hardening.AllowlistStrict, "cf", nil
 	}
-	if strings.HasPrefix(raw, "strict:") {
-		src := strings.TrimPrefix(raw, "strict:")
+	if after, ok := strings.CutPrefix(raw, "strict:"); ok {
+		src := after
 		if _, err := hardening.ParseSource(src); err != nil {
 			return hardening.AllowlistNormal, "", fmt.Errorf("--firewall-allowlist: %w", err)
 		}
@@ -913,7 +913,7 @@ func newAllowlistPeerCmd(f *infraFlags) *cobra.Command {
 					return err
 				}
 				fmt.Println("port proto scope ips")
-				for _, line := range strings.Split(out, "\n") {
+				for line := range strings.SplitSeq(out, "\n") {
 					fields := strings.Fields(line)
 					if len(fields) >= 3 {
 						ipPart := ""
@@ -1011,7 +1011,7 @@ func newAllowlistExposeCmd(f *infraFlags) *cobra.Command {
 			}
 			if ips != "" {
 				effectiveScope = hardening.PortScopeIPs
-				for _, ip := range strings.Split(ips, ",") {
+				for ip := range strings.SplitSeq(ips, ",") {
 					ipList = append(ipList, strings.TrimSpace(ip))
 				}
 			}

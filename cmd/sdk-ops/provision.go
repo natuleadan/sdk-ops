@@ -204,17 +204,17 @@ Example provision.yaml:
       traefik:
         enabled: true
         domains:
-          - { domain: "test.nla.run", service: hello, port: 8088 }
+          - { domain: "app.example.com", service: hello, port: 8088 }
   hosts:
-    - name: netcup
-      host: 152.53.169.115
+    - name: edge-01
+      host: 203.0.113.20
       group: edge
       user: root
       ssh_key: ~/.ssh/id_ed25519
   peers:
-    - from: vps-lite
-      to: netcup
-      ports: [43453]
+    - from: edge-02
+      to: edge-01
+      ports: [6000]
   bans:
     - 198.51.100.7
   telegram:
@@ -296,7 +296,7 @@ func selectHostsByTags(hosts []ProvisionHost, tags string) []ProvisionHost {
 		return hosts
 	}
 	want := map[string]bool{}
-	for _, t := range strings.Split(tags, ",") {
+	for t := range strings.SplitSeq(tags, ",") {
 		want[strings.TrimSpace(t)] = true
 	}
 	var out []ProvisionHost
@@ -1022,7 +1022,7 @@ func installFail2banJailOn(pf ProvisionFile, h ProvisionHost) error {
 		RecidiveBantime: pf.Fail2ban.RecidiveBantime,
 		MaxRetry:        pf.Fail2ban.MaxRetry,
 	}
-	for _, ip := range strings.Split(r.adminIPs, ",") {
+	for ip := range strings.SplitSeq(r.adminIPs, ",") {
 		if ip = strings.TrimSpace(ip); ip != "" {
 			cfg.IgnoreIPs = append(cfg.IgnoreIPs, hardening.NormalizeCIDR(ip))
 		}
@@ -1075,7 +1075,7 @@ func applyTraefikDomainsOn(conn *golang_ssh.Client, ssl SSLConfig, traefik Traef
 	// Bridge-mode Traefik reaches the 404 responder (traefik-404 on :18080)
 	// through the docker gateway, so the docker subnets must reach that port.
 	if !hostNet {
-		if err := hardening.AllowlistExposePort(conn, 18080, "tcp", hardening.PortScopeIPs, "172.16.0.0/12"); err != nil {
+		if err := hardening.AllowlistExposePort(conn, 18080, "tcp", hardening.PortScopeIPs, "172.16.0.0/12"); err != nil { // go-check:ignore-ip (docker bridge CIDR)
 			return fmt.Errorf("traefik 404 port 18080: %w", err)
 		}
 	}
@@ -1119,7 +1119,7 @@ ROUTEREOF
 	}
 	challenge := "      httpChallenge:\n        entryPoint: web"
 	if ssl.DNS01 != nil && ssl.DNS01.Provider != "" {
-		challenge = fmt.Sprintf("      dnsChallenge:\n        provider: %s\n        resolvers:\n          - \"1.1.1.1:53\"\n          - \"8.8.8.8:53\"", ssl.DNS01.Provider)
+		challenge = fmt.Sprintf("      dnsChallenge:\n        provider: %s\n        resolvers:\n          - \"1.1.1.1:53\"\n          - \"8.8.8.8:53\"", ssl.DNS01.Provider) // go-check:ignore-ip (public DNS resolvers)
 	}
 	script := fmt.Sprintf(`sudo tee /etc/traefik/traefik.yml > /dev/null << 'EOF'
 global:

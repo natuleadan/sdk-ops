@@ -44,19 +44,19 @@ func TestParseOpsComponents(t *testing.T) {
 }
 
 func TestOpsTargets(t *testing.T) {
-	pf := &ProvisionFile{Hosts: []ProvisionHost{{Name: "a", Host: "1.1.1.1"}, {Name: "b", Host: "2a03::1"}}}
+	pf := &ProvisionFile{Hosts: []ProvisionHost{{Name: "a", Host: "192.0.2.1"}, {Name: "b", Host: "2001:db8::1"}}}
 	hosts, pfOut, err := opsTargets(pf, "", infraFlags{})
 	if err != nil || len(hosts) != 2 || pfOut != pf {
 		t.Errorf("fleet targets wrong: %v %v", err, hosts)
 	}
-	hosts, _, err = opsTargets(pf, "2a03::1", infraFlags{})
+	hosts, _, err = opsTargets(pf, "2001:db8::1", infraFlags{})
 	if err != nil || len(hosts) != 1 || hosts[0].Name != "b" {
 		t.Errorf("filtered targets wrong: %v %v", err, hosts)
 	}
-	if _, _, err := opsTargets(pf, "9.9.9.9", infraFlags{}); err == nil {
+	if _, _, err := opsTargets(pf, "192.0.2.9", infraFlags{}); err == nil {
 		t.Error("unknown node must fail")
 	}
-	hosts, pfOut, err = opsTargets(nil, "1.1.1.1", infraFlags{user: "sdkops"})
+	hosts, pfOut, err = opsTargets(nil, "192.0.2.1", infraFlags{user: "sdkops"})
 	if err != nil || pfOut != nil || len(hosts) != 1 || hosts[0].User != "sdkops" {
 		t.Errorf("single node targets wrong: %v %v", err, hosts)
 	}

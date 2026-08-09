@@ -151,10 +151,10 @@ func resolveTXT(ctx context.Context, fqdn string, depth int, visited map[string]
 	}
 	var out []string
 	for _, rec := range records {
-		for _, tok := range strings.Fields(rec) {
+		for tok := range strings.FieldsSeq(rec) {
 			tok = strings.Trim(tok, `"`)
-			if strings.HasPrefix(tok, "include:") {
-				sub, err := resolveTXT(ctx, strings.TrimPrefix(tok, "include:"), depth+1, visited)
+			if after, ok := strings.CutPrefix(tok, "include:"); ok {
+				sub, err := resolveTXT(ctx, after, depth+1, visited)
 				if err != nil {
 					return nil, err
 				}
@@ -240,7 +240,7 @@ type AllowlistConfig struct {
 // or other iptables-nft tables are never touched when it is loaded.
 //
 // Sets use `flags interval` because they hold prefix elements (e.g.
-// 173.245.48.0/20 for Cloudflare ranges); plain sets reject prefixes.
+// 192.0.2.0/24 for example ranges); plain sets reject prefixes.
 func GenerateAllowlistConfig(cfg AllowlistConfig) string {
 	var b strings.Builder
 	b.WriteString("table inet filter {\n")
@@ -279,9 +279,9 @@ func GenerateAllowlistConfig(cfg AllowlistConfig) string {
 	if cfg.OpenWeb {
 		b.WriteString("        tcp dport { 80, 443 } accept\n")
 	}
-	b.WriteString("        ip saddr 10.0.0.0/8 accept\n")
-	b.WriteString("        ip saddr 172.16.0.0/12 accept\n")
-	b.WriteString("        ip saddr 192.168.0.0/16 accept\n")
+	b.WriteString("        ip saddr 10.0.0.0/8 accept\n")     // go-check:ignore-ip (RFC1918 subnets)
+	b.WriteString("        ip saddr 172.16.0.0/12 accept\n")  // go-check:ignore-ip (RFC1918 subnets)
+	b.WriteString("        ip saddr 192.168.0.0/16 accept\n") // go-check:ignore-ip (RFC1918 subnets)
 	b.WriteString("        ip saddr @admin4 accept\n")
 	b.WriteString("        ip6 saddr @admin6 accept\n")
 	b.WriteString("        ip saddr @allow4 accept\n")
@@ -342,7 +342,7 @@ func CurrentSSHPorts(client *goss.Client, fallbackPort int) []int {
 		return []int{fallbackPort}
 	}
 	ports := map[int]bool{fallbackPort: true}
-	for _, seg := range strings.Fields(out) {
+	for seg := range strings.FieldsSeq(out) {
 		p := 0
 		if _, err := fmt.Sscanf(strings.Trim(seg, "{},/;"), "%d", &p); err == nil && p >= 1 && p <= 65535 && !allowlistGatePorts[p] {
 			ports[p] = true

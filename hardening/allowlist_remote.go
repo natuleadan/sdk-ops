@@ -568,7 +568,7 @@ func reapplyPortRegistry(client *goss.Client) {
 	if err != nil || strings.TrimSpace(out) == "" {
 		return
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 3 {
 			continue
