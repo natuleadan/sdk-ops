@@ -23,6 +23,31 @@ else
   FAILED=1
 fi
 
+# Cert expiry: fail when < 30 days left (the renewal timer refreshes it).
+CERT="$DIR/certs/server.pem"
+if [ -f "$CERT" ]; then
+  if openssl x509 -in "$CERT" -noout -checkend 2592000 >/dev/null 2>&1; then
+    echo "  [PASS] server cert > 30d"
+  else
+    echo "  [FAIL] server cert expira en <30 dias"
+    FAILED=1
+  fi
+else
+  echo "  [FAIL] server cert ausente"
+  FAILED=1
+fi
+
+# Host memory: fail when < 200MB free.
+avail="$(free -m 2>/dev/null | awk '/^Mem:/{print $7}')"
+if [ -n "$avail" ]; then
+  if [ "$avail" -gt 200 ]; then
+    echo "  [PASS] host free ${avail}MB"
+  else
+    echo "  [FAIL] memoria baja (${avail}MB)"
+    FAILED=1
+  fi
+fi
+
 if [ "$FAILED" -ne 0 ]; then echo "[nats-validate] FAILED"; exit 1; fi
 echo "[nats-validate] OK"
 exit 0

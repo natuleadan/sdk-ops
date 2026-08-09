@@ -68,6 +68,9 @@ func deployServiceOn(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost,
 	if err := templates.RenderDir(tmpl.DirName, renderDir, data); err != nil {
 		return err
 	}
+	if err := maybeWriteSingleVPS(renderDir, data, name, h.Name); err != nil {
+		return err
+	}
 
 	svcDir := "/opt/sdk-ops/services/" + name
 	if _, _, err := ssh.Run(conn, "sudo mkdir -p "+svcDir); err != nil {
@@ -112,13 +115,18 @@ func deployServiceOn(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost,
 // one deployed on the node (or the service container is not running), which
 // means the container must be recreated to pick up the new config.
 func serviceConfigChanged(conn *golang_ssh.Client, renderDir, svcDir string) (bool, error) {
+	// Config file (nats.conf, or nats-0.conf in single-VPS mode).
+	cfgFile := "nats.conf"
+	if _, err := os.Stat(filepath.Join(renderDir, "nats-0.conf")); err == nil {
+		cfgFile = "nats-0.conf"
+	}
 	//nolint:gosec // renderDir is a MkdirTemp dir we control + fixed filename
-	rendered, err := os.ReadFile(filepath.Join(renderDir, "nats.conf"))
+	rendered, err := os.ReadFile(filepath.Join(renderDir, cfgFile))
 	if err != nil {
 		// No renderable config for this service — fall back to a plain up.
 		return false, nil
 	}
-	remote, _, err := ssh.Run(conn, "sudo cat "+filepath.Join(svcDir, "nats.conf")+" 2>/dev/null || true")
+	remote, _, err := ssh.Run(conn, "sudo cat "+filepath.Join(svcDir, cfgFile)+" 2>/dev/null || true")
 	if err != nil {
 		return false, err
 	}
@@ -159,18 +167,7 @@ func natsRenderData(pf ProvisionFile, h ProvisionHost, prof map[string]any, cfg 
 	if cluster == "" {
 		cluster = "nla"
 	}
-	var routes []string
-	for _, other := range pf.Hosts {
-		if other.Name == h.Name {
-			continue
-		}
-		// Only peer with hosts that actually run the NATS service; a
-		// consumer-only host (no nats in services) must not appear in the mesh.
-		if _, ok := resolveHostConfig(&pf, other).services["nats"]; !ok {
-			continue
-		}
-		routes = append(routes, peerRouteIP(h, other))
-	}
+	replicas, nodeCount, singleVPS, routes, containers := natsTopology(pf, h, cfg)
 	appHash, err := bcryptHash(env("NATS_APP_PASSWORD"))
 	if err != nil {
 		return nil, err
@@ -197,7 +194,7 @@ func natsRenderData(pf ProvisionFile, h ProvisionHost, prof map[string]any, cfg 
 	appSubscribe = append(appSubscribe, splitCsv(env("NATS_APP_SUBSCRIBE"))...)
 	return map[string]any{
 		"ServerName":        h.Name,
-		"Advertise":         h.Host,
+		"Advertise":         meshAdvertise(pf, h),
 		"Routes":            routes,
 		"ClusterName":       cluster,
 		"MaxConnections":    prof["max_connections"],
@@ -213,6 +210,10 @@ func natsRenderData(pf ProvisionFile, h ProvisionHost, prof map[string]any, cfg 
 		"ClientAdvertise":   cfg.ClientAdvertise,
 		"AppPublishAllow":   jsonTags(appPublish),
 		"AppSubscribeAllow": jsonTags(appSubscribe),
+		"Replicas":          replicas,
+		"NodeCount":         nodeCount,
+		"SingleVPS":         singleVPS,
+		"Containers":        containers,
 	}, nil
 }
 
@@ -239,8 +240,91 @@ func jsonTags(tags []string) string {
 	}
 	return "[" + strings.Join(quoted, ",") + "]"
 }
-func bcryptHash(pass string) (string, error) {
-	if pass == "" {
+// meshAdvertise returns the address the peers reach this node by. When the
+// node and every NATS peer are on a private network, the private IP is used
+// (firewall allows the private source); otherwise the public host is used so
+// external peers can reach back.
+func meshAdvertise(pf ProvisionFile, h ProvisionHost) string {
+	advertise := h.Host
+	allPrivate := h.PeerIP != "" && isPrivateIP(h.PeerIP)
+	for _, other := range pf.Hosts {
+		if other.Name == h.Name {
+			continue
+		}
+		if _, ok := resolveHostConfig(&pf, other).services["nats"]; !ok {
+			continue
+		}
+		if other.PeerIP == "" || !isPrivateIP(other.PeerIP) {
+			allPrivate = false
+		}
+	}
+	if allPrivate {
+		advertise = h.PeerIP
+	}
+	return advertise
+}
+
+// natsTopology derives the replica mode for a NATS node: the desired replica
+// count, the number of hosts running NATS and whether the replicas are served
+// by N containers on this same VPS (singleVPS) or by N peer VPS nodes.
+func natsTopology(pf ProvisionFile, h ProvisionHost, cfg ServiceConfig) (int, int, bool, []string, []int) {
+	nodeCount := 0
+	for _, other := range pf.Hosts {
+		if _, ok := resolveHostConfig(&pf, other).services["nats"]; ok {
+			nodeCount++
+		}
+	}
+	replicas := cfg.Replicas
+	if replicas <= 0 {
+		replicas = nodeCount // default: one copy per NATS node
+	}
+	singleVPS := replicas > 1 && nodeCount == 1
+	var routes []string
+	if singleVPS {
+		for i := 1; i < replicas; i++ {
+			routes = append(routes, fmt.Sprintf("nats-%d", i))
+		}
+	} else {
+		for _, other := range pf.Hosts {
+			if other.Name == h.Name {
+				continue
+			}
+			// Only peer with hosts that actually run the NATS service; a
+			// consumer-only host (no nats in services) must not appear in the mesh.
+			if _, ok := resolveHostConfig(&pf, other).services["nats"]; !ok {
+				continue
+			}
+			routes = append(routes, peerRouteIP(h, other))
+		}
+	}
+	var containers []int
+	if singleVPS {
+		for i := 0; i < replicas; i++ {
+			containers = append(containers, i)
+		}
+	}
+	return replicas, nodeCount, singleVPS, routes, containers
+}
+
+// maybeWriteSingleVPS replaces the single-node template output with the
+// single-VPS multi-container setup when a host declares replicas>1 with no
+// peer NATS hosts.
+func maybeWriteSingleVPS(renderDir string, data map[string]any, name, hostName string) error {
+	if name != "nats" {
+		return nil
+	}
+	single, _ := data["SingleVPS"].(bool)
+	if !single {
+		return nil
+	}
+	replicas, _ := data["Replicas"].(int)
+	if replicas < 1 {
+		replicas = 3
+	}
+	return writeSingleVPSSetup(renderDir, data, replicas, hostName)
+}
+
+func bcryptHash(pass string) (string, error) {	if pass == "" {
 		return "", fmt.Errorf("empty password — set NATS_*_PASSWORD in the environment")
 	}
 	b, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)

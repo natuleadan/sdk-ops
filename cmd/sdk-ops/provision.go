@@ -72,6 +72,11 @@ type ProvisionServices map[string]ServiceConfig
 // ServiceConfig is one declared service on a host.
 type ServiceConfig struct {
 	Profile         string   `yaml:"profile"`
+	// Replicas is the desired stream/bucket replica count (1 = single node,
+	// 2 = R2, 3 = R3...). Validated against the cluster topology: it can be
+	// satisfied either across N VPS nodes (N hosts with the service) or by a
+	// single VPS running N containers. 0 = default (derived from node count).
+	Replicas        int      `yaml:"replicas,omitempty"`
 	ServerTags      []string `yaml:"server_tags,omitempty"`
 	ClientAdvertise string   `yaml:"client_advertise,omitempty"`
 }
@@ -634,7 +639,26 @@ func validateProvision(pf *ProvisionFile) (map[string]string, error) {
 	if err := validateVLANs(pf); err != nil {
 		return nil, err
 	}
+	if err := validateServiceReplicas(pf); err != nil {
+		return nil, err
+	}
 	return names, nil
+}
+
+// validateServiceReplicas checks the service replicas declaration. Replicas
+// are satisfied either across N VPS nodes (N hosts with the service) or by a
+// single VPS running N containers — the render picks the mode. Only a negative
+// value is invalid (0 = default).
+func validateServiceReplicas(pf *ProvisionFile) error {
+	for _, h := range pf.Hosts {
+		r := resolveHostConfig(pf, h)
+		for name, svc := range r.services {
+			if svc.Replicas < 0 {
+				return fmt.Errorf("host %q service %q replicas must be >= 0 (0 = default)", h.Name, name)
+			}
+		}
+	}
+	return nil
 }
 
 // validateVLANs checks VLAN assignments: known hosts, non-empty iface, IP

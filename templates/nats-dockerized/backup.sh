@@ -46,5 +46,15 @@ s3cmd ls -r "s3://$S3_BUCKET/$S3_PREFIX/" 2>/dev/null | while read -r line; do
   if [ "${d:-0}" \< "$cutoff" ]; then s3cmd del "$key" >/dev/null 2>&1; fi
 done
 
+# Identity bundle: node config, certs, keys, s3cfg — so a wiped node can be
+# rebuilt from B2 (the recipient NKey on the operator decrypts it).
+IDENT="$BACKUP_ROOT/identity-$TS.tar.gz"
+sudo tar czf "$IDENT" -C / "$DIR" /home/sdkops/.s3cfg 2>/dev/null || fail "tar identity"
+seal "$IDENT" "$BACKUP_ROOT/identity-$TS.nkey" || fail "seal identity"
+rm -f "$IDENT"
+s3cmd put "$BACKUP_ROOT/identity-$TS.nkey" "s3://$S3_BUCKET/$S3_PREFIX/identity/$TS.nkey" >/dev/null 2>&1 || fail "s3 identity"
+rm -f "$BACKUP_ROOT/identity-$TS.nkey"
+echo "[nats-backup] identity -> s3://$S3_BUCKET/$S3_PREFIX/identity/$TS.nkey OK"
+
 echo "[nats-backup] OK"
 exit 0
