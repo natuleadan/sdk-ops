@@ -18,6 +18,20 @@ if command -v docker &>/dev/null; then
     exit 0
 fi
 
+# The provider mirror (mirror.<provider>) can hang — switch to the official
+# Ubuntu/Debian archives first (provider-agnostic), so the apt (docker-ce)
+# resolves during the install.
+sudo sed -i -E 's|https?://mirror[^/ ]*/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true
+sudo sed -i -E 's|mirror\+file://[^ ]*debian-security[^ ]*|http://deb.debian.org/debian-security|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+sudo sed -i -E 's|mirror\+file://[^ ]*debian[^ ]*|http://deb.debian.org/debian|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+# The ForceIPv6 breaks v4-only hosts (the apt would try the unreachable v6):
+# remove it ALWAYS, re-add only on v4-less hosts.
+sudo rm -f /etc/apt/apt.conf.d/99force-ipv6 2>/dev/null || true
+if ! ip -4 addr show | grep -q 'inet '; then
+  echo 'Acquire::ForceIPv6 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv6 >/dev/null 2>&1 || true
+fi
+sudo apt-get update >/dev/null 2>&1 || true
+
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $(whoami) 2>/dev/null || true
 
