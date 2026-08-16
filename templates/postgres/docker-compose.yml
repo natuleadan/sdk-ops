@@ -1,0 +1,61 @@
+name: pg-{{ .NodeName }}
+# PostgreSQL HA node: Patroni (postgres 18 + patroni[etcd] + pgbackrest).
+# {{ if .IsPooler }}The pooler node also runs PgDog (the app entry, 6432).{{ end }}
+services:
+  patroni:
+    build:
+      context: .
+      # The image build needs the host's network: the build container's DNS
+      # fails on IPv6-only providers ("DNS: transient error") — the host
+      # resolves the alpine/pypi mirrors over v6 correctly.
+      network: host
+    user: "70:70"
+    command: ["/etc/patroni/patroni.yml"]
+    ports:
+      - "5432:5432"
+      - "8008:8008"
+    volumes:
+      - ./data/patroni:/var/lib/postgresql
+      - ../ssl:/ssl:ro
+      - ./patroni.yml:/etc/patroni/patroni.yml:ro
+      - ./post-bootstrap.sh:/etc/patroni/post-bootstrap.sh:ro
+      - ./pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - ./run:/run/postgresql
+    mem_limit: {{ .MemLimit }}
+    cpus: {{ .Cpus }}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8008/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - default
+{{ if .IsPooler }}
+  pgdog:
+    image: ghcr.io/pgdogdev/pgdog:v0.1.52
+    ports:
+      - "6432:6432"
+    environment:
+      PGPASSWORD: {{ .PGAppPassword }}
+    volumes:
+      - ./pgdog.toml:/pgdog/pgdog.toml:ro
+      - ./users.toml:/pgdog/users.toml:ro
+      - ../ssl:/ssl:ro
+    depends_on:
+      patroni:
+        condition: service_started
+    healthcheck:
+      test: psql -h127.0.0.1 -p6432 -U dev -d postgres -c 'SELECT 1' >/dev/null 2>&1
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - default
+{{ end }}
+networks:
+  default:
+    enable_ipv6: true

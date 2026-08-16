@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-//go:embed pg-dockerized kv-dockerized libsql-dockerized nats-dockerized
+//go:embed pg-dockerized kv-dockerized libsql-dockerized nats-dockerized etcd postgres
 var infraTemplates embed.FS
 
 type Template struct {
@@ -115,6 +115,18 @@ var Templates = map[string]Template{
 		Description: "NATS JetStream cluster node (R3, TLS/mTLS, at-rest)",
 		IsDir:       true,
 		DirName:     "nats-dockerized",
+	},
+	"etcd": {
+		Name:        "etcd",
+		Description: "etcd DCS shared (3-member quorum 2/3) — consensus for Patroni + services",
+		IsDir:       true,
+		DirName:     "etcd",
+	},
+	"postgres": {
+		Name:        "postgres",
+		Description: "PostgreSQL HA cluster (Patroni + etcd DCS + PgDog + pgbackrest S3 + DR)",
+		IsDir:       true,
+		DirName:     "postgres",
 	},
 }
 

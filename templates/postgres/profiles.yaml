@@ -1,0 +1,14 @@
+# postgres profiles — one scalable template, sized per node.
+# Selected via provision.yaml: services: { postgres: { profile: <name> } }
+lite:
+  max_connections: 500
+  mem_limit: 2g
+  cpus: 1
+normal:
+  max_connections: 1000
+  mem_limit: 4g
+  cpus: 2
+small:
+  max_connections: 2000
+  mem_limit: 8g
+  cpus: 4

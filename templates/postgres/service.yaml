@@ -1,0 +1,13 @@
+name: postgres
+description: PostgreSQL HA cluster (Patroni + etcd DCS shared + PgDog pooler + pgbackrest S3 + DR)
+ports:
+  - "5432:5432"  # PostgreSQL (TLS)
+  - "6432:6432"  # PgDog pooler (app entry) — only on the pooler node
+  - "8008:8008"  # Patroni REST API (health/switchover)
+health:
+  path: /
+  interval: 15
+commands:
+  backup: bash backup.sh
+  restore: bash restore.sh
+  validate: bash validate.sh

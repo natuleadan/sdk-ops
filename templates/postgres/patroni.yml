@@ -1,0 +1,82 @@
+# patroni.yml — PostgreSQL HA node (Patroni + etcd DCS shared).
+# Rendered per node by the provision ({{ .Var }}). The DCS keys live under
+# /service/pg/<scope>/ — the etcd cluster is SHARED infra (quorum 2/3).
+scope: {{ .Scope }}
+namespace: /service/pg/
+name: {{ .NodeName }}
+
+restapi:
+  listen: "*:8008"
+  connect_address: "{{ .NodeIP }}:8008"
+etcd:
+  hosts: "{{ .EtcdHosts }}"
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        max_connections: {{ .MaxConnections }}
+        wal_level: replica
+        hot_standby: "on"
+        archive_mode: "on"
+        archive_command: pgbackrest --stanza={{ .Stanza }} archive-push %p
+        max_worker_processes: 4
+    synchronous_mode: true
+    synchronous_mode_strict: false
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - local all all trust
+    - host replication replicator 0.0.0.0/0 scram-sha-256
+    - host replication replicator ::/0 scram-sha-256
+    - host all all 0.0.0.0/0 scram-sha-256
+    - host all all ::/0 scram-sha-256
+  # Patroni v4+ removed bootstrap.users — the roles are created here.
+  # (postgres:18-alpine has no bash — the post_bootstrap runs via sh.)
+  post_bootstrap: sh /etc/patroni/post-bootstrap.sh
+
+postgresql:
+  listen: "*:5432"
+  connect_address: "{{ .NodeIP }}:5432"
+  data_dir: /var/lib/postgresql/data
+  bin_dir: /usr/local/bin
+  pgpass: /tmp/pgpass
+  # The DYNAMIC pg_hba (applied continuously from the DCS — the bootstrap's
+  # only runs once). Dual-stack: the IPv4 peers (VLAN/intra) + the IPv6 peers
+  # (the external mesh). Patroni ignores this only if hba_file is non-default.
+  pg_hba:
+    - local all all trust
+    - host replication replicator 0.0.0.0/0 scram-sha-256
+    - host replication replicator ::/0 scram-sha-256
+    - host all all 0.0.0.0/0 scram-sha-256
+    - host all all ::/0 scram-sha-256
+  authentication:
+    replication:
+      username: replicator
+      password: {{ .PGReplicatorPassword }}
+    superuser:
+      username: postgres
+      password: {{ .PGSuperUser }}
+    rewind:
+      username: rewind_user
+      password: {{ .PGRewindPassword }}
+  parameters:
+    unix_socket_directories: /run/postgresql
+    ssl: "on"
+    ssl_cert_file: /ssl/server.crt
+    ssl_key_file: /ssl/server.key
+    restore_command: pgbackrest --config=/etc/pgbackrest/pgbackrest.conf --pg1-path=/var/lib/postgresql/data --stanza={{ .Stanza }} archive-get %f "%p"
+
+watchdog:
+  mode: off
+
+tags:
+  nofailover: false
+  noloadbalance: false

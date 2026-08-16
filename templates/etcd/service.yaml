@@ -1,0 +1,10 @@
+name: etcd
+description: etcd DCS shared (3-member quorum 2/3) — the consensus layer for Patroni + future services
+ports:
+  - "2379:2379"  # client (Patroni + health)
+  - "2380:2380"  # peer (RAFT between members)
+health:
+  path: /health
+  interval: 15
+commands:
+  validate: bash validate.sh

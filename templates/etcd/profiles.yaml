@@ -1,0 +1,11 @@
+# etcd profiles — one scalable DCS, sized per node. Selected via
+# provision.yaml: services: { etcd: { profile: <name> } }
+lite:
+  mem_limit: 256m
+  cpus: 0.5
+normal:
+  mem_limit: 512m
+  cpus: 1
+small:
+  mem_limit: 1g
+  cpus: 2
