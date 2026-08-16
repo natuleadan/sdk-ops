@@ -29,6 +29,9 @@ type ProvisionFile struct {
 	AdminIPs          string                 `yaml:"admin_ips"`
 	HTTPSMode         string                 `yaml:"https_mode"`
 	NoTraefik         bool                   `yaml:"no_traefik"`
+	// Hardening enables the OS hardening phase on first init. Default true;
+	// `hardening: false` skips it (docker + services only — fast drills).
+	Hardening *bool `yaml:"hardening,omitempty"`
 	Groups            map[string]GroupConfig `yaml:"groups"`
 	Hosts             []ProvisionHost        `yaml:"hosts"`
 	Peers             []ProvisionPeer        `yaml:"peers"`
@@ -83,6 +86,32 @@ type ServiceConfig struct {
 	Seeds           int      `yaml:"seeds,omitempty"`
 	ServerTags      []string `yaml:"server_tags,omitempty"`
 	ClientAdvertise string   `yaml:"client_advertise,omitempty"`
+	// Mode is the postgres deployment mode: "cluster" (default, n>=2 nodes)
+	// or "single" (1 node — Patroni + local DCS, no quorum).
+	Mode string `yaml:"mode,omitempty"`
+	// BackupMode selects where the pgbackrest backup runs: "server" (default,
+	// a dedicated backup node — backup-standby, the leader is not loaded) or
+	// "leader" (the pooler node, simple).
+	BackupMode string `yaml:"backup_mode,omitempty"`
+	// Restore enables the idempotent DR: if the cluster is NOT operational at
+	// provision time, restore from S3 (pgbackrest). false = never restore.
+	Restore bool `yaml:"restore,omitempty"`
+	// Pooler marks this host as the PgDog node (the app entry). Default: the
+	// first host that declares the postgres service.
+	Pooler bool `yaml:"pooler,omitempty"`
+	// Recreate wipes the service state (containers + data + DCS keys + networks)
+	// before deploying — a clean redeploy from scratch. Granular per service:
+	// only the declared service is wiped. Idempotent (no flag = skip).
+	Recreate bool `yaml:"recreate,omitempty"`
+	// Backup is the YAML-driven backup schedule (defaults: full daily + incr hourly).
+	Backup *BackupSchedule `yaml:"backup,omitempty"`
+}
+
+// BackupSchedule is the YAML-driven pgbackrest cadence.
+type BackupSchedule struct {
+	Full string `yaml:"full,omitempty"` // systemd calendar for the full backup (default: daily 00:15)
+	Diff string `yaml:"diff,omitempty"` // systemd calendar for the differential (default: none)
+	Incr string `yaml:"incr,omitempty"` // systemd calendar for the incremental (default: hourly)
 }
 
 // GroupConfig is a reusable per-group configuration that hosts inherit.
@@ -264,6 +293,46 @@ Example provision.yaml:
 	cmd.Flags().StringVar(&tags, "tags", "", "Only provision hosts with any of these tags (comma-separated)")
 	cmd.Flags().BoolVar(&check, "check", false, "Dry-run: parse, resolve and render the services plan without touching any node")
 	return cmd
+}
+
+// newApplyCmd — the declarative one-command entry: `sdk-ops apply <file.yaml>`
+// provisions the whole fleet (init + hardening + services + DR) in one shot,
+// like `kubectl apply` — idempotent (re-applying an unchanged fleet is a
+// no-op). `-v` prints the per-step detail.
+func newApplyCmd() *cobra.Command {
+	var tags string
+	var check bool
+	cmd := &cobra.Command{
+		Use:   "apply <file.yaml>",
+		Short: "Provision a fleet from a YAML file (one declarative command)",
+		Long: `The declarative entry: sdk-ops apply fleet.yaml provisions the whole
+fleet (init + hardening + services + DR) in one shot — idempotent, the
+re-apply of an unchanged fleet is a no-op. -v prints the per-step detail.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if v, _ := cmd.Flags().GetBool("verbose"); v {
+				verboseMode = true
+			}
+			if check {
+				return runProvisionCheck(args[0], tags)
+			}
+			return runProvision(args[0], tags)
+		},
+	}
+	cmd.Flags().StringVar(&tags, "tags", "", "Only provision hosts with any of these tags (comma-separated)")
+	cmd.Flags().BoolVar(&check, "check", false, "Dry-run: parse, resolve and render the services plan without touching any node")
+	cmd.Flags().BoolP("verbose", "v", false, "Verbose: print the per-step detail (wire scripts output)")
+	return cmd
+}
+
+// verboseMode gates the per-step detail of the apply/provision flows.
+var verboseMode bool
+
+// verbosef prints the per-step detail only under `apply -v` / `provision -v`.
+func verbosef(format string, args ...any) {
+	if verboseMode {
+		fmt.Printf("  · "+format+"\n", args...)
+	}
 }
 
 func runProvision(path, tags string) error {
@@ -449,6 +518,7 @@ func provisionHost(pf ProvisionFile, h ProvisionHost) provisionResult {
 		firewallAllowlist: fw,
 		adminIPs:          adm,
 		noTraefik:         pf.NoTraefik,
+		noHardening:       pf.Hardening != nil && !*pf.Hardening,
 	}
 	fmt.Printf("\n━━━ Host %s (%s) [group=%s] ━━━\n", h.Name, h.Host, h.Group)
 	already := hostAlreadyInitialized(h, &f)
@@ -921,14 +991,68 @@ func applyProvisionPhases(pf ProvisionFile, names map[string]string) error {
 }
 
 // applyPerHostPhases installs security watch and traefik domains per host
-// using each host's resolved (group-inherited) configuration.
+// using each host's resolved (group-inherited) configuration. The FLEET-wide
+// etcd (the DCS) deploys FIRST on every host — the postgres patroni needs the
+// etcd QUORUM (2/3) before the leader election; a single member blocks the
+// linearizable reads and the postgres wire would wait forever.
 func applyPerHostPhases(pf ProvisionFile) error {
+	if err := applyFleetEtcd(pf); err != nil {
+		return err
+	}
 	for _, h := range pf.Hosts {
 		if err := applyPerHostPhaseOn(pf, h); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// applyFleetEtcd deploys the etcd service on every host that declares it —
+// the DCS quorum must exist BEFORE any postgres node starts (the per-host
+// phase re-deploys it idempotently: an unchanged config is a no-op).
+func applyFleetEtcd(pf ProvisionFile) error {
+	for _, h := range pf.Hosts {
+		cfg, ok := resolveHostConfig(&pf, h).services["etcd"]
+		if !ok {
+			continue
+		}
+		port := h.Port
+		if port == 0 {
+			port = 22
+		}
+		etcdUser := h.User
+		if etcdUser == "" {
+			etcdUser = "sdkops"
+		}
+		f := infraFlags{user: etcdUser, key: h.SSHKey, port: port, mode: pf.Mode, noHardening: pf.Hardening != nil && !*pf.Hardening}
+		conn, err := infraConnect(h.Host, &f)
+		if err != nil {
+			return fmt.Errorf("fleet etcd: connect %s: %w", h.Name, err)
+		}
+		err = deployServiceOn(conn, pf, h, "etcd", cfg)
+		closeConn(conn)
+		if err != nil {
+			return fmt.Errorf("fleet etcd %s: %w", h.Name, err)
+		}
+		fmt.Printf("→ fleet etcd up on %s\n", h.Name)
+	}
+	return nil
+}
+
+// hostInfraFlags builds the SSH flags for a host: the YAML user (root in the
+// no-hardening mode) with the sdkops fallback for hardened nodes.
+func hostInfraFlags(pf ProvisionFile, h ProvisionHost, port int) infraFlags {
+	user := h.User
+	if user == "" {
+		user = "sdkops"
+	}
+	return infraFlags{
+		user:        user,
+		key:         h.SSHKey,
+		port:        port,
+		mode:        pf.Mode,
+		noHardening: pf.Hardening != nil && !*pf.Hardening,
+	}
 }
 
 // applyPerHostPhaseOn applies the per-host fleet phases for a single host:
@@ -953,7 +1077,7 @@ func applyPerHostPhaseOn(pf ProvisionFile, h ProvisionHost) error {
 		if port == 0 {
 			port = 22
 		}
-		f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+		f := hostInfraFlags(pf, h, port)
 		conn, err := infraConnect(h.Host, &f)
 		if err != nil {
 			return fmt.Errorf("traefik: connect %s: %w", h.Name, err)
@@ -1004,7 +1128,7 @@ func installStateWatchOn(pf ProvisionFile, h ProvisionHost) error {
 	if port == 0 {
 		port = 22
 	}
-	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	f := hostInfraFlags(pf, h, port)
 	conn, err := infraConnect(h.Host, &f)
 	if err != nil {
 		return fmt.Errorf("state watch: connect %s: %w", h.Name, err)
@@ -1022,7 +1146,7 @@ func installTraefikWatchOn(pf ProvisionFile, h ProvisionHost) error {
 	if port == 0 {
 		port = 22
 	}
-	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	f := hostInfraFlags(pf, h, port)
 	conn, err := infraConnect(h.Host, &f)
 	if err != nil {
 		return fmt.Errorf("traefik watch: connect %s: %w", h.Name, err)
@@ -1049,7 +1173,7 @@ func applyVLANOn(pf ProvisionFile, h ProvisionHost, vlanName, iface, ip, cidr st
 	if port == 0 {
 		port = 22
 	}
-	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	f := hostInfraFlags(pf, h, port)
 	conn, err := infraConnect(h.Host, &f)
 	if err != nil {
 		return fmt.Errorf("vlan %q: connect %s: %w", vlanName, h.Name, err)
@@ -1101,7 +1225,7 @@ func installLogRotationOn(pf ProvisionFile, h ProvisionHost) error {
 	if port == 0 {
 		port = 22
 	}
-	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	f := hostInfraFlags(pf, h, port)
 	conn, err := infraConnect(h.Host, &f)
 	if err != nil {
 		return fmt.Errorf("logrotate: connect %s: %w", h.Name, err)
@@ -1121,7 +1245,7 @@ func installFail2banJailOn(pf ProvisionFile, h ProvisionHost) error {
 	if port == 0 {
 		port = 22
 	}
-	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	f := hostInfraFlags(pf, h, port)
 	conn, err := infraConnect(h.Host, &f)
 	if err != nil {
 		return fmt.Errorf("fail2ban: connect %s: %w", h.Name, err)
@@ -1150,7 +1274,7 @@ func installSecurityOn(pf ProvisionFile, h ProvisionHost, threshold int) error {
 	if port == 0 {
 		port = 22
 	}
-	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	f := hostInfraFlags(pf, h, port)
 	conn, err := infraConnect(h.Host, &f)
 	if err != nil {
 		return fmt.Errorf("security: connect %s: %w", h.Name, err)
@@ -1302,7 +1426,7 @@ cat > /tmp/traefik-install.sh << 'EOF'
 %s
 EOF
 sudo cp /tmp/traefik-install.sh /opt/sdk-ops/traefik/install.sh
-sudo chown sdkops:sdkops /opt/sdk-ops/traefik/install.sh
+id sdkops >/dev/null 2>&1 && sudo chown sdkops:sdkops /opt/sdk-ops/traefik/install.sh
 sudo chmod 0750 /opt/sdk-ops/traefik/install.sh
 echo "traefik install template persisted"
 `, script)
@@ -1375,11 +1499,16 @@ func applyProvisionPeer(pf ProvisionFile, names map[string]string, peer Provisio
 	if port == 0 {
 		port = 22
 	}
+	peerUser := toHost.User
+	if peerUser == "" {
+		peerUser = "sdkops"
+	}
 	f := infraFlags{
-		user: "sdkops",
-		key:  toHost.SSHKey,
-		port: port,
-		mode: pf.Mode,
+		user:        peerUser,
+		key:         toHost.SSHKey,
+		port:        port,
+		mode:        pf.Mode,
+		noHardening: pf.Hardening != nil && !*pf.Hardening,
 	}
 	conn, err := infraConnect(toHost.Host, &f)
 	if err != nil {
@@ -1387,6 +1516,11 @@ func applyProvisionPeer(pf ProvisionFile, names map[string]string, peer Provisio
 	}
 	defer closeConn(conn)
 	for _, p := range peer.Ports {
+		if f.noHardening {
+			// No firewall in the no-hardening mode — the mesh is open.
+			fmt.Printf("  → %s can reach %s:%d (no firewall)\n", peer.From, peer.To, p)
+			continue
+		}
 		_ = hardening.AllowlistUnexposePort(conn, p)
 		fmt.Printf("  → %s can reach %s:%d\n", peer.From, peer.To, p)
 		if err := hardening.AllowlistExposePort(conn, p, "tcp", hardening.PortScopeIPs, fromIP); err != nil {
@@ -1404,7 +1538,7 @@ func applyProvisionBans(pf ProvisionFile) error {
 		if port == 0 {
 			port = 22
 		}
-		f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+		f := hostInfraFlags(pf, h, port)
 		conn, err := infraConnect(h.Host, &f)
 		if err != nil {
 			return fmt.Errorf("bans: connect %s: %w", h.Name, err)
@@ -1430,7 +1564,7 @@ func applyTelegramNotify(pf ProvisionFile) error {
 		if port == 0 {
 			port = 22
 		}
-		f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+		f := hostInfraFlags(pf, h, port)
 		conn, err := infraConnect(h.Host, &f)
 		if err != nil {
 			return fmt.Errorf("telegram: connect %s: %w", h.Name, err)
@@ -1440,7 +1574,7 @@ export TELEGRAM_API_KEY=%s
 export TELEGRAM_CHAT_ID=%s
 EOF
 EOF
-sudo chown sdkops:sdkops /etc/sdk-ops/firewall/notify.env
+sudo chown sdkops:sdkops /etc/sdk-ops/firewall/notify.env 2>/dev/null || true
 sudo chmod 0600 /etc/sdk-ops/firewall/notify.env
 echo "telegram: %s configured"`, pf.Telegram.APIKey, pf.Telegram.ChatID, h.Name)
 		if _, _, err := ssh.Run(conn, script); err != nil {

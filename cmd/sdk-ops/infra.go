@@ -49,6 +49,7 @@ type infraFlags struct {
 	firewallAllowlist string
 	adminIPs          string
 	noTraefik         bool
+	noHardening       bool
 	provisionYAML     string
 	// k3s-specific
 	disableTraefik        bool
@@ -133,7 +134,7 @@ Provider options:
 
 Examples:
   sdk-ops infra init 188.xxx.xxx.xxx
-  sdk-ops infra init --provider cubepath --plan gp.nano --location us-mia-1
+  sdk-ops infra init --provider aws --plan t3.micro --location us-east-1
   sdk-ops infra init --provider vultr --plan vc2-1c-2gb --location ewr
   sdk-ops infra init 188.xxx.xxx.xxx --docker --crowdsec`,
 		Args: cobra.MaximumNArgs(1),
@@ -1828,7 +1829,11 @@ func installAllowlistOn(pf *ProvisionFile, h ProvisionHost) error {
 	if port == 0 {
 		port = 22
 	}
-	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	alUser := h.User
+	if alUser == "" {
+		alUser = "sdkops"
+	}
+	f := infraFlags{user: alUser, key: h.SSHKey, port: port, mode: pf.Mode}
 	conn, err := infraConnect(h.Host, &f)
 	if err != nil {
 		return fmt.Errorf("allowlist %s: %w", h.Name, err)
@@ -1884,8 +1889,14 @@ func applyInitFleetPhases(ip string, f infraFlags) error {
 	return fmt.Errorf("init --provision-yaml: host %s not found in the fleet YAML", ip)
 }
 
-func applyInfraHardening(conn *golang_ssh.Client, f infraFlags) hardening.Config {
+func applyInfraHardening(conn *golang_ssh.Client, ip string, f infraFlags) hardening.Config {
 	hardCfg := hardening.DefaultConfig()
+	if f.noHardening {
+		// `hardening: false` in the fleet YAML — skip the OS hardening
+		// entirely (no sdkops user, no firewall, root stays): used for fast
+		// connectivity-matrix drills where only docker + the services matter.
+		return hardening.Config{User: f.user}
+	}
 	if f.user != "root" {
 		hardCfg.User = f.user
 	}
@@ -1896,11 +1907,36 @@ func applyInfraHardening(conn *golang_ssh.Client, f infraFlags) hardening.Config
 	hardCfg.LockRoot = f.lockRoot
 	if f.hardSSHPort > 0 {
 		hardCfg.SSHPort = f.hardSSHPort
+	} else if p := yamlHostPort(f.provisionYAML, ip); p > 0 && p != f.port {
+		// YAML-driven SSH port: the fleet YAML's host `port` migrates SSH on
+		// the first init (the flag wins when set; no port in YAML = keep 22).
+		hardCfg.SSHPort = p
 	}
 	if err := hardening.Apply(conn, hardCfg); err != nil {
 		fmt.Printf("  ⚠️  Hardening partially failed, continuing...\n")
 	}
 	return hardCfg
+}
+
+// yamlHostPort resolves the host's `port` from the provision YAML (0 = not set).
+func yamlHostPort(yamlPath, ip string) int {
+	if yamlPath == "" || ip == "" {
+		return 0
+	}
+	data, err := os.ReadFile(filepath.Clean(yamlPath)) //nolint:gosec // operator-supplied fleet path
+	if err != nil {
+		return 0
+	}
+	var pf ProvisionFile
+	if err := yaml.Unmarshal(data, &pf); err != nil {
+		return 0
+	}
+	for _, h := range pf.Hosts {
+		if h.Host == ip {
+			return h.Port
+		}
+	}
+	return 0
 }
 
 func reconnectAfterHardening(ip string, f infraFlags, hardCfg hardening.Config) (*golang_ssh.Client, error) {
@@ -1960,7 +1996,7 @@ func runInfraInitSSH(ip string, f infraFlags) error {
 		}
 	}()
 
-	hardCfg := applyInfraHardening(conn, f)
+	hardCfg := applyInfraHardening(conn, ip, f)
 	if err := conn.Close(); err != nil {
 		log.Printf("infra: conn close error: %v", err)
 	}
@@ -2089,7 +2125,7 @@ func runInfraInitPostInstall(conn *golang_ssh.Client, ip string, f infraFlags, h
 	}
 
 	// Phase: provider IP allowlist (hardening goes hand in hand)
-	if f.firewallAllowlist != "" {
+	if f.firewallAllowlist != "" && !f.noHardening {
 		if err := installAllowlistPhase(conn, ip, f); err != nil {
 			return err
 		}

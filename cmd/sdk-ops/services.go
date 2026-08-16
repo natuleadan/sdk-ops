@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -32,14 +33,18 @@ func applyServicesOn(pf ProvisionFile, h ProvisionHost) error {
 	if port == 0 {
 		port = 22
 	}
-	f := infraFlags{user: "sdkops", key: h.SSHKey, port: port, mode: pf.Mode}
+	f := hostInfraFlags(pf, h, port)
 	conn, err := infraConnect(h.Host, &f)
 	if err != nil {
 		return fmt.Errorf("services: connect %s: %w", h.Name, err)
 	}
 	defer closeConn(conn)
 
-	for name, cfg := range r.services {
+	// Deterministic service order — the dependencies first (etcd = the DCS the
+	// postgres needs; the map iteration alone is random and a postgres deploy
+	// racing its own etcd would miss the DCS during the bootstrap).
+	for _, name := range orderedServiceNames(r.services) {
+		cfg := r.services[name]
 		if err := deployServiceOn(conn, pf, h, name, cfg); err != nil {
 			return fmt.Errorf("services %s on %s: %w", name, h.Name, err)
 		}
@@ -47,11 +52,58 @@ func applyServicesOn(pf ProvisionFile, h ProvisionHost) error {
 	return nil
 }
 
+// orderedServiceNames sorts the declared services deterministically: the
+// dependency order first (etcd before postgres), the rest alphabetically.
+func orderedServiceNames(services ProvisionServices) []string {
+	order := []string{"etcd", "postgres", "nats", "kv", "libsql"}
+	var out []string
+	seen := map[string]bool{}
+	for _, name := range order {
+		if _, ok := services[name]; ok && !seen[name] {
+			out = append(out, name)
+			seen[name] = true
+		}
+	}
+	var rest []string
+	for name := range services {
+		if !seen[name] {
+			rest = append(rest, name)
+		}
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
+}
+
 // deployServiceOn deploys one service (e.g. nats) onto a node.
-func deployServiceOn(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost, name string, cfg ServiceConfig) error {
-	tmpl, ok := templates.Templates[name+"-dockerized"]
+// wireService dispatches the per-service wiring (certs, secrets, CLI, timers).
+func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg ServiceConfig, pf ProvisionFile, h ProvisionHost) error {
+	switch name {
+	case "nats":
+		return wireNATSOn(conn, svcDir, nodeName)
+	case "etcd":
+		return wireEtcdOn(conn, svcDir, nodeName)
+	case "postgres":
+		return wirePGOn(conn, svcDir, nodeName, cfg, pf, h)
+	default:
+		return fmt.Errorf("no wiring for service %q", name)
+	}
+}
+
+// resolveServiceTemplate resolves the template for a service: the exact name
+// first (etcd, postgres), then the legacy "<name>-dockerized" convention.
+func resolveServiceTemplate(name string) (templates.Template, bool) {
+	tmpl, ok := templates.Templates[name]
 	if !ok {
-		return fmt.Errorf("no template for service %q (available infra templates: pg-dockerized, kv-dockerized, libsql-dockerized, nats-dockerized)", name)
+		tmpl, ok = templates.Templates[name+"-dockerized"]
+	}
+	return tmpl, ok
+}
+
+func deployServiceOn(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost, name string, cfg ServiceConfig) error {
+	verbosef("service %s on %s: render", name, h.Name)
+	tmpl, ok := resolveServiceTemplate(name)
+	if !ok {
+		return fmt.Errorf("no template for service %q (available: nats, kv, libsql, pg, etcd, postgres)", name)
 	}
 
 	data, err := buildRenderData(pf, h, tmpl.DirName, cfg.Profile, cfg)
@@ -78,31 +130,31 @@ func deployServiceOn(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost,
 	}
 	// Decide before uploading: compare the rendered config vs the deployed one
 	// (the upload overwrites the remote, so the diff must be taken first).
-	recreate, err := serviceConfigChanged(conn, renderDir, svcDir)
+	recreate, err := serviceConfigChanged(conn, renderDir, svcDir, name)
 	if err != nil {
 		return err
 	}
+	verbosef("service %s on %s: upload + wiring", name, h.Name)
 	if err := uploadDir(conn, renderDir, svcDir); err != nil {
 		return err
 	}
 
 	// Service-specific wiring (certs, secrets, CLI, timers).
-	switch name {
-	case "nats":
-		if err := wireNATSOn(conn, svcDir, h.Name); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("no wiring for service %q", name)
+	if err := wireService(conn, svcDir, h.Name, name, cfg, pf, h); err != nil {
+		return err
 	}
 
 	// Idempotent deploy: recreate the container only when a mounted config
 	// changed (compose up alone does not restart on config-file changes).
+	verbosef("service %s on %s: compose up (recreate=%v)", name, h.Name, recreate)
 	up := fmt.Sprintf("cd %s && sudo docker compose up -d", svcDir)
 	if recreate {
 		up += " --force-recreate"
 	}
 	if _, _, err := ssh.Run(conn, up); err != nil {
+		return err
+	}
+	if err := waitServiceUp(conn, name, pf, h); err != nil {
 		return err
 	}
 	if err := exposeServicePorts(conn, renderDir, pf, h); err != nil {
@@ -114,25 +166,36 @@ func deployServiceOn(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost,
 // serviceConfigChanged reports whether the rendered config differs from the
 // one deployed on the node (or the service container is not running), which
 // means the container must be recreated to pick up the new config.
-func serviceConfigChanged(conn *golang_ssh.Client, renderDir, svcDir string) (bool, error) {
-	// Config file (nats.conf, or nats-0.conf in single-VPS mode).
-	cfgFile := "nats.conf"
-	if _, err := os.Stat(filepath.Join(renderDir, "nats-0.conf")); err == nil {
-		cfgFile = "nats-0.conf"
+func serviceConfigChanged(conn *golang_ssh.Client, renderDir, svcDir, name string) (bool, error) {
+	// Per-service config to diff: nats.conf (or nats-0.conf), patroni.yml,
+	// docker-compose.yml (etcd), postgresql.auto.conf...
+	cfgFiles := map[string][]string{
+		"nats":     {"nats.conf", "nats-0.conf"},
+		"etcd":     {"docker-compose.yml"},
+		"postgres": {"patroni.yml", "pgdog.toml", "docker-compose.yml", "pgbackrest.conf"},
 	}
-	//nolint:gosec // renderDir is a MkdirTemp dir we control + fixed filename
-	rendered, err := os.ReadFile(filepath.Join(renderDir, cfgFile))
-	if err != nil {
-		// No renderable config for this service — fall back to a plain up.
+	files, ok := cfgFiles[name]
+	if !ok {
 		return false, nil
 	}
-	remote, _, err := ssh.Run(conn, "sudo cat "+filepath.Join(svcDir, cfgFile)+" 2>/dev/null || true")
-	if err != nil {
-		return false, err
+	for _, cfgFile := range files {
+		//nolint:gosec // renderDir is a MkdirTemp dir we control + fixed filename
+		rendered, err := os.ReadFile(filepath.Join(renderDir, cfgFile))
+		if err != nil {
+			continue // this config is not rendered for the service — try the next
+		}
+		remote, _, err := ssh.Run(conn, "sudo cat "+filepath.Join(svcDir, cfgFile)+" 2>/dev/null || true")
+		if err != nil {
+			return false, err
+		}
+		if strings.TrimSpace(remote) != strings.TrimSpace(string(rendered)) {
+			return true, nil
+		}
 	}
-	out, _, _ := ssh.Run(conn, "sudo docker ps -q -f name=nats 2>/dev/null | head -1")
+	container := name
+	out, _, _ := ssh.Run(conn, "sudo docker ps -q -f name="+container+" 2>/dev/null | head -1")
 	running := strings.TrimSpace(out) != ""
-	return !running || strings.TrimSpace(remote) != strings.TrimSpace(string(rendered)), nil
+	return !running, nil
 }
 
 // buildRenderData merges the profile variables with the node context.
@@ -155,6 +218,10 @@ func buildRenderData(pf ProvisionFile, h ProvisionHost, dirName, profile string,
 	switch {
 	case strings.HasPrefix(dirName, "nats"):
 		return natsRenderData(pf, h, prof, cfg)
+	case dirName == "etcd":
+		return etcdRenderData(pf, h, prof, cfg)
+	case dirName == "postgres":
+		return pgRenderData(pf, h, prof, cfg)
 	default:
 		return nil, fmt.Errorf("no render builder for template %q", dirName)
 	}
@@ -429,7 +496,7 @@ func uploadDir(conn *golang_ssh.Client, localDir, remoteDir string) error {
 		return err
 	}
 	_, _, err = ssh.RunWithStdin(conn,
-		fmt.Sprintf("sudo mkdir -p %s && sudo tar xf - -C %s && sudo chown -R sdkops:sdkops %s", remoteDir, remoteDir, remoteDir), buf.String())
+		fmt.Sprintf("sudo mkdir -p %s && sudo tar xf - -C %s && (id sdkops >/dev/null 2>&1 && sudo chown -R sdkops:sdkops %s || true)", remoteDir, remoteDir, remoteDir), buf.String())
 	if err != nil {
 		return fmt.Errorf("upload %s -> %s: %w", localDir, remoteDir, err)
 	}
@@ -455,6 +522,9 @@ func writeRemoteFile(conn *golang_ssh.Client, path, content string) error {
 // cluster peers in a single ips-scope call, so the two never wipe each other
 // (AllowlistExposePort rebuilds a port's chain rules per call).
 func exposeServicePorts(conn *golang_ssh.Client, renderDir string, pf ProvisionFile, h ProvisionHost) error {
+	if pf.Hardening != nil && !*pf.Hardening {
+		return nil // no firewall in the no-hardening mode — the ports are open
+	}
 	//nolint:gosec // renderDir is a MkdirTemp dir we control + fixed filename
 	data, err := os.ReadFile(filepath.Join(renderDir, "service.yaml"))
 	if err != nil {
@@ -555,13 +625,24 @@ func runProvisionCheck(path, tags string) error {
 	} else {
 		fmt.Println("[check] env secrets: OK")
 	}
+	// The docker mode (no k3s) installs docker, pulls the images and archives
+	// to S3 — every node needs a public route. Without IPv6 (or a NAT egress)
+	// the deploy will fail at the install step, so warn early in the dry-run.
+	if pf.Mode != "k3s" {
+		for _, h := range hosts {
+			hasV6 := strings.Contains(h.Host, ":") || strings.Contains(h.PeerIP, ":")
+			if !hasV6 {
+				fmt.Printf("[check] ⚠ %s has no IPv6 (%s) — the docker-mode install (docker, images, S3) needs a public route (IPv6 or a NAT egress); without it the deploy fails at the install step\n", h.Name, h.Host)
+			}
+		}
+	}
 	fmt.Println("[check] render OK — dry-run only, nothing applied")
 	return nil
 }
 
 // checkRenderService renders one service for the dry-run and prints its plan.
 func checkRenderService(pf ProvisionFile, h ProvisionHost, name string, cfg ServiceConfig) error {
-	tmpl, ok := templates.Templates[name+"-dockerized"]
+	tmpl, ok := resolveServiceTemplate(name)
 	if !ok {
 		return fmt.Errorf("[check] %s: no template for service %q", h.Name, name)
 	}
