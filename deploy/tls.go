@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"time"
 	"fmt"
 	"log"
 	"os"
@@ -128,6 +129,13 @@ kubectl apply -f /var/lib/rancher/k3s/server/manifests/traefik-cert-%s.yaml 2>/d
 echo "Traefik certificate configured for %s"
 `, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain, cfg.Domain)
 
+	// The cert-manager operator must be present — install it once if missing.
+	crdOut, _, _ := ssh.Run(client, "kubectl get crd certificates.cert-manager.io 2>/dev/null || echo missing")
+	if strings.Contains(crdOut, "missing") {
+		fmt.Println("  → Installing cert-manager (the operator)...")
+		_, _, _ = ssh.Run(client, "kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.3/cert-manager.yaml")
+		time.Sleep(20 * time.Second)
+	}
 	checkIssuer, _, _ := ssh.Run(client, "kubectl get clusterissuer letsencrypt-prod 2>/dev/null || echo 'missing'")
 	if strings.Contains(checkIssuer, "missing") {
 		fmt.Println("  → Creating Let's Encrypt ClusterIssuer for Traefik...")

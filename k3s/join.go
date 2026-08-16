@@ -43,7 +43,7 @@ func Join(agentClient, serverClient *goss.Client, cfg JoinConfig) error {
 	}
 
 	agentArgs := cfg.ExtraArgs
-	installCmd = fmt.Sprintf("%s K3S_URL=https://%s:6443 K3S_TOKEN=%s INSTALL_K3S_EXEC='agent %s' sh -",
+	installCmd = fmt.Sprintf("%s K3S_URL=https://%s:6443 K3S_TOKEN=%s INSTALL_K3S_EXEC='agent %s' | sh",
 		installCmd, cfg.ServerIP, token, agentArgs)
 
 	out, _, err := ssh.Run(agentClient, installCmd)
