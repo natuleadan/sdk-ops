@@ -196,7 +196,7 @@ if [ "$NET" != "host" ]; then
   sudo docker network connect sdk-ops-net traefik >/dev/null 2>&1 || true
 fi
 INSTALLEOF
-sudo chown sdkops:sdkops /opt/sdk-ops/traefik/install.sh
+sudo chown sdkops:sdkops /opt/sdk-ops/traefik/install.sh 2>/dev/null || true
 sudo chmod 0750 /opt/sdk-ops/traefik/install.sh
 
 # Shared network so bridge-mode Traefik resolves service names (docker DNS).
