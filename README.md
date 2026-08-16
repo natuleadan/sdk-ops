@@ -268,8 +268,8 @@ s.Cluster().Scale("deploy/my-app", 5)
 | `--alerts` | `""` | Install Alertmanager with Slack webhook |
 | `--cloud-init` | `false` | Use cloud-init instead of SSH-based provisioning |
 | `--provider` | `""` | Create VPS via provider API first |
-| `--plan` | `gp.nano` | VPS plan (provider) |
-| `--location` | `us-mia-1` | VPS location (provider) |
+| `--plan` | `t3.micro` | VPS plan (provider) |
+| `--location` | `us-east-1` | VPS location (provider) |
 | `--secrets-encryption` | `false` | Enable secrets encryption at rest in etcd (CIS) |
 | `--protect-kernel-defaults` | `false` | Protect kubelet kernel defaults (CIS) |
 | `--admission-plugins` | `NodeRestriction,EventRateLimit` | Kube-apiserver admission plugins (CIS) |
@@ -315,8 +315,8 @@ Health check probes configurable endpoints via `health_url` in `service.yaml`. F
 ```bash
 # Create VPS via CubePath, then harden + install k3s automatically
 sdk-ops infra init --provider cubepath \
-  --plan gp.nano \
-  --location us-mia-1 \
+  --plan t3.micro \
+  --location us-east-1 \
   --template ubuntu-24 \
   --ssh-key-ids 421 \
   --api-key "${CUBEPATH_API_KEY}"
@@ -330,8 +330,8 @@ Create `server.yaml`:
 provider: cubepath
 api_key: "${CUBEPATH_API_KEY}"
 project_id: 4601
-plan: gp.nano
-location: us-mia-1
+plan: t3.micro
+location: us-east-1
 template: ubuntu-24
 ssh_key_ids: [421]
 ```
@@ -444,7 +444,7 @@ sdk-ops config set-credentials
 # Create a 2-node managed K8s cluster
 sdk-ops provider k8s create --provider cubepath \
   --name prod-cluster \
-  --location us-mia-1 \
+  --location us-east-1 \
   --node-plan gp.micro \
   --nodes 2
 

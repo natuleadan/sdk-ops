@@ -160,7 +160,7 @@ Full reference: `docs/commands.md`. Categories:
 
 ### Provision a new VPS via provider API + cloud-init
 ```
-1. sdk-ops infra init --provider cubepath --plan gp.nano --location us-mia-1 --cloud-init
+1. sdk-ops infra init --provider aws --plan t3.micro --location us-east-1 --cloud-init
    → Creates VPS via API, passes cloud-init user-data, waits for boot
    → Hardening + Docker + k3s already applied via cloud-init
 ```

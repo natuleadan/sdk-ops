@@ -64,8 +64,8 @@ Flags:
                           default; k3s ships its own Traefik ingress)
   --cloud-init            Use cloud-init instead of SSH-based provisioning
   --provider string       Create VPS via provider (cubepath, hetzner, digitalocean, vultr, aws, civo)
-  --plan string           VPS plan (default "gp.nano")
-  --location string       VPS location (default "us-mia-1")
+  --plan string           VPS plan (default "t3.micro")
+  --location string       VPS location (default "us-east-1")
   --template string       OS template (default "ubuntu-24")
   --ssh-key-ids string    SSH key IDs (comma-separated)
   --api-key string        Provider API key (or env var)
@@ -803,8 +803,8 @@ object-storage, cdn, block-storage).
 
 ```bash
 sdk-ops provider vps create [flags]
-  --plan string           VPS plan (default "gp.nano")
-  --location string       Location (default "us-mia-1")
+  --plan string           VPS plan (default "t3.micro")
+  --location string       Location (default "us-east-1")
   --template string       OS template (default "ubuntu-24")
   --hostname string       Hostname
   --ssh-key-ids string    SSH key IDs (comma-separated)
@@ -822,7 +822,7 @@ sdk-ops provider vps export <id>               # Export as Terraform HCL
 # Cluster lifecycle
 sdk-ops provider k8s create [flags]
   --name string           Cluster name
-  --location string       Location (default "us-mia-1")
+  --location string       Location (default "us-east-1")
   --version string        K8s version
   --node-plan string      Node plan
   --nodes int             Number of nodes (default 3)
@@ -852,7 +852,7 @@ sdk-ops provider k8s lb-list <id>                      # List LBs attached to cl
 # Lifecycle
 sdk-ops provider lb create [flags]
   --name string           LB name
-  --location string       Location (default "us-mia-1")
+  --location string       Location (default "us-east-1")
   --plan string           LB plan
 sdk-ops provider lb list
 sdk-ops provider lb delete <id>
