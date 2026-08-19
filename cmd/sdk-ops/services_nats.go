@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,26 +64,50 @@ func uploadNATSCerts(conn *golang_ssh.Client, svcDir, nodeName string) error {
 	}
 	defer removeAll(stage)
 
-	//nolint:gosec // nodeName sanitized by safeName; base dir is the operator's NATS_CERT_DIR; dest is our stage dir
+	srcRoot, err := os.OpenRoot(certDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = srcRoot.Close() }()
+	dstRoot, err := os.OpenRoot(stage)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dstRoot.Close() }()
+
+	// Fixed relative paths under the operator's own NATS_CERT_DIR, copied into
+	// our MkdirTemp stage; os.Root rejects absolute paths and ".." escapes.
 	copies := map[string]string{
-		filepath.Join(certDir, "ca.pem"):                  filepath.Join(stage, "ca.pem"),
-		filepath.Join(certDir, "server", nodeName+".pem"): filepath.Join(stage, "server.pem"),
-		filepath.Join(certDir, "server", nodeName+".key"): filepath.Join(stage, "server.key"),
-		filepath.Join(certDir, "client", "app-cert.pem"):  filepath.Join(stage, "app-cert.pem"),
-		filepath.Join(certDir, "client", "app-key.pem"):   filepath.Join(stage, "app-key.pem"),
-		filepath.Join(certDir, "client", "sys-cert.pem"):  filepath.Join(stage, "sys-cert.pem"),
-		filepath.Join(certDir, "client", "sys-key.pem"):   filepath.Join(stage, "sys-key.pem"),
-		filepath.Join(certDir, "client", "svc-cert.pem"):  filepath.Join(stage, "svc-cert.pem"),
-		filepath.Join(certDir, "client", "svc-key.pem"):   filepath.Join(stage, "svc-key.pem"),
+		"ca.pem":                      "ca.pem",
+		"server/" + nodeName + ".pem": "server.pem",
+		"server/" + nodeName + ".key": "server.key",
+		"client/app-cert.pem":         "app-cert.pem",
+		"client/app-key.pem":          "app-key.pem",
+		"client/sys-cert.pem":         "sys-cert.pem",
+		"client/sys-key.pem":          "sys-key.pem",
+		"client/svc-cert.pem":         "svc-cert.pem",
+		"client/svc-key.pem":          "svc-key.pem",
 	}
 	for src, dst := range copies {
-		//nolint:gosec // fixed paths under the operator's own NATS_CERT_DIR
-		data, err := os.ReadFile(src)
+		in, err := srcRoot.Open(src)
 		if err != nil {
 			return fmt.Errorf("cert %s: %w", src, err)
 		}
-		if err := os.WriteFile(dst, data, 0600); err != nil { //nolint:gosec // dst is within our stage dir
-			return err
+		data, err := io.ReadAll(in)
+		_ = in.Close()
+		if err != nil {
+			return fmt.Errorf("cert %s: %w", src, err)
+		}
+		out, err := dstRoot.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err != nil {
+			return fmt.Errorf("cert %s: %w", dst, err)
+		}
+		if _, err := out.Write(data); err != nil {
+			_ = out.Close()
+			return fmt.Errorf("cert %s: %w", dst, err)
+		}
+		if err := out.Close(); err != nil {
+			return fmt.Errorf("cert %s: %w", dst, err)
 		}
 	}
 	return uploadDir(conn, stage, filepath.Join(svcDir, "certs"))

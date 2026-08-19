@@ -178,11 +178,20 @@ func serviceConfigChanged(conn *golang_ssh.Client, renderDir, svcDir, name strin
 	if !ok {
 		return false, nil
 	}
+	root, err := os.OpenRoot(renderDir)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = root.Close() }()
 	for _, cfgFile := range files {
-		//nolint:gosec // renderDir is a MkdirTemp dir we control + fixed filename
-		rendered, err := os.ReadFile(filepath.Join(renderDir, cfgFile))
+		in, err := root.Open(cfgFile)
 		if err != nil {
 			continue // this config is not rendered for the service — try the next
+		}
+		rendered, err := io.ReadAll(in)
+		_ = in.Close()
+		if err != nil {
+			continue
 		}
 		remote, _, err := ssh.Run(conn, "sudo cat "+filepath.Join(svcDir, cfgFile)+" 2>/dev/null || true")
 		if err != nil {
@@ -533,6 +542,22 @@ func writeRemoteFile(conn *golang_ssh.Client, path, content string) error {
 
 // exposeServicePorts opens the service.yaml ports to the operator (admin scope).
 // Peer access is already granted by the provision.yaml peers section.
+// readRenderedService reads the rendered service.yaml from a MkdirTemp render
+// dir via os.Root (fixed filename, no traversal possible).
+func readRenderedService(renderDir string) ([]byte, error) {
+	root, err := os.OpenRoot(renderDir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	in, err := root.Open("service.yaml")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = in.Close() }()
+	return io.ReadAll(in)
+}
+
 // exposeServicePorts opens the service.yaml ports to the operator AND the
 // cluster peers in a single ips-scope call, so the two never wipe each other
 // (AllowlistExposePort rebuilds a port's chain rules per call).
@@ -540,8 +565,7 @@ func exposeServicePorts(conn *golang_ssh.Client, renderDir string, pf ProvisionF
 	if pf.Hardening != nil && !*pf.Hardening {
 		return nil // no firewall in the no-hardening mode — the ports are open
 	}
-	//nolint:gosec // renderDir is a MkdirTemp dir we control + fixed filename
-	data, err := os.ReadFile(filepath.Join(renderDir, "service.yaml"))
+	data, err := readRenderedService(renderDir)
 	if err != nil {
 		return err
 	}

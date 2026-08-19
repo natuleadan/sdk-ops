@@ -159,11 +159,21 @@ func refreshServices(store, domain string, services []string) {
 }
 
 func copyPEM(dst, src string, mode os.FileMode) {
+	root, err := os.OpenRoot(filepath.Dir(dst))
+	if err != nil {
+		return
+	}
+	defer func() { _ = root.Close() }()
 	data, err := os.ReadFile(filepath.Clean(src))
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Clean(dst), data, mode) //nolint:gosec // dst is a service path constant; domain validated by certDomainRe
+	out, err := root.OpenFile(filepath.Base(dst), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return
+	}
+	defer func() { _ = out.Close() }()
+	_, _ = out.Write(data)
 }
 
 func splitLines(b []byte) []string {

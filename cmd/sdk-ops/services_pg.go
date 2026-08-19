@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,7 +102,17 @@ func ensurePGDogImage(conn *goss.Client, nodeName string) error {
 	if err := crane.Save(img, image, filepath.Join(tmpDir, "pgdog.tar")); err != nil {
 		return fmt.Errorf("pgdog image save (operator side): %w", err)
 	}
-	data, err := os.ReadFile(filepath.Join(tmpDir, "pgdog.tar")) //nolint:gosec // our MkdirTemp dir
+	root, err := os.OpenRoot(tmpDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	in, err := root.Open("pgdog.tar")
+	if err != nil {
+		return err
+	}
+	data, err := io.ReadAll(in)
+	_ = in.Close()
 	if err != nil {
 		return err
 	}
