@@ -81,8 +81,7 @@ func uploadNATSCerts(conn *golang_ssh.Client, svcDir, nodeName string) error {
 		if err != nil {
 			return fmt.Errorf("cert %s: %w", src, err)
 		}
-		//nolint:gosec // dst is within our stage dir
-		if err := os.WriteFile(dst, data, 0600); err != nil {
+		if err := os.WriteFile(dst, data, 0600); err != nil { //nolint:gosec // dst is within our stage dir
 			return err
 		}
 	}
