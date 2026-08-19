@@ -96,7 +96,7 @@ func syncCert(cfg certSyncConfig) error {
 	// Directory and fullchain/cert are public certificate material that the
 	// health/backup scripts (running as the non-root sdkops user) must read for
 	// --tlsca and expiry checks. The privkey below stays 0600 (the real secret).
-	if err := os.MkdirAll(filepath.Clean(cfg.Store), 0o755); err != nil { //nolint:gosec // public cert store, readable by monitoring user
+	if err := os.MkdirAll(filepath.Clean(cfg.Store), 0o755); err != nil { // #nosec G301 -- public cert store, 0755 required for non-root sdkops reads (0750 would break --tlsca/expiry checks)
 		return err
 	}
 	fullchain, key, ok, err := extractTraefikCert(cfg.ACMEJSON, cfg.Domain)
@@ -112,9 +112,9 @@ func syncCert(cfg certSyncConfig) error {
 		renewLogf("cert unchanged for %s, skip", cfg.Domain)
 		return nil
 	}
-	//nolint:gosec // fullchain/cert are public cert data (see MkdirAll above)
-	_ = os.WriteFile(filepath.Join(cfg.Store, "fullchain.pem"), fullchain, 0o644)
-	_ = os.WriteFile(filepath.Join(cfg.Store, "cert.pem"), fullchain, 0o644) //nolint:gosec // public cert data
+	// fullchain/cert are public cert data (see MkdirAll above)
+	_ = os.WriteFile(filepath.Join(cfg.Store, "fullchain.pem"), fullchain, 0o644) // #nosec G306 -- public cert data, 0644 required for non-root sdkops reads (privkey stays 0600)
+	_ = os.WriteFile(filepath.Join(cfg.Store, "cert.pem"), fullchain, 0o644)      // #nosec G306 -- public cert data
 	_ = os.WriteFile(filepath.Join(cfg.Store, "privkey.pem"), key, 0o600)
 	renewLogf("cert synced for %s", cfg.Domain)
 	refreshServices(cfg.Store, cfg.Domain, cfg.Services)
@@ -141,7 +141,7 @@ func refreshServices(store, domain string, services []string) {
 				if out, err := exec.CommandContext(context.Background(), "docker", "ps", "-q", "--filter", "name=nats").Output(); err == nil {
 					for _, c := range splitLines(out) {
 						if containerIDRe.MatchString(c) {
-							_ = exec.CommandContext(context.Background(), "docker", "kill", "-s", "HUP", c).Run() //nolint:gosec // G204: c is docker ps output, strictly validated by containerIDRe hex 12-64, not user input
+							_ = exec.CommandContext(context.Background(), "docker", "kill", "-s", "HUP", c).Run() // #nosec G204 -- c is docker ps output, strictly validated by containerIDRe hex 12-64, not user input
 						}
 					}
 				}

@@ -1923,7 +1923,7 @@ func yamlHostPort(yamlPath, ip string) int {
 	if yamlPath == "" || ip == "" {
 		return 0
 	}
-	data, err := os.ReadFile(filepath.Clean(yamlPath)) //nolint:gosec // operator-supplied fleet path
+	data, err := os.ReadFile(filepath.Clean(yamlPath)) // #nosec G304 -- operator-supplied fleet path (CLI arg, no external input)
 	if err != nil {
 		return 0
 	}

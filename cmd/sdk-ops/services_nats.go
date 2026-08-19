@@ -126,18 +126,18 @@ func uploadNATSKeys(conn *golang_ssh.Client, svcDir string) error {
 		return err
 	}
 	defer removeAll(stage)
-	sData, err := os.ReadFile(sender) //nolint:gosec // operator-controlled env path
+	sData, err := os.ReadFile(sender) // #nosec G304,G703 -- operator env path NATS_SENDER_NK (absolute; os.Root accepts relative paths only)
 	if err != nil {
 		return fmt.Errorf("sender key: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(stage, "backup-sender.nk"), sData, 0600); err != nil { //nolint:gosec // stage is our MkdirTemp dir
+	if err := os.WriteFile(filepath.Join(stage, "backup-sender.nk"), sData, 0600); err != nil { // #nosec G703 -- dst fixed within our MkdirTemp stage
 		return err
 	}
-	rData, err := os.ReadFile(recipientPub) //nolint:gosec // operator-controlled env path
+	rData, err := os.ReadFile(recipientPub) // #nosec G304,G703 -- operator env path NATS_RECIPIENT_PUB (absolute; os.Root accepts relative paths only)
 	if err != nil {
 		return fmt.Errorf("recipient pub: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(stage, "backup-recipient.pub"), rData, 0600); err != nil { //nolint:gosec // stage is our MkdirTemp dir
+	if err := os.WriteFile(filepath.Join(stage, "backup-recipient.pub"), rData, 0600); err != nil { // #nosec G703 -- dst fixed within our MkdirTemp stage
 		return err
 	}
 	return uploadDir(conn, stage, svcDir)

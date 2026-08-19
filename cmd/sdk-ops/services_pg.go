@@ -541,7 +541,7 @@ func uploadPGCerts(conn *goss.Client, svcDir, nodeName string) error {
 	read := func(p string) string {
 		// The path is built from the operator's own PG_CERT_DIR + the node name
 		// (validated by safeName) — no user-controlled input reaches it.
-		b, err := os.ReadFile(filepath.Clean(p)) //nolint:gosec // operator's cert store + validated node name
+		b, err := os.ReadFile(filepath.Clean(p)) // #nosec G304 -- operator's cert store + node name validated by safeName
 		if err != nil {
 			return ""
 		}
