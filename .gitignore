@@ -44,3 +44,5 @@ kubeconfig.yaml
 *.swp
 *.swo
 .DS_Store
+
+/bin
