@@ -451,9 +451,14 @@ func isPrivateIP(ip string) bool {
 
 // uploadDir streams a local directory to a remote one as a tar over stdin.
 func uploadDir(conn *golang_ssh.Client, localDir, remoteDir string) error {
+	root, err := os.OpenRoot(localDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	err := filepath.Walk(localDir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.WalkDir(localDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -464,30 +469,10 @@ func uploadDir(conn *golang_ssh.Client, localDir, remoteDir string) error {
 		if rel == "." {
 			return nil
 		}
-		hdr, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
+		if strings.Contains(rel, "..") {
+			return fmt.Errorf("invalid path %q", rel)
 		}
-		hdr.Name = rel
-		if info.IsDir() {
-			hdr.Name += "/"
-		}
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			//nolint:gosec // path comes from filepath.Walk within the local render dir
-			f, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			_, cerr := io.Copy(tw, f)
-			_ = f.Close()
-			if cerr != nil {
-				return cerr
-			}
-		}
-		return nil
+		return writeTarEntry(tw, root, rel, d)
 	})
 	if err != nil {
 		return err
@@ -499,6 +484,36 @@ func uploadDir(conn *golang_ssh.Client, localDir, remoteDir string) error {
 		fmt.Sprintf("sudo mkdir -p %s && sudo tar xf - -C %s && (id sdkops >/dev/null 2>&1 && sudo chown -R sdkops:sdkops %s || true)", remoteDir, remoteDir, remoteDir), buf.String())
 	if err != nil {
 		return fmt.Errorf("upload %s -> %s: %w", localDir, remoteDir, err)
+	}
+	return nil
+}
+
+func writeTarEntry(tw *tar.Writer, root *os.Root, rel string, d os.DirEntry) error {
+	info, err := d.Info()
+	if err != nil {
+		return err
+	}
+	hdr, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		return err
+	}
+	hdr.Name = rel
+	if d.IsDir() {
+		hdr.Name += "/"
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	if !d.IsDir() {
+		f, err := root.Open(rel)
+		if err != nil {
+			return err
+		}
+		_, cerr := io.Copy(tw, f)
+		_ = f.Close()
+		if cerr != nil {
+			return cerr
+		}
 	}
 	return nil
 }

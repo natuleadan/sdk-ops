@@ -141,7 +141,7 @@ func refreshServices(store, domain string, services []string) {
 				if out, err := exec.CommandContext(context.Background(), "docker", "ps", "-q", "--filter", "name=nats").Output(); err == nil {
 					for _, c := range splitLines(out) {
 						if containerIDRe.MatchString(c) {
-							_ = exec.CommandContext(context.Background(), "docker", "kill", "-s", "HUP", c).Run() //nolint:gosec // c validated by containerIDRe (hex docker ID)
+							_ = exec.CommandContext(context.Background(), "docker", "kill", "-s", "HUP", c).Run() //nolint:gosec // G204: c is docker ps output, strictly validated by containerIDRe hex 12-64, not user input
 						}
 					}
 				}
