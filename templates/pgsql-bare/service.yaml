@@ -1,0 +1,20 @@
+name: pgsql-bare
+description: PostgreSQL bare-metal — native postgres on the VPS (no Docker), single instance, YSQL-compatible
+services:
+  - postgres (native, no Docker)
+  - app role + database (idempotent)
+ports:
+  - "5432:5432"  # PostgreSQL
+env:
+  PG_VERSION: "18"
+  PG_APP_USER: dev
+  PG_APP_PASSWORD: devpass
+  PG_DATABASE: postgres
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  backup: bash backup.sh
+  restore: bash restore.sh [-y|--yes]
+  validate: bash validate.sh
