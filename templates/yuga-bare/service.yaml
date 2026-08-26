@@ -1,0 +1,22 @@
+name: yuga-bare
+description: YugabyteDB bare-metal — install the official tarball and run yugabyted directly on the VPS (no Docker). One node per host; join to form an RF=3 cluster. YSQL + YCQL, backups to S3.
+services:
+  - yugabyted node (master + tserver, runs as the yugabyte user)
+  - YSQL (Postgres wire, 5433) / YCQL (9042) / UI (7000, 9000)
+env:
+  YB_RELEASE: 2026.1.1.1
+  YB_VERSION: 2026.1.1.1-b2
+  YB_JOIN: ""           # seed node IP; empty = this host is the seed
+  YB_ADVERTISE: 127.0.0.1
+  YB_INSTALL_DIR: /opt/yugabyte
+  YB_DATA_DIR: /var/lib/yugabyte
+  YB_SHARDS: "4"
+  YB_APP_USER: dev
+  YB_APP_PASSWORD: devpass
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  validate: bash validate.sh
+  deploy-k3s: bash deploy-k3s.sh
