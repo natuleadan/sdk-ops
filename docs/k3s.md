@@ -111,3 +111,23 @@ The k3s mode is the declarative path: the scaling is `kubectl scale` /
   the fleet nodes.
 - **No double traefik**: the k3s mode does not install the host traefik — the
   cluster uses its own ingress controller (`no_traefik` for clarity).
+
+## YugabyteDB inside k3s (operator)
+
+The `yugabyte-k8s-operator` manages a cluster inside k3s declaratively via a
+helm chart — the same role CloudNativePG plays for postgres. The template
+provides `deploy-k3s.sh` (run from the operator machine, `kubectl` pointed at
+the k3s cluster):
+
+```bash
+helm repo add yugabytedb https://charts.yugabyte.com
+helm upgrade --install yb-demo yugabytedb/yugabyte \
+  --namespace yb-demo \
+  --set Image.tag=2026.1.1.1-b2 \
+  --set replicas.master=1,replicas.tserver=1
+```
+
+Microservices in the cluster consume yugabyte over the internal service DNS
+(`yb-master.yb-demo` / `yb-tserver.yb-demo`) — no host ports are exposed; the
+operator sets up the services and the replication (RF) between masters.
+

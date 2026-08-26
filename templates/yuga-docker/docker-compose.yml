@@ -1,0 +1,105 @@
+name: yuga-docker
+# YugabyteDB — distributed SQL cluster (Postgres/YCQL-compatible).
+# 3 yugabyted nodes (3 masters + 3 tservers), replicated RF=3, auto-failover.
+# Each node advertises a static bridge IP (yb-net /24, TEST-NET here — the
+# operator substitutes their private subnet); node-0 is the join seed and the
+# only one that publishes host ports. Nodes start concurrently — yugabyted
+# handles the asynchronous join once the seed's master is up (a strict
+# depends_on: service_healthy between nodes deadlocks: the seed never reports
+# "Running" without the 2/3 quorum that the followers provide).
+# To span real VPSes the fleet provisioner rewrites advertise_address/join to
+# the peer IPs (like pg/nats).
+services:
+  yugabyte-0:
+    image: yugabytedb/yugabyte:${YB_VERSION:-2024.2.10.0-b62}
+    command:
+      - bin/yugabyted
+      - start
+      - --daemon=false
+      - --base_dir=/home/yugabyte/yb_data
+      - --advertise_address=${YB0_IP:-203.0.113.10}
+      - --cloud_location=${YB_CLOUD_LOCATION:-cloud.region.zone}
+      - --insecure
+      - --tserver_flags=ysql_num_shards_per_tserver=${YB_SHARDS:-4}
+    networks:
+      yb-net:
+        ipv4_address: ${YB0_IP:-203.0.113.10}
+    ports:
+      - "${YB_YSQL_PORT:-5433}:5433"   # YSQL (Postgres wire)
+      - "${YB_YCQL_PORT:-9042}:9042"   # YCQL (Cassandra wire)
+      - "${YB_MASTER_UI:-7000}:7000"   # YB-Master UI
+      - "${YB_TSERVER_UI:-9000}:9000"  # YB-TServer UI
+    healthcheck:
+      # Lax on purpose: the master web server answers as soon as the process
+      # binds — no 2/3 quorum required (that needs all followers up). The
+      # master listens on the container IP, not loopback.
+      test: ["CMD", "bash", "-lc", "curl -sf http://${YB0_IP:-203.0.113.10}:7000/ >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+    restart: unless-stopped
+    volumes:
+      - yb0_data:/home/yugabyte/yb_data
+
+  yugabyte-1:
+    image: yugabytedb/yugabyte:${YB_VERSION:-2024.2.10.0-b62}
+    command:
+      - bin/yugabyted
+      - start
+      - --daemon=false
+      - --base_dir=/home/yugabyte/yb_data
+      - --advertise_address=${YB1_IP:-203.0.113.11}
+      - --join=${YB0_IP:-203.0.113.10}
+      - --cloud_location=${YB_CLOUD_LOCATION:-cloud.region.zone}
+      - --insecure
+      - --tserver_flags=ysql_num_shards_per_tserver=${YB_SHARDS:-4}
+    networks:
+      yb-net:
+        ipv4_address: ${YB1_IP:-203.0.113.11}
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "curl -sf http://${YB1_IP:-203.0.113.11}:7000/ >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+    restart: unless-stopped
+    volumes:
+      - yb1_data:/home/yugabyte/yb_data
+
+  yugabyte-2:
+    image: yugabytedb/yugabyte:${YB_VERSION:-2024.2.10.0-b62}
+    command:
+      - bin/yugabyted
+      - start
+      - --daemon=false
+      - --base_dir=/home/yugabyte/yb_data
+      - --advertise_address=${YB2_IP:-203.0.113.12}
+      - --join=${YB0_IP:-203.0.113.10}
+      - --cloud_location=${YB_CLOUD_LOCATION:-cloud.region.zone}
+      - --insecure
+      - --tserver_flags=ysql_num_shards_per_tserver=${YB_SHARDS:-4}
+    networks:
+      yb-net:
+        ipv4_address: ${YB2_IP:-203.0.113.12}
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "curl -sf http://${YB2_IP:-203.0.113.12}:7000/ >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+    restart: unless-stopped
+    volumes:
+      - yb2_data:/home/yugabyte/yb_data
+
+networks:
+  yb-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 203.0.113.0/24
+
+volumes:
+  yb0_data:
+  yb1_data:
+  yb2_data:

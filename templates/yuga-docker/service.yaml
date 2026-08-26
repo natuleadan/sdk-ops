@@ -1,0 +1,25 @@
+name: yuga-docker
+description: YugabyteDB distributed SQL cluster — 3 yugabyted nodes (3 masters + 3 tservers), RF=3, auto-failover, YSQL (Postgres wire) + YCQL, logical backups to S3
+services:
+  - yugabyte-0/1/2 (yugabyted nodes — each runs a master + tserver; entrypoint on node-0)
+  - YSQL (Postgres-compatible, port 5433)
+  - YCQL (Cassandra-compatible, port 9042)
+  - yb-master UI (7000) / yb-tserver UI (9000)
+ports:
+  - "5433:5433"  # YSQL
+  - "9042:9042"  # YCQL
+  - "7000:7000"  # YB-Master UI
+  - "9000:9000"  # YB-TServer UI
+env:
+  YB_DB: yugabyte
+  YB_USER: dev
+  YB_PASSWORD: devpass
+  YB_VERSION: 2024.2.10.0-b62
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  backup: bash backup.sh
+  restore: bash restore.sh [-y|--yes]
+  validate: bash validate.sh

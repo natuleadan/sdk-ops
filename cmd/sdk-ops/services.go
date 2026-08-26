@@ -55,7 +55,7 @@ func applyServicesOn(pf ProvisionFile, h ProvisionHost) error {
 // orderedServiceNames sorts the declared services deterministically: the
 // dependency order first (etcd before postgres), the rest alphabetically.
 func orderedServiceNames(services ProvisionServices) []string {
-	order := []string{"etcd", "postgres", "nats", "kv", "libsql"}
+	order := []string{"etcd", "pgsql-cluster", "nats", "kv", "libsql"}
 	var out []string
 	seen := map[string]bool{}
 	for _, name := range order {
@@ -82,10 +82,13 @@ func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg Ser
 		return wireNATSOn(conn, svcDir, nodeName)
 	case "etcd":
 		return wireEtcdOn(conn, svcDir, nodeName)
-	case "postgres":
+	case "pgsql-cluster":
 		return wirePGOn(conn, svcDir, nodeName, cfg, pf, h)
 	default:
-		return fmt.Errorf("no wiring for service %q", name)
+		// Dockerized templates (yugabyte, libsql, kv, ...) need no special
+		// wiring — they are self-contained compose stacks driven by init.sh.
+		verbosef("service %s: no extra wiring (dockerized template)", name)
+		return nil
 	}
 }
 
@@ -144,8 +147,12 @@ func deployServiceOn(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost,
 		return err
 	}
 
-	// Idempotent deploy: recreate the container only when a mounted config
-	// changed (compose up alone does not restart on config-file changes).
+	// Idempotent deploy. Native templates (pgsql-bare, yuga-bare — no
+	// docker-compose.yml) run their init.sh directly on the host; compose
+	// templates run `docker compose up -d` (recreate only on config change).
+	if _, err := os.Stat(filepath.Join(renderDir, "docker-compose.yml")); err != nil {
+		return deployNativeService(conn, name, pf, h, svcDir)
+	}
 	verbosef("service %s on %s: compose up (recreate=%v)", name, h.Name, recreate)
 	up := fmt.Sprintf("cd %s && sudo docker compose up -d", svcDir)
 	if recreate {
@@ -163,6 +170,19 @@ func deployServiceOn(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost,
 	return nil
 }
 
+// deployNativeService handles templates without docker-compose (pgsql-bare,
+// yuga-bare) by running their init.sh directly on the host.
+func deployNativeService(conn *golang_ssh.Client, name string, pf ProvisionFile, h ProvisionHost, svcDir string) error {
+	verbosef("service %s on %s: native init (no docker-compose)", name, h.Name)
+	if _, _, err := ssh.Run(conn, fmt.Sprintf("cd %s && sudo bash init.sh", svcDir)); err != nil {
+		return fmt.Errorf("native init %s: %w", name, err)
+	}
+	if err := waitServiceUp(conn, name, pf, h); err != nil {
+		return err
+	}
+	return nil
+}
+
 // serviceConfigChanged reports whether the rendered config differs from the
 // one deployed on the node (or the service container is not running), which
 // means the container must be recreated to pick up the new config.
@@ -172,7 +192,7 @@ func serviceConfigChanged(conn *golang_ssh.Client, renderDir, svcDir, name strin
 	cfgFiles := map[string][]string{
 		"nats":     {"nats.conf", "nats-0.conf"},
 		"etcd":     {"docker-compose.yml"},
-		"postgres": {"patroni.yml", "pgdog.toml", "docker-compose.yml", "pgbackrest.conf"},
+		"pgsql-cluster": {"patroni.yml", "pgdog.toml", "docker-compose.yml", "pgbackrest.conf"},
 	}
 	files, ok := cfgFiles[name]
 	if !ok {
@@ -229,8 +249,18 @@ func buildRenderData(pf ProvisionFile, h ProvisionHost, dirName, profile string,
 		return natsRenderData(pf, h, prof, cfg)
 	case dirName == "etcd":
 		return etcdRenderData(pf, h, prof, cfg)
-	case dirName == "postgres":
+	case dirName == "pgsql-cluster":
 		return pgRenderData(pf, h, prof, cfg)
+	case strings.HasPrefix(dirName, "pgsql"):
+		// pgsql-docker / pgsql-bare are self-contained (compose stack or
+		// native scripts driven by env-var defaults) — render data is light.
+		return map[string]any{
+			"MemLimit":  prof["mem_limit"],
+			"Cpus":      prof["cpus"],
+			"Provision": true,
+		}, nil
+	case strings.HasPrefix(dirName, "yuga"):
+		return yugabyteRenderData(pf, h, prof, cfg)
 	default:
 		return nil, fmt.Errorf("no render builder for template %q", dirName)
 	}

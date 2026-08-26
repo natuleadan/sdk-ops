@@ -20,7 +20,7 @@ import (
 func pgNodes(pf ProvisionFile) []ProvisionHost {
 	var out []ProvisionHost
 	for _, h := range pf.Hosts {
-		if _, ok := resolveHostConfig(&pf, h).services["postgres"]; ok {
+		if _, ok := resolveHostConfig(&pf, h).services["pgsql-cluster"]; ok {
 			out = append(out, h)
 		}
 	}
@@ -136,7 +136,7 @@ func ensurePGDogImage(conn *goss.Client, nodeName string) error {
 // rewind/basebackup gets confused).
 func pgRecreateWanted(pf ProvisionFile) bool {
 	for _, n := range pf.Hosts {
-		if cfg, ok := resolveHostConfig(&pf, n).services["postgres"]; ok && cfg.Recreate {
+		if cfg, ok := resolveHostConfig(&pf, n).services["pgsql-cluster"]; ok && cfg.Recreate {
 			return true
 		}
 	}
@@ -195,7 +195,7 @@ func pgRenderData(pf ProvisionFile, h ProvisionHost, prof map[string]any, cfg Se
 	env := os.Getenv
 	nodes := pgNodes(pf)
 	if len(nodes) == 0 {
-		return nil, fmt.Errorf("postgres: no hosts declare services: postgres")
+		return nil, fmt.Errorf("pgsql-cluster: no hosts declare services: pgsql-cluster")
 	}
 	mode := cfg.Mode
 	if mode == "" {
@@ -241,7 +241,7 @@ func pgRenderData(pf ProvisionFile, h ProvisionHost, prof map[string]any, cfg Se
 	}
 
 	return map[string]any{
-		"Scope":             "postgres",
+		"Scope":             "pgsql-cluster",
 		"NodeName":          "pg-" + h.Name,
 		"NodeIP":            urlHost(ip),
 		"EtcdHosts":         strings.Join(etcdEndpoints, ","),
@@ -334,7 +334,7 @@ func wirePGOn(conn *goss.Client, svcDir, nodeName string, cfg ServiceConfig, pf 
 // grabs the pre-fork timeline — "requested timeline N is not a child of this
 // server's history"). Other services: no wait.
 func waitServiceUp(conn *goss.Client, name string, pf ProvisionFile, h ProvisionHost) error {
-	if name != "postgres" {
+	if name != "pgsql-cluster" {
 		return nil
 	}
 	if pgPrimaryNode(pf).Name != h.Name {
@@ -738,4 +738,22 @@ func cadenceTimer(cadence string) string {
 	default:
 		return "OnUnitActiveSec=" + cadence
 	}
+}
+
+// yugabyteRenderData — the per-node render context for templates/yuga-docker.
+// The template uses env-var defaults (${YB_*}) for most knobs, so the render
+// data is intentionally light: the profile sizing + the placement zone. The
+// fleet provisioner may override cloud/region/zone per host for multi-region.
+func yugabyteRenderData(_ ProvisionFile, h ProvisionHost, prof map[string]any, _ ServiceConfig) (map[string]any, error) {
+	zone := os.Getenv("YB_ZONE")
+	if zone == "" {
+		zone = "rack" + strings.TrimSuffix(h.Name, strings.TrimRight(h.Name, "0123456789"))
+	}
+	return map[string]any{
+		"YbCpus":    prof["yb_cpus"],
+		"YbMem":     prof["yb_mem"],
+		"YbShards":  prof["yb_shards"],
+		"YbZone":    zone,
+		"Provision": true,
+	}, nil
 }
