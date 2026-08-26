@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/natuleadan/sdk-ops/deploy"
 	"github.com/natuleadan/sdk-ops/hardening"
+	"github.com/natuleadan/sdk-ops/providers"
 	"github.com/natuleadan/sdk-ops/ssh"
 )
 
@@ -57,6 +60,16 @@ type ProvisionHost struct {
 	User              string            `yaml:"user"`
 	SSHKey            string            `yaml:"ssh_key"`
 	Port              int               `yaml:"port"`
+	// Provider topology — when set, `apply` creates the VPS via the cloud
+	// provider API (waiting for boot and resolving the IP into Host) instead
+	// of provisioning an existing host; `destroy` deletes it. Empty = existing
+	// host provisioned as-is.
+	Provider          string            `yaml:"provider,omitempty"`
+	Plan              string            `yaml:"plan,omitempty"`
+	Location          string            `yaml:"location,omitempty"`
+	Template          string            `yaml:"template,omitempty"`
+	SSHKeyIDs         string            `yaml:"ssh_key_ids,omitempty"`
+	ProjectID         int               `yaml:"project_id,omitempty"`
 	FirewallAllowlist string            `yaml:"firewall_allowlist,omitempty"`
 	AdminIPs          string            `yaml:"admin_ips,omitempty"`
 	HTTPSMode         string            `yaml:"https_mode,omitempty"`
@@ -325,6 +338,24 @@ re-apply of an unchanged fleet is a no-op. -v prints the per-step detail.`,
 	return cmd
 }
 
+// newDestroyCmd — the declarative teardown: `sdk-ops destroy <file.yaml>`
+// deletes every VPS that the fleet YAML declares with a provider topology
+// (best-effort uninstall first, then DeleteVPS via the provider API).
+// Idempotent — hosts already gone are no-ops.
+func newDestroyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "destroy <file.yaml>",
+		Short: "Destroy the fleet VPS declared with a provider topology",
+		Long: `Destroy the fleet declared in a YAML file. Every host with a
+provider topology (provider: set) is uninstalled (best-effort) and deleted via
+the cloud provider API. Hosts without a provider are skipped. Idempotent.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDestroy(args[0])
+		},
+	}
+}
+
 // verboseMode gates the per-step detail of the apply/provision flows.
 var verboseMode bool
 
@@ -361,6 +392,13 @@ func runProvision(path, tags string) error {
 		parallel = 1
 	}
 
+	// Bloque A: create VPS via the provider API for every host that declares
+	// a provider topology (and has no IP yet). Waits for boot, resolves the
+	// IPv4/IPv6 into Host/PeerIP, then provisions.
+	if err := ensureTopologyVPS(hosts); err != nil {
+		return err
+	}
+
 	fmt.Printf("→ Provisioning %d hosts (mode=%s, parallel=%d)\n", len(hosts), pf.Mode, parallel)
 	results := provisionHosts(pf, hosts, parallel)
 	failed := countProvisionFailures(results)
@@ -372,7 +410,145 @@ func runProvision(path, tags string) error {
 		return err
 	}
 
-	fmt.Println("\n✅ Provision complete")
+	fmt.Println("\nProvision complete")
+	return nil
+}
+
+// ensureTopologyVPS creates a VPS for every host that declares a provider
+// topology and has no IP yet. It waits for boot and resolves the public
+// IPv4/IPv6 into Host/PeerIP so the rest of the provision treats it as a
+// normal existing host. Hosts without a provider (or already holding an IP)
+// are left untouched.
+func ensureTopologyVPS(hosts []ProvisionHost) error {
+	created := 0
+	for i := range hosts {
+		h := &hosts[i]
+		if h.Provider == "" {
+			continue
+		}
+		if h.Host != "" {
+			verbosef("host %s: provider declared but IP already set (%s) — skipping create", h.Name, h.Host)
+			continue
+		}
+		p, err := getInfraProvider(h.Provider, "", h.Location, h.ProjectID)
+		if err != nil {
+			return fmt.Errorf("host %s: %w", h.Name, err)
+		}
+		cfg := providers.VPSCreateConfig{
+			Label:      h.Name,
+			Plan:       h.Plan,
+			Location:   h.Location,
+			Template:   h.Template,
+			Hostname:   h.Name,
+			EnableIPv4: true,
+			EnableIPv6: true,
+		}
+		if h.SSHKeyIDs != "" {
+			for s := range strings.SplitSeq(h.SSHKeyIDs, ",") {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					cfg.SSHKeyIDs = append(cfg.SSHKeyIDs, s)
+				}
+			}
+		}
+		fmt.Printf("→ Creating VPS %s via %s (plan=%s, location=%s)...\n", h.Name, h.Provider, h.Plan, h.Location)
+		vps, err := p.CreateVPS(context.Background(), cfg)
+		if err != nil {
+			return fmt.Errorf("host %s create vps: %w", h.Name, err)
+		}
+		ip, err := waitForVPSIP(p, vps.ID, h.Name)
+		if err != nil {
+			return err
+		}
+		h.Host = ip
+		if h.PeerIP == "" {
+			h.PeerIP = ip
+		}
+		fmt.Printf("  %s @ %s\n", h.Name, ip)
+		created++
+	}
+	verbosef("%d VPS created by topology", created)
+	return nil
+}
+
+// waitForVPSIP polls GetVPS until the instance reports a public IPv4 (or
+// IPv6 when no v4 is assigned) and is reachable — the provider may take tens
+// of seconds to finish provisioning. Timeout 5 minutes.
+func waitForVPSIP(p providers.Provider, id, name string) (string, error) {
+	deadline := time.Now().Add(5 * time.Minute)
+	for time.Now().Before(deadline) {
+		vps, err := p.GetVPS(context.Background(), id)
+		if err == nil && vps != nil {
+			ip := strings.TrimSpace(vps.IP)
+			if ip != "" {
+				return ip, nil
+			}
+		}
+		time.Sleep(10 * time.Second)
+	}
+	return "", fmt.Errorf("host %s: timed out waiting for VPS IP", name)
+}
+
+// runDestroy removes every host declared in the fleet YAML that carries a
+// provider topology: uninstalls sdk-ops from the node (best-effort) and then
+// deletes the VPS via the provider API. Idempotent — a host already gone is a
+// no-op. Existing hosts without a provider are skipped.
+func runDestroy(path string) error {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return fmt.Errorf("read provision file: %w", err)
+	}
+	var pf ProvisionFile
+	if err := yaml.Unmarshal(data, &pf); err != nil {
+		return fmt.Errorf("parse provision file: %w", err)
+	}
+	if _, err := validateProvision(&pf); err != nil {
+		return err
+	}
+	destroyed := 0
+	for _, h := range pf.Hosts {
+		if h.Provider == "" {
+			continue
+		}
+		// Best-effort uninstall while the node is still reachable.
+		if h.Host != "" {
+			if err := runInfraRemove(h.Host, infraFlags{user: h.User, key: h.SSHKey, mode: pf.Mode}); err != nil {
+				fmt.Printf("  %s: uninstall skipped (%v)\n", h.Name, err)
+			}
+		}
+		p, err := getInfraProvider(h.Provider, "", h.Location, h.ProjectID)
+		if err != nil {
+			return fmt.Errorf("host %s: %w", h.Name, err)
+		}
+		fmt.Printf("→ Deleting VPS %s (%s)...\n", h.Name, h.Provider)
+		if err := deleteProviderVPS(p, h.Name); err != nil {
+			return err
+		}
+		destroyed++
+	}
+	if destroyed == 0 {
+		fmt.Println("no hosts with a provider topology to destroy")
+	}
+	fmt.Printf("Destroy complete (%d VPS)\n", destroyed)
+	return nil
+}
+
+// deleteProviderVPS finds the VPS by label and deletes it. Idempotent: if no
+// instance with that label is found it is treated as already gone.
+func deleteProviderVPS(p providers.Provider, label string) error {
+	ctx := context.Background()
+	list, err := p.ListVPS(ctx)
+	if err != nil {
+		return fmt.Errorf("list vps: %w", err)
+	}
+	for _, v := range list {
+		if v.Name == label || v.Label == label {
+			if err := p.DeleteVPS(ctx, v.ID); err != nil {
+				return fmt.Errorf("delete vps %s: %w", label, err)
+			}
+			return nil
+		}
+	}
 	return nil
 }
 
@@ -675,13 +851,23 @@ func countProvisionFailures(results []provisionResult) int {
 
 // validateProvision validates the fleet file and returns name->host IP map
 // (peer_ip fallback host).
-func validateProvision(pf *ProvisionFile) (map[string]string, error) {
+// validateHosts validates each host in the fleet and builds the name->IP map
+// (peer_ip fallback host). A host with a provider topology may lack an IP —
+// `apply` creates the VPS and resolves it before provisioning; for peer
+// resolution the placeholder is the hostname until creation.
+func validateHosts(pf *ProvisionFile) (map[string]string, error) {
 	names := map[string]string{}
 	for _, h := range pf.Hosts {
-		if h.Name == "" || h.Host == "" {
+		if h.Name == "" {
+			return nil, fmt.Errorf("every host needs name and host")
+		}
+		if h.Host == "" && h.Provider == "" {
 			return nil, fmt.Errorf("every host needs name and host")
 		}
 		peerIP := h.Host
+		if peerIP == "" {
+			peerIP = h.Name
+		}
 		if h.PeerIP != "" {
 			if _, err := hardening.ValidateCIDR(strings.TrimSpace(h.PeerIP)); err != nil {
 				return nil, fmt.Errorf("host %q peer_ip %q is not a valid IP: %v", h.Name, h.PeerIP, err)
@@ -694,6 +880,14 @@ func validateProvision(pf *ProvisionFile) (map[string]string, error) {
 				return nil, fmt.Errorf("host %q references unknown group %q", h.Name, h.Group)
 			}
 		}
+	}
+	return names, nil
+}
+
+func validateProvision(pf *ProvisionFile) (map[string]string, error) {
+	names, err := validateHosts(pf)
+	if err != nil {
+		return nil, err
 	}
 	if err := validatePeers(pf, names); err != nil {
 		return nil, err

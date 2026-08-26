@@ -37,6 +37,7 @@ Examples:
 
 	rootCmd.AddCommand(newInfraCmd())
 	rootCmd.AddCommand(newApplyCmd())
+	rootCmd.AddCommand(newDestroyCmd())
 	rootCmd.AddCommand(newOpsCmd())
 	rootCmd.AddCommand(newCertsCmd())
 	rootCmd.AddCommand(newNodeCmd())

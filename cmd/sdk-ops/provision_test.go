@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestValidateProvision(t *testing.T) {
@@ -52,8 +54,42 @@ func TestValidateProvision(t *testing.T) {
 	}
 }
 
-func TestValidateHTTPSModeAndWildcard(t *testing.T) {
-	// valid: https_mode cf/all + wildcard with dns01 token
+func TestProviderTopologyYAML(t *testing.T) {
+	y := `
+mode: docker
+hosts:
+  - name: node-a
+    provider: test
+    plan: test-plan
+    location: test-location
+    ssh_key_ids: "1,2"
+    ssh_key: /path/example-key
+    user: root
+  - name: node-b
+    host: 2001:db8::1
+    provider: test
+`
+	var pf ProvisionFile
+	if err := yaml.Unmarshal([]byte(y), &pf); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(pf.Hosts) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(pf.Hosts))
+	}
+	h0 := pf.Hosts[0]
+	if h0.Provider != "test" || h0.Plan != "test-plan" || h0.Location != "test-location" {
+		t.Errorf("topology fields not parsed: %+v", h0)
+	}
+	if h0.SSHKeyIDs != "1,2" {
+		t.Errorf("ssh_key_ids not parsed: %q", h0.SSHKeyIDs)
+	}
+	// A host with provider but no IP is valid (it will be created on apply).
+	if _, err := validateProvision(&pf); err != nil {
+		t.Errorf("provider topology rejected: %v", err)
+	}
+}
+
+func TestValidateHTTPSModeAndWildcard(t *testing.T) {	// valid: https_mode cf/all + wildcard with dns01 token
 	ok := &ProvisionFile{
 		Mode:      "docker",
 		HTTPSMode: "all",
