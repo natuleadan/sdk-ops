@@ -97,7 +97,7 @@ sdk-ops db create redis --port 6379 --node 192.0.2.100
 ### 2.9 Infrastructure templates
 
 ```bash
-sdk-ops deploy init ./pg --template pg-dockerized     # PostgreSQL + PgDog + pgbackrest
+sdk-ops deploy init ./pg --template pgsql-docker     # PostgreSQL + PgDog + pgbackrest
 sdk-ops deploy init ./kv --template kv-dockerized     # Dragonfly KV + HAProxy TLS
 sdk-ops deploy init ./ls --template libsql-dockerized  # libSQL + HAProxy TLS
 

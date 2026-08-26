@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-//go:embed pg-dockerized kv-dockerized libsql-dockerized nats-dockerized etcd postgres
+//go:embed pgsql-docker pgsql-cluster pgsql-bare kv-dockerized libsql-dockerized nats-dockerized etcd yuga-docker yuga-bare yuga-cluster
 var infraTemplates embed.FS
 
 type Template struct {
@@ -92,11 +92,11 @@ var Templates = map[string]Template{
 			"project/wsgi.py":     djangoWsgi,
 		},
 	},
-	"pg-dockerized": {
-		Name:        "pg-dockerized",
-		Description: "PostgreSQL 18 + PgDog + 2 replicas + pgbackrest",
+	"pgsql-docker": {
+		Name:        "pgsql-docker",
+		Description: "PostgreSQL 18 + PgDog + 2 replicas + pgbackrest (compose on one VPS)",
 		IsDir:       true,
-		DirName:     "pg-dockerized",
+		DirName:     "pgsql-docker",
 	},
 	"kv-dockerized": {
 		Name:        "kv-dockerized",
@@ -122,11 +122,35 @@ var Templates = map[string]Template{
 		IsDir:       true,
 		DirName:     "etcd",
 	},
-	"postgres": {
-		Name:        "postgres",
+	"pgsql-bare": {
+		Name:        "pgsql-bare",
+		Description: "PostgreSQL bare-metal — native postgres on the host (no Docker), single instance",
+		IsDir:       true,
+		DirName:     "pgsql-bare",
+	},
+	"pgsql-cluster": {
+		Name:        "pgsql-cluster",
 		Description: "PostgreSQL HA cluster (Patroni + etcd DCS + PgDog + pgbackrest S3 + DR)",
 		IsDir:       true,
-		DirName:     "postgres",
+		DirName:     "pgsql-cluster",
+	},
+	"yuga-docker": {
+		Name:        "yuga-docker",
+		Description: "YugabyteDB distributed SQL — 3 yugabyted nodes (masters+tservers, RF=3), YSQL+YCQL, backups to S3",
+		IsDir:       true,
+		DirName:     "yuga-docker",
+	},
+	"yuga-bare": {
+		Name:        "yuga-bare",
+		Description: "YugabyteDB bare-metal — official tarball + yugabyted start on the host (no Docker), YSQL+YCQL, backups to S3",
+		IsDir:       true,
+		DirName:     "yuga-bare",
+	},
+	"yuga-cluster": {
+		Name:        "yuga-cluster",
+		Description: "YugabyteDB in k3s via the yugabyte-k8s-operator (helm) — RF=3, no host ports, internal service DNS",
+		IsDir:       true,
+		DirName:     "yuga-cluster",
 	},
 }
 

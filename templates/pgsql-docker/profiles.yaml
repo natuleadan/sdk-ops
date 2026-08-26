@@ -1,0 +1,13 @@
+# pgsql-docker — resource profiles, sized for the underlying VPS.
+lite:        # 1c / 2GB
+  mem_limit: 1g
+  cpus: 0.5
+normal:      # 2c / 4GB
+  mem_limit: 2g
+  cpus: 1
+medium:      # 4c / 8GB
+  mem_limit: 4g
+  cpus: 2
+large:       # 8c / 16GB
+  mem_limit: 8g
+  cpus: 4

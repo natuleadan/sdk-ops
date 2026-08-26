@@ -1,7 +1,7 @@
-# postgres — PostgreSQL HA cluster template (Patroni + etcd + PgDog + pgbackrest)
+# pgsql-cluster — PostgreSQL HA cluster template (Patroni + etcd + PgDog + pgbackrest)
 
 One scalable template, sized per node via `profiles.yaml` (lite/rs/...). Selected
-via `provision.yaml`: `services: { postgres: { profile: <name> } }`.
+via `provision.yaml`: `services: { pgsql-cluster: { profile: <name> } }`.
 
 ## What it deploys (per node)
 

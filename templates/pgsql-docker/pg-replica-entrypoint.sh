@@ -1,5 +1,5 @@
 #!/bin/sh
-# pg-dockerized replica entrypoint — clones primary via pg_basebackup, starts as standby
+# pgsql-docker replica entrypoint — clones primary via pg_basebackup, starts as standby
 set -e
 
 mkdir -p /tmp/pgbackrest && chmod 777 /tmp/pgbackrest

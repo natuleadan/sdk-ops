@@ -1,5 +1,5 @@
 #!/bin/sh
-# pg-dockerized init — PostgreSQL 18 + PgDog + SSL + pgbackrest (local or S3)
+# pgsql-docker init — PostgreSQL 18 + PgDog + SSL + pgbackrest (local or S3)
 set -e
 
 PG_USER="${PG_USER:-dev}"
@@ -14,9 +14,9 @@ S3_KEY="${S3_KEY:-}"
 S3_SECRET="${S3_SECRET:-}"
 S3_REGION="${S3_REGION:-auto}"
 
-CONTAINER="${CONTAINER:-pg-dockerized-postgres-1}"
+CONTAINER="${CONTAINER:-pgsql-docker-postgres-1}"
 
-echo "=== pg-dockerized init ==="
+echo "=== pgsql-docker init ==="
 echo "User: $PG_USER  DB: $PG_DATABASE  Pool: $POOL_SIZE"
 
 # Create directories
@@ -133,7 +133,7 @@ for REP in pg-replica pg-replica-2; do
   echo "  $REP ready"
 done
 
-echo "✓ pg-dockerized ready"
+echo "✓ pgsql-docker ready"
 echo "  PG:      postgresql://$PG_USER:$PG_PASSWORD@localhost:5432/$PG_DATABASE?sslmode=require"
 echo "  PgDog:   postgresql://$PG_USER:$PG_PASSWORD@localhost:6432/$PG_DATABASE?sslmode=require"
 echo "  Backup:  bash backup.sh"

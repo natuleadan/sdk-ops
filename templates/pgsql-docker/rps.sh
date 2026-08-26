@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# rps-pg.sh — pgbench benchmark for pg-dockerized
+# rps-pg.sh — pgbench benchmark for pgsql-docker
 # Usage (from VPS host):
-#   docker exec pg-dockerized-pgdog-1 bash /app/rps.sh [scale]
+#   docker exec pgsql-docker-pgdog-1 bash /app/rps.sh [scale]
 #   bash rps.sh [scale]              # if run inside PgDog container
 #
 # Default scale=10 (~1M rows in pgbench_accounts)
@@ -14,7 +14,7 @@ LOGFILE="/tmp/pgbench-$(date +%Y%m%d-%H%M%S).log"
 export PGPASSWORD="$PGPASS"
 
 echo "============================================"
-echo " pgbench RPS — pg-dockerized"
+echo " pgbench RPS — pgsql-docker"
 echo " Scale: $SCALE  |  Host: $PGHOST:$PGPORT"
 echo " Date:  $(date)"
 echo "============================================"
@@ -62,7 +62,7 @@ done
 # --- Summary (awk for math) ---
 echo ""
 echo "============================================"
-echo " RPS Summary — pg-dockerized"
+echo " RPS Summary — pgsql-docker"
 echo "============================================"
 
 avg_read=$(printf '%s\n' "${READ_TPS[@]}" | awk '{s+=$1} END {printf "%.0f", s/NR}')

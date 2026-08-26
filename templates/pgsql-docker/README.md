@@ -1,4 +1,4 @@
-# pg-dockerized — PostgreSQL Full Stack
+# pgsql-docker — PostgreSQL Full Stack
 
 PostgreSQL 18 + 2 streaming replicas + PgDog connection pooler (read/write split, round_robin LB) + SSL/TLS + pgbackrest backups + optional MinIO S3.
 
@@ -15,7 +15,7 @@ PostgreSQL 18 + 2 streaming replicas + PgDog connection pooler (read/write split
 ## Quick start
 
 ```bash
-cd /path/to/pg-dockerized
+cd /path/to/pgsql-docker
 bash init.sh
 ```
 

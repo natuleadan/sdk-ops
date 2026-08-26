@@ -1,14 +1,14 @@
 #!/bin/sh
-# pg-dockerized backup — pgbackrest full backup to local or S3 storage
+# pgsql-docker backup — pgbackrest full backup to local or S3 storage
 set -e
 
-CONTAINER="${CONTAINER:-pg-dockerized-postgres-1}"
+CONTAINER="${CONTAINER:-pgsql-docker-postgres-1}"
 PG_USER="${PG_USER:-dev}"
 PG_PASSWORD="${PG_PASSWORD:-devpass}"
 STANZA="${STANZA:-main}"
 TYPE="${TYPE:-full}"
 
-echo "=== pg-dockerized backup ==="
+echo "=== pgsql-docker backup ==="
 
 # Verify container is running
 docker inspect "$CONTAINER" >/dev/null 2>&1 || {

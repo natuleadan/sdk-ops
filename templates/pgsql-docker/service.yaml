@@ -1,4 +1,4 @@
-name: pg-dockerized
+name: pgsql-docker
 description: PostgreSQL 18 + PgDog + SSL + pgbackrest (WAL archiving, full/incr/diff backups, PITR)
 services:
   - postgres 18 (database, WAL archiving, SSL)

@@ -1,18 +1,18 @@
 #!/bin/sh
-# pg-dockerized integration test — full PITR cycle via pgbackrest
+# pgsql-docker integration test — full PITR cycle via pgbackrest
 set -e
 
 PG_USER="${PG_USER:-dev}"
 PG_PASSWORD="${PG_PASSWORD:-devpass}"
 PG_DATABASE="${PG_DATABASE:-postgres}"
-CONTAINER="${CONTAINER:-pg-dockerized-postgres-1}"
+CONTAINER="${CONTAINER:-pgsql-docker-postgres-1}"
 COMPOSE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 STANZA="${STANZA:-main}"
 
 # All psql commands run inside the Docker container via docker exec
 PSQL() { docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" psql -U "$PG_USER" -d "$PG_DATABASE" "$@" 2>/dev/null; }
 
-echo "=== pg-dockerized INTEGRATION TEST ==="
+echo "=== pgsql-docker INTEGRATION TEST ==="
 
 # 1. Ensure services are running
 echo "--- Step 1: Verify services ---"
@@ -79,7 +79,7 @@ docker run --rm \
   -v "$COMPOSE_DIR/data/pgbackrest:/var/lib/pgbackrest" \
   -v "$COMPOSE_DIR/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro" \
   -e PGPASSWORD="$PG_PASSWORD" \
-  pg-dockerized:latest \
+  pgsql-docker:latest \
   sh -c "
 pgbackrest --stanza=$STANZA --db-path=/var/lib/postgresql/18/docker --type=none restore 2>&1
 rm -f /var/lib/postgresql/18/docker/postgresql.auto.conf
@@ -126,4 +126,4 @@ docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" psql -U "$PG_USER" -d "$PG
   "SELECT state, count(*) FROM pg_stat_replication GROUP BY state" 2>/dev/null | grep -q "streaming" && echo "  ✓ Replicas streaming" || echo "  WARN: Replication not streaming"
 
 echo ""
-echo "=== pg-dockerized INTEGRATION TEST PASSED ==="
+echo "=== pgsql-docker INTEGRATION TEST PASSED ==="

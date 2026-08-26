@@ -1,4 +1,4 @@
-name: pg-dockerized
+name: pgsql-docker
 services:
   pgdog:
     image: ghcr.io/pgdogdev/pgdog:main

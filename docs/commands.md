@@ -176,6 +176,47 @@ Execute a multi-node infrastructure plan. Installs servers first, then joins age
 sdk-ops infra apply <plan.yaml> [flags]
 ```
 
+### apply (declarative fleet)
+
+`sdk-ops apply <file.yaml>` provisions the whole fleet declaratively — init +
+hardening + services + DR — in one shot. Idempotent: re-applying an unchanged
+fleet is a no-op. `--check` is a dry-run (parse + render, touches nothing);
+`-v` prints the per-step detail.
+
+```bash
+sdk-ops apply fleet.yaml --insecure     # provision the fleet
+sdk-ops apply fleet.yaml --check        # dry-run
+```
+
+**Provider topology** — any host may declare a `provider` to have `apply`
+create the VPS via the cloud API (waiting for boot and resolving the IP) instead
+of provisioning an existing host:
+
+```yaml
+hosts:
+  - name: node-01
+    provider: <provider>
+    plan: test-plan
+    location: test-location
+    ssh_key_ids: "1,2"
+    ssh_key: /path/key
+    user: root
+```
+
+A host with a `provider` but no `host:` IP is created on apply; without a
+`provider` it must carry an IP and is provisioned as-is.
+
+### destroy (declarative fleet)
+
+`sdk-ops destroy <file.yaml>` tears down every VPS the fleet declares with a
+provider topology: best-effort uninstall from the node, then `DeleteVPS` via
+the provider API. Idempotent — a host already gone is a no-op; hosts without a
+provider are skipped.
+
+```bash
+sdk-ops destroy fleet.yaml
+```
+
 ### remove
 
 ```bash
@@ -637,19 +678,19 @@ sdk-ops deploy init ./my-svc --template go              # Go HTTP server
 sdk-ops deploy init ./my-app --template nextjs           # Next.js (standalone)
 sdk-ops deploy init ./my-app --template python-fastapi   # FastAPI + uvicorn
 sdk-ops deploy init ./my-app --template django           # Django + gunicorn
-sdk-ops deploy init ./pg --template pg-dockerized           # PostgreSQL + PgDog + pgbackrest
+sdk-ops deploy init ./pg --template pgsql-docker           # PostgreSQL + PgDog + pgbackrest
 sdk-ops deploy init ./kv --template kv-dockerized           # Dragonfly KV + HAProxy TLS
 sdk-ops deploy init ./ls --template libsql-dockerized        # libSQL + HAProxy TLS
 
 # Infrastructure templates deploy via docker compose (not deploy push)
-sdk-ops deploy init ./pg --template pg-dockerized
+sdk-ops deploy init ./pg --template pgsql-docker
 sdk-ops deploy init ./kv --template kv-dockerized
 sdk-ops deploy init ./ls --template libsql-dockerized
 cp -r ./pg /root/pg
 ssh root@<ip> "cd /root/pg && bash init.sh"
 
 # Test interactively (requires running services):
-sdk-ops deploy init ./pg --template pg-dockerized --tested
+sdk-ops deploy init ./pg --template pgsql-docker --tested
 
 # Also generate CI/CD pipeline
 sdk-ops deploy init ./my-app --template go --ci github   # + .github/workflows/deploy.yml

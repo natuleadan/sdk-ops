@@ -1,4 +1,4 @@
-# pg-dockerized — pgbench RPS
+# pgsql-docker — pgbench RPS
 
 ## What is TPS / RPS
 

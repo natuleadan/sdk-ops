@@ -1,4 +1,4 @@
-name: postgres
+name: pgsql-cluster
 description: PostgreSQL HA cluster (Patroni + etcd DCS shared + PgDog pooler + pgbackrest S3 + DR)
 ports:
   - "5432:5432"  # PostgreSQL (TLS)

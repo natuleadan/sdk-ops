@@ -1,8 +1,8 @@
 #!/bin/sh
-# pg-dockerized restore — pgbackrest restore with PITR support
+# pgsql-docker restore — pgbackrest restore with PITR support
 set -e
 
-CONTAINER="${CONTAINER:-pg-dockerized-postgres-1}"
+CONTAINER="${CONTAINER:-pgsql-docker-postgres-1}"
 PG_USER="${PG_USER:-dev}"
 PG_PASSWORD="${PG_PASSWORD:-devpass}"
 STANZA="${STANZA:-main}"
@@ -50,7 +50,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-echo "=== pg-dockerized restore ==="
+echo "=== pgsql-docker restore ==="
 echo "Stanza: $STANZA  Mode: $MODE  Delta: $DELTA"
 
 # Build pgbackrest restore args
@@ -109,7 +109,7 @@ docker run --rm \
   -v "$COMPOSE_DIR/data/pgbackrest:/var/lib/pgbackrest" \
   -v "$COMPOSE_DIR/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro" \
   -e PGPASSWORD="$PG_PASSWORD" \
-  pg-dockerized:latest \
+  pgsql-docker:latest \
   sh -c "
 pgbackrest $ARGS restore 2>&1
 # Reset WAL so PostgreSQL can start without recovery

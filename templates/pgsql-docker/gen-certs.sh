@@ -1,5 +1,5 @@
 #!/bin/sh
-# pg-dockerized gen-certs — generate self-signed SSL certificates
+# pgsql-docker gen-certs — generate self-signed SSL certificates
 set -e
 
 mkdir -p ssl

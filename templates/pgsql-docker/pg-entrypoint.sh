@@ -1,5 +1,5 @@
 #!/bin/sh
-# pg-dockerized PostgreSQL entrypoint — pgbackrest pre-installed in image
+# pgsql-docker PostgreSQL entrypoint — pgbackrest pre-installed in image
 set -e
 
 # Ensure /tmp/pgbackrest is writable by postgres user

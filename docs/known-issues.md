@@ -211,7 +211,7 @@ Templates expose only the **entrypoint** port to the internet. Internal ports
 
 | Template | Entrypoint | Internal ports closed |
 |----------|:----------:|:-------------------:|
-| `pg-dockerized` | 6432 (PgDog) | 5432, 5433, 5434 |
+| `pgsql-docker` | 6432 (PgDog) | 5432, 5433, 5434 |
 | `kv-dockerized` | 6379 (HAProxy TLS) | 6380, 6381, 10001-10003 |
 | `libsql-dockerized` | 8443 (HAProxy TLS) | 8080, 8081, 8082, 5001 |
 
