@@ -1,0 +1,17 @@
+name: yuga-cluster
+description: YugabyteDB in k3s via the yugabyte-k8s-operator (helm) — RF=3, no host ports, microservices consume over internal service DNS. The `mode: k3s` variant.
+services:
+  - yugabyte-k8s-operator (helm chart, YBManaged CRD)
+  - yb-master / yb-tserver statefulsets (RF=3)
+env:
+  YB_K8S_NAMESPACE: yb-demo
+  YB_K8S_RELEASE: yb-demo
+  YB_TAG: 2026.1.1.1-b2
+  YB_MASTER_REPLICAS: "3"
+  YB_TSERVER_REPLICAS: "3"
+health:
+  path: /
+  interval: 15
+commands:
+  deploy: bash deploy.sh
+  validate: bash validate.sh

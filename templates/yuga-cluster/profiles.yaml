@@ -1,0 +1,13 @@
+# yuga-cluster — resource profiles (k3s operator sizing).
+lite:        # 1c / 2GB per node
+  yb_cpus: 0.5
+  yb_mem: 1g
+normal:      # 2c / 4GB
+  yb_cpus: 1
+  yb_mem: 2g
+medium:      # 4c / 8GB
+  yb_cpus: 1.5
+  yb_mem: 4g
+large:       # 8c / 16GB
+  yb_cpus: 3
+  yb_mem: 8g
