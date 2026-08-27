@@ -47,10 +47,16 @@ fi
 echo "  restoring: $FNAME"
 
 YSQLSH="$YB_INSTALL_DIR/yugabyte-$YB_RELEASE/bin/ysqlsh"
-# Terminate sessions + drop/recreate via template1, then load.
-su -s /bin/sh yugabyte -c "$YSQLSH -h $ADDR -p 5433 -U yugabyte -d template1 -c \\\"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$YB_DB'\\\" >/dev/null 2>&1 || true"
-su -s /bin/sh yugabyte -c "$YSQLSH -h $ADDR -p 5433 -U yugabyte -d template1 -c 'DROP DATABASE IF EXISTS $YB_DB'"
-su -s /bin/sh yugabyte -c "$YSQLSH -h $ADDR -p 5433 -U yugabyte -d template1 -c 'CREATE DATABASE $YB_DB OWNER $YB_USER'"
+# System DB `yugabyte` never DROP — TRUNCATE instead (issues #5651, #4938).
+# For app DBs, terminate sessions + DROP/CREATE via template1.
+if [ "$YB_DB" = "yugabyte" ]; then
+  echo "  system DB yugabyte — TRUNCATE tables (no DROP DATABASE)"
+  su -s /bin/sh yugabyte -c "$YSQLSH -h $ADDR -p 5433 -U $YB_USER -d yugabyte -t -A -c \"SELECT 'TRUNCATE TABLE ' || quote_ident(tablename) || ' CASCADE;' FROM pg_tables WHERE schemaname='public'\" 2>/dev/null | su -s /bin/sh yugabyte -c \"$YSQLSH -h $ADDR -p 5433 -U $YB_USER -d yugabyte\" 2>/dev/null" || true
+else
+  su -s /bin/sh yugabyte -c "$YSQLSH -h $ADDR -p 5433 -U yugabyte -d template1 -c \\\"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$YB_DB'\\\" >/dev/null 2>&1 || true"
+  su -s /bin/sh yugabyte -c "$YSQLSH -h $ADDR -p 5433 -U yugabyte -d template1 -c 'DROP DATABASE IF EXISTS $YB_DB'"
+  su -s /bin/sh yugabyte -c "$YSQLSH -h $ADDR -p 5433 -U yugabyte -d template1 -c 'CREATE DATABASE $YB_DB OWNER $YB_USER'"
+fi
 gunzip -c "$LOCAL_DIR/$FNAME" | su -s /bin/sh yugabyte -c "$YSQLSH -h $ADDR -p 5433 -U $YB_USER -d $YB_DB"
 
 echo "  restore complete"

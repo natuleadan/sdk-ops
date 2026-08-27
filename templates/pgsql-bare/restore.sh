@@ -44,10 +44,12 @@ fi
 echo "  restoring: $FNAME"
 
 # Terminate sessions + drop/recreate via a maintenance DB, then load.
-su -s /bin/sh postgres -c "psql -h 127.0.0.1 -p $LISTEN_PORT -U postgres -d template1 -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$PG_DATABASE' AND pid <> pg_backend_pid()\"" >/dev/null 2>&1 || true
-su -s /bin/sh postgres -c "psql -h 127.0.0.1 -p $LISTEN_PORT -U postgres -d template1 -c 'DROP DATABASE IF EXISTS $PG_DATABASE'"
-su -s /bin/sh postgres -c "psql -h 127.0.0.1 -p $LISTEN_PORT -U postgres -d template1 -c 'CREATE DATABASE $PG_DATABASE OWNER $PG_APP_USER'"
-su -s /bin/sh postgres -c "psql -h 127.0.0.1 -p $LISTEN_PORT -U postgres -d $PG_DATABASE -c 'GRANT ALL ON SCHEMA public TO $PG_APP_USER'" || true
+# Use the unix socket (no -h) for the postgres superuser — TCP forces
+# md5/scram and prompts for a password (peer auth via socket works as root).
+su -s /bin/sh postgres -c "psql -p $LISTEN_PORT -U postgres -d template1 -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$PG_DATABASE' AND pid <> pg_backend_pid()\"" >/dev/null 2>&1 || true
+su -s /bin/sh postgres -c "psql -p $LISTEN_PORT -U postgres -d template1 -c 'DROP DATABASE IF EXISTS $PG_DATABASE'"
+su -s /bin/sh postgres -c "psql -p $LISTEN_PORT -U postgres -d template1 -c 'CREATE DATABASE $PG_DATABASE OWNER $PG_APP_USER'"
+su -s /bin/sh postgres -c "psql -p $LISTEN_PORT -U postgres -d $PG_DATABASE -c 'GRANT ALL ON SCHEMA public TO $PG_APP_USER'" || true
 gunzip -c "$LOCAL_DIR/$FNAME" | PGPASSWORD="$PG_APP_PASSWORD" psql -h 127.0.0.1 -p "$LISTEN_PORT" -U "$PG_APP_USER" -d "$PG_DATABASE"
 
 echo "  restore complete"

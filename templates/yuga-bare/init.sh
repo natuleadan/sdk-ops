@@ -60,16 +60,31 @@ if su -s /bin/sh yugabyte -c "$YUGABYTED status --base_dir=$DATA_DIR" 2>&1 | gre
 else
   JOIN_ARGS=""
   [ -n "$JOIN" ] && JOIN_ARGS="--join=$JOIN"
+  # yugabyted start stays in the foreground even with --daemon=false on some
+  # versions — run it in the background (nohup) so the init completes, then
+  # poll for YSQL readiness below.
   su -s /bin/sh yugabyte -c "
-    $YUGABYTED start \
+    nohup $YUGABYTED start \
       --base_dir=$DATA_DIR \
       --advertise_address=${YB_ADVERTISE:-127.0.0.1} \
       --cloud_location=$CLOUD_LOC \
       --insecure \
       $JOIN_ARGS \
-      --tserver_flags=ysql_num_shards_per_tserver=${YB_SHARDS:-4}
-  "
+      --tserver_flags=ysql_num_shards_per_tserver=${YB_SHARDS:-4} \
+      > $DATA_DIR/logs/yugabyted-init.log 2>&1 &
+  " || true
 fi
+
+# Wait for YSQL to accept connections (the yugabyted start was backgrounded).
+echo "  → waiting for YSQL..."
+YSQLSH="$APP_DIR/bin/ysqlsh"
+for i in $(seq 1 60); do
+  if su -s /bin/sh yugabyte -c "$YSQLSH -h ${YB_ADVERTISE:-127.0.0.1} -p 5433 -U yugabyte -d postgres -c 'SELECT 1'" >/dev/null 2>&1; then
+    echo "  YSQL ready"
+    break
+  fi
+  sleep 5
+done
 touch "$DATA_DIR/.init-done"
 
 # 4. Create the app role + database (idempotent) via ysqlsh. Use a temp SQL

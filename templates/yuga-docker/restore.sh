@@ -47,15 +47,24 @@ fi
 
 echo "  restoring: $FNAME"
 
-# Drop + recreate the database. Connect to another DB (template1) and terminate
-# any sessions still on the target so the DROP works on an active cluster.
+# Drop + recreate the database. For the system DB `yugabyte` never DROP —
+# it hangs CREATE DATABASE (issues #5651, #4938). TRUNCATE tables instead.
+# For a dedicated app DB, DROP/CREATE is safe. Connect via template1.
 YBH="${YB0_IP:-203.0.113.10}"
-docker compose exec -T yugabyte-0 bash -lc "
-  /usr/local/bin/ysqlsh -h $YBH -p 5433 -U yugabyte -d template1 -v ON_ERROR_STOP=1 -c \\
-    \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$YB_DB' AND pid <> pg_backend_pid()\" >/dev/null 2>&1;
-  /usr/local/bin/ysqlsh -h $YBH -p 5433 -U yugabyte -d template1 -v ON_ERROR_STOP=1 -c 'DROP DATABASE IF EXISTS $YB_DB' &&
-  /usr/local/bin/ysqlsh -h $YBH -p 5433 -U yugabyte -d template1 -v ON_ERROR_STOP=1 -c 'CREATE DATABASE $YB_DB OWNER $YB_USER'
-"
+if [ "$YB_DB" = "yugabyte" ]; then
+  echo "  system DB yugabyte — TRUNCATE tables (no DROP DATABASE)"
+  docker compose exec -T yugabyte-0 bash -lc "
+    TABLES=\$(/usr/local/bin/ysqlsh -h $YBH -p 5433 -U $YB_USER -d $YB_DB -t -c \"SELECT string_agg(tablename, ',') FROM pg_tables WHERE schemaname='public'\");
+    if [ -n \"\$TABLES\" ] && [ \"\$TABLES\" != \"\" ]; then /usr/local/bin/ysqlsh -h $YBH -p 5433 -U $YB_USER -d $YB_DB -c \"TRUNCATE \$TABLES CASCADE\"; fi
+  "
+else
+  docker compose exec -T yugabyte-0 bash -lc "
+    /usr/local/bin/ysqlsh -h $YBH -p 5433 -U yugabyte -d template1 -v ON_ERROR_STOP=1 -c \\
+      \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$YB_DB' AND pid <> pg_backend_pid()\" >/dev/null 2>&1;
+    /usr/local/bin/ysqlsh -h $YBH -p 5433 -U yugabyte -d template1 -v ON_ERROR_STOP=1 -c 'DROP DATABASE IF EXISTS $YB_DB' &&
+    /usr/local/bin/ysqlsh -h $YBH -p 5433 -U yugabyte -d template1 -v ON_ERROR_STOP=1 -c 'CREATE DATABASE $YB_DB OWNER $YB_USER'
+  "
+fi
 # Load the dump: pipe it into a file inside the container, then ysqlsh -f
 # (a direct piped stdin to ysqlsh corrupts the COPY-from-stdin blocks).
 gunzip -c "$LOCAL_DIR/$FNAME" | docker compose exec -T yugabyte-0 bash -lc \

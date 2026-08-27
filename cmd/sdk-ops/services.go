@@ -20,6 +20,52 @@ import (
 	"github.com/natuleadan/sdk-ops/templates"
 )
 
+// cleanupStaleServices removes services previously deployed on the host that
+// are no longer declared in the desired YAML. It detects the previous YAML
+// by listing /opt/sdk-ops/services and uninstalls anything not in desired.
+// Families are mutually exclusive: pgsql-bare/docker/cluster and
+// yuga-bare/docker/cluster — switching YAML auto-cleans the previous family
+// to avoid saturating the server. libsql is never auto-removed (banca).
+func cleanupStaleServices(conn *golang_ssh.Client, desired ProvisionServices) {
+	out, _, err := ssh.Run(conn, "ls /opt/sdk-ops/services 2>/dev/null | tr '\\n' ' ' || true")
+	if err != nil {
+		return
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return
+	}
+	for _, name := range strings.Fields(out) {
+		if _, ok := desired[name]; ok {
+			continue
+		}
+		if name == "libsql" || strings.HasPrefix(name, "libsql") {
+			verbosef("cleanup: keep stale %s (libsql en banca)", name)
+			continue
+		}
+		verbosef("cleanup: stale service %s not in desired YAML — uninstall", name)
+		svcDir := "/opt/sdk-ops/services/" + name
+		isYuga := strings.HasPrefix(name, "yuga")
+		isPgBare := name == "pgsql-bare"
+		isYugaCluster := name == "yuga-cluster"
+		// compose stacks (pgsql-docker, yuga-docker, pgsql-cluster, etcd ...)
+		if _, _, err := ssh.Run(conn, fmt.Sprintf("test -f %s/docker-compose.yml", svcDir)); err == nil {
+			_, _, _ = ssh.Run(conn, fmt.Sprintf("cd %s && sudo docker compose down -v 2>/dev/null || true", svcDir))
+		}
+		if isYuga {
+			_, _, _ = ssh.Run(conn, "sudo pkill -f yugabyted 2>/dev/null || true; sudo pkill -f yb-master 2>/dev/null || true; sudo pkill -f yb-tserver 2>/dev/null || true")
+		}
+		if isPgBare {
+			_, _, _ = ssh.Run(conn, "sudo pg_ctlcluster 18 main stop 2>/dev/null || sudo systemctl stop postgresql 2>/dev/null || true")
+		}
+		if isYugaCluster {
+			_, _, _ = ssh.Run(conn, "helm uninstall yb-demo -n yb-demo 2>/dev/null || true; sudo k3s kubectl delete ns yb-demo --force --grace-period=0 2>/dev/null || true")
+		}
+		_, _, _ = ssh.Run(conn, "sudo rm -rf "+svcDir+" 2>/dev/null || true")
+		verbosef("cleanup: removed %s", name)
+	}
+}
+
 // applyServicesOn deploys the services declared for one host (YAML-driven).
 // Each service renders its template with the node's profile + cluster topology
 // and the secrets from the environment (never the YAML). Idempotent by design:
@@ -39,6 +85,8 @@ func applyServicesOn(pf ProvisionFile, h ProvisionHost) error {
 		return fmt.Errorf("services: connect %s: %w", h.Name, err)
 	}
 	defer closeConn(conn)
+
+	cleanupStaleServices(conn, r.services)
 
 	// Deterministic service order — the dependencies first (etcd = the DCS the
 	// postgres needs; the map iteration alone is random and a postgres deploy
@@ -147,11 +195,17 @@ func deployServiceOn(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost,
 		return err
 	}
 
-	// Idempotent deploy. Native templates (pgsql-bare, yuga-bare — no
-	// docker-compose.yml) run their init.sh directly on the host; compose
-	// templates run `docker compose up -d` (recreate only on config change).
+	return deployFromRender(conn, pf, h, name, renderDir, svcDir, recreate)
+}
+
+// deployFromRender dispatches the final deploy step: native init, init.sh
+// (certs/quorum), or plain compose up.
+func deployFromRender(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost, name, renderDir, svcDir string, recreate bool) error {
 	if _, err := os.Stat(filepath.Join(renderDir, "docker-compose.yml")); err != nil {
 		return deployNativeService(conn, name, pf, h, svcDir)
+	}
+	if _, err := os.Stat(filepath.Join(renderDir, "init.sh")); err == nil {
+		return deployViaInit(conn, name, pf, h, renderDir, svcDir)
 	}
 	verbosef("service %s on %s: compose up (recreate=%v)", name, h.Name, recreate)
 	up := fmt.Sprintf("cd %s && sudo docker compose up -d", svcDir)
@@ -160,6 +214,20 @@ func deployServiceOn(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost,
 	}
 	if _, _, err := ssh.Run(conn, up); err != nil {
 		return err
+	}
+	if err := waitServiceUp(conn, name, pf, h); err != nil {
+		return err
+	}
+	if err := exposeServicePorts(conn, renderDir, pf, h); err != nil {
+		return err
+	}
+	return nil
+}
+
+func deployViaInit(conn *golang_ssh.Client, name string, pf ProvisionFile, h ProvisionHost, renderDir, svcDir string) error {
+	verbosef("service %s on %s: init.sh up", name, h.Name)
+	if _, _, err := ssh.Run(conn, fmt.Sprintf("cd %s && sudo bash init.sh", svcDir)); err != nil {
+		return fmt.Errorf("init %s: %w", name, err)
 	}
 	if err := waitServiceUp(conn, name, pf, h); err != nil {
 		return err
@@ -229,6 +297,15 @@ func serviceConfigChanged(conn *golang_ssh.Client, renderDir, svcDir, name strin
 
 // buildRenderData merges the profile variables with the node context.
 func buildRenderData(pf ProvisionFile, h ProvisionHost, dirName, profile string, cfg ServiceConfig) (map[string]any, error) {
+	// yuga-bare / pgsql-bare are native installs driven by env-var defaults —
+	// no profiles.yaml exists; render data is light (resource hints only).
+	if dirName == "yuga-bare" || dirName == "pgsql-bare" {
+		return map[string]any{
+			"MemLimit":  "512m",
+			"Cpus":      "1",
+			"Provision": true,
+		}, nil
+	}
 	profiles, err := templates.LoadProfiles(dirName)
 	if err != nil {
 		return nil, err
