@@ -1,4 +1,4 @@
-FROM ghcr.io/tursodatabase/libsql-server:latest
+FROM ghcr.io/tursodatabase/libsql-server:v0.24.33
 
 RUN apt-get update -qq && apt-get install -y -qq curl && rm -rf /var/lib/apt/lists/*
 

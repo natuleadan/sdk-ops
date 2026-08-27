@@ -1,0 +1,404 @@
+
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"os/exec"
+	"os/signal"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+)
+
+type LeaderInfo struct {
+	Node  string `json:"node"`
+	Epoch int64  `json:"epoch"`
+}
+
+type Router struct {
+	etcd         *clientv3.Client
+	scope        string
+	prefix       string
+	backends     map[string]*url.URL
+	leader       string
+	leaderMu     sync.RWMutex
+	primaryProxy *httputil.ReverseProxy
+	replicaProxy *httputil.ReverseProxy
+	healthProxy  *httputil.ReverseProxy
+	replicaList  []string
+	replicaIdx   uint64
+	mux          sync.Mutex
+}
+
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func NewRouter() (*Router, error) {
+	etcdEndpoints := envOrDefault("ETCD_ENDPOINTS", "http://etcd:2379")
+	scope := envOrDefault("CLUSTER_SCOPE", "libsql-dockerized")
+
+	etcdCli, err := clientv3.New(clientv3.Config{
+		Endpoints:   strings.Split(etcdEndpoints, ","),
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("etcd connect: %w", err)
+	}
+
+	r := &Router{
+		etcd:     etcdCli,
+		scope:    scope,
+		prefix:   fmt.Sprintf("/cluster/%s/", scope),
+		backends: make(map[string]*url.URL),
+	}
+
+	return r, nil
+}
+
+func (r *Router) loadLeader(ctx context.Context) error {
+	resp, err := r.etcd.Get(ctx, r.prefix+"leader")
+	if err != nil {
+		return err
+	}
+	if len(resp.Kvs) == 0 {
+		return fmt.Errorf("no leader key found")
+	}
+	var leader LeaderInfo
+	if err := json.Unmarshal(resp.Kvs[0].Value, &leader); err != nil {
+		return err
+	}
+	r.leaderMu.Lock()
+	r.leader = leader.Node
+	r.leaderMu.Unlock()
+	log.Printf("[router] leader: %s", leader.Node)
+	return nil
+}
+
+func (r *Router) getLeader() string {
+	r.leaderMu.RLock()
+	defer r.leaderMu.RUnlock()
+	return r.leader
+}
+
+func (r *Router) isReplica(name string) bool {
+	return strings.Contains(name, "replica")
+}
+
+func (r *Router) resolveHost(containerName string) string {
+	svcName := containerName
+	svcName = strings.TrimPrefix(svcName, r.scope+"-")
+	if idx := strings.LastIndex(svcName, "-"); idx > 0 {
+		svcName = svcName[:idx]
+	}
+	return svcName
+}
+
+func (r *Router) discoverBackends() {
+	// Discover the live sqld containers dynamically via docker.sock (mounted
+	// into the router, same as the controller). The compose project label is
+	// the source of truth — container names carry the compose instance suffix
+	// (sqld-replica-2-1) which the static list could never predict, and after
+	// a failover the controller recreates containers under the same project.
+	out, err := dockerCmd("ps", "-a", "--format", "{{.Names}}\t{{.Status}}", "--filter", "label=com.docker.compose.project="+r.scope)
+	if err != nil {
+		log.Printf("[router] docker ps: %v — falling back to static discovery", err)
+		r.discoverStatic()
+		return
+	}
+
+	found := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) < 1 {
+			continue
+		}
+		name := strings.TrimSpace(parts[0])
+		if name == "" || !strings.Contains(name, "sqld") {
+			continue
+		}
+		host := r.resolveHost(name)
+		u, err := url.Parse("http://" + host + ":8080")
+		if err != nil {
+			continue
+		}
+		r.backends[name] = u
+		found[name] = true
+		log.Printf("[router] backend: %s -> %s (host=%s)", name, u, host)
+	}
+
+	// Drop backends whose containers are gone (failover removed them).
+	for name := range r.backends {
+		if !found[name] {
+			delete(r.backends, name)
+			log.Printf("[router] backend gone: %s", name)
+		}
+	}
+
+	r.updateProxies()
+}
+
+// discoverStatic is the fallback when docker.sock is unavailable: the compose
+// service names (resolved by Docker DNS to whichever container owns the alias).
+func (r *Router) discoverStatic() {
+	services := []string{
+		"sqld-primary",
+		"sqld-replica",
+		"sqld-replica-2",
+	}
+	for _, svc := range services {
+		host := svc
+		u, err := url.Parse("http://" + host + ":8080")
+		if err != nil {
+			continue
+		}
+		r.backends["static-"+svc] = u
+		log.Printf("[router] static backend: %s -> %s", svc, u)
+	}
+	r.updateProxies()
+}
+
+// dockerCmd runs docker via the mounted socket (same as the controller).
+func dockerCmd(args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+func (r *Router) updateProxies() {
+	leader := r.getLeader()
+	leaderHost := r.resolveHost(leader)
+
+	primaryAddr := ""
+	for name, u := range r.backends {
+		host := r.resolveHost(name)
+		if host == leaderHost {
+			primaryAddr = u.String()
+			break
+		}
+	}
+
+	if primaryAddr == "" {
+		for name, u := range r.backends {
+			if !r.isReplica(name) {
+				primaryAddr = u.String()
+				break
+			}
+		}
+	}
+
+	if primaryAddr != "" {
+		u, _ := url.Parse(primaryAddr)
+		r.primaryProxy = httputil.NewSingleHostReverseProxy(u)
+		log.Printf("[router] primary proxy -> %s", primaryAddr)
+	}
+
+	r.replicaList = r.replicaList[:0]
+	for name, u := range r.backends {
+		host := r.resolveHost(name)
+		if r.isReplica(name) && host != leaderHost {
+			r.replicaList = append(r.replicaList, u.String())
+		}
+	}
+
+	if len(r.replicaList) > 0 {
+		u, _ := url.Parse(r.replicaList[0])
+		r.replicaProxy = httputil.NewSingleHostReverseProxy(u)
+	}
+
+	if len(r.backends) > 0 {
+		first := ""
+		for name := range r.backends {
+			if !r.isReplica(name) {
+				first = name
+				break
+			}
+		}
+		if first == "" {
+			for name := range r.backends {
+				first = name
+				break
+			}
+		}
+		if u, ok := r.backends[first]; ok {
+			r.healthProxy = httputil.NewSingleHostReverseProxy(u)
+		}
+	}
+}
+
+func (r *Router) roundRobinReplica() string {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+	if len(r.replicaList) == 0 {
+		return ""
+	}
+	idx := r.replicaIdx
+	r.replicaIdx++
+	return r.replicaList[idx%uint64(len(r.replicaList))]
+}
+
+func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.URL.Path == "/health" || req.URL.Path == "/healthz" {
+		r.handleHealth(w, req)
+		return
+	}
+
+	if req.Method == "POST" || req.Method == "PUT" || req.Method == "PATCH" || req.Method == "DELETE" {
+		r.handleWrite(w, req)
+		return
+	}
+
+	r.handleRead(w, req)
+}
+
+func (r *Router) handleHealth(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	fmt.Fprintf(w, `{"status":"ok","role":"router"}`)
+}
+
+func (r *Router) handleWrite(w http.ResponseWriter, req *http.Request) {
+	if r.primaryProxy == nil {
+		http.Error(w, `{"error":"no primary available"}`, 503)
+		return
+	}
+	r.primaryProxy.ServeHTTP(w, req)
+}
+
+func (r *Router) handleRead(w http.ResponseWriter, req *http.Request) {
+	target := r.roundRobinReplica()
+	if target == "" {
+		if r.primaryProxy != nil {
+			r.primaryProxy.ServeHTTP(w, req)
+			return
+		}
+		http.Error(w, `{"error":"no backends available"}`, 503)
+		return
+	}
+
+	u, _ := url.Parse(target)
+	proxy := httputil.NewSingleHostReverseProxy(u)
+	proxy.ServeHTTP(w, req)
+}
+
+func (r *Router) startLeaderWatch(ctx context.Context) {
+	wch := r.etcd.Watch(ctx, r.prefix+"leader")
+	for resp := range wch {
+		for _, ev := range resp.Events {
+			if ev.Type == clientv3.EventTypePut {
+				var leader LeaderInfo
+				if err := json.Unmarshal(ev.Kv.Value, &leader); err == nil {
+					r.leaderMu.Lock()
+					r.leader = leader.Node
+					r.leaderMu.Unlock()
+					log.Printf("[router] leader changed: %s (epoch %d)", leader.Node, leader.Epoch)
+					r.updateProxies()
+				}
+			}
+		}
+	}
+}
+
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	router, err := NewRouter()
+	if err != nil {
+		log.Fatalf("[router] init: %v", err)
+	}
+
+	log.Printf("[router] starting (scope=%s)", router.scope)
+
+	if err := router.loadLeader(ctx); err != nil {
+		log.Printf("[router] no leader yet: %v", err)
+	}
+
+	router.discoverBackends()
+
+	go router.startLeaderWatch(ctx)
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				router.loadLeader(ctx)
+				router.discoverBackends() // rediscover: pick up failover recreated containers
+				router.updateProxies()
+			}
+		}
+	}()
+
+	certFile := envOrDefault("TLS_CERT", "/tls/server_cert.pem")
+	keyFile := envOrDefault("TLS_KEY", "/tls/server_key.pem")
+
+	tlsCert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		log.Printf("[router] WARNING no TLS certs, running plain HTTP: %v", err)
+
+		server := &http.Server{
+			Addr:    ":8443",
+			Handler: router,
+		}
+
+		go func() {
+			log.Printf("[router] HTTP listening on :8443")
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("[router] HTTP: %v", err)
+			}
+		}()
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		server.Shutdown(context.Background())
+		router.etcd.Close()
+		return
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	server := &http.Server{
+		Addr:      ":8443",
+		Handler:   router,
+		TLSConfig: tlsConfig,
+	}
+
+	go func() {
+		log.Printf("[router] HTTPS listening on :8443")
+		if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[router] HTTPS: %v", err)
+		}
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	log.Println("[router] shutting down...")
+	cancel()
+	server.Shutdown(context.Background())
+	router.etcd.Close()
+}

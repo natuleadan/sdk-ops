@@ -35,7 +35,7 @@ func cleanupStaleServices(conn *golang_ssh.Client, desired ProvisionServices) {
 	if out == "" {
 		return
 	}
-	for _, name := range strings.Fields(out) {
+	for name := range strings.FieldsSeq(out) {
 		if _, ok := desired[name]; ok {
 			continue
 		}
@@ -258,8 +258,8 @@ func serviceConfigChanged(conn *golang_ssh.Client, renderDir, svcDir, name strin
 	// Per-service config to diff: nats.conf (or nats-0.conf), patroni.yml,
 	// docker-compose.yml (etcd), postgresql.auto.conf...
 	cfgFiles := map[string][]string{
-		"nats":     {"nats.conf", "nats-0.conf"},
-		"etcd":     {"docker-compose.yml"},
+		"nats":          {"nats.conf", "nats-0.conf"},
+		"etcd":          {"docker-compose.yml"},
 		"pgsql-cluster": {"patroni.yml", "pgdog.toml", "docker-compose.yml", "pgbackrest.conf"},
 	}
 	files, ok := cfgFiles[name]
@@ -338,9 +338,42 @@ func buildRenderData(pf ProvisionFile, h ProvisionHost, dirName, profile string,
 		}, nil
 	case strings.HasPrefix(dirName, "yuga"):
 		return yugabyteRenderData(pf, h, prof, cfg)
+	case strings.HasPrefix(dirName, "libsql"):
+		return libsqlRenderData(prof)
 	default:
 		return nil, fmt.Errorf("no render builder for template %q", dirName)
 	}
+}
+
+// libsqlRenderData builds the render context for templates/libsql-dockerized.
+// The profile variables (SQLD_MEM, ETCD_MEM, ...) become the Go-template vars
+// the compose file consumes ({{ .SQLD_MEM }}), so a fleet YAML profile
+// (lite/normal/medium/large) sizes the whole 3-node stack deterministically.
+func libsqlRenderData(prof map[string]any) (map[string]any, error) {
+	envOr := func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
+	data := map[string]any{
+		"SQLD_MEM":             prof["SQLD_MEM"],
+		"SQLD_CPUS":            prof["SQLD_CPUS"],
+		"ETCD_MEM":             prof["ETCD_MEM"],
+		"ETCD_CPUS":            prof["ETCD_CPUS"],
+		"CONTROLLER_MEM":       prof["CONTROLLER_MEM"],
+		"CONTROLLER_CPUS":      prof["CONTROLLER_CPUS"],
+		"ROUTER_MEM":           prof["ROUTER_MEM"],
+		"ROUTER_CPUS":          prof["ROUTER_CPUS"],
+		"REPLICAS":             prof["REPLICAS"],
+		"LIBSQL_HTTP":          envOr("LIBSQL_HTTP", "8080"),
+		"LIBSQL_REPLICA_HTTP":  envOr("LIBSQL_REPLICA_HTTP", "8081"),
+		"LIBSQL_REPLICA2_HTTP": envOr("LIBSQL_REPLICA2_HTTP", "8082"),
+		"LIBSQL_HTTP_TLS":      envOr("LIBSQL_HTTP_TLS", "8443"),
+		"CONTROLLER_PORT":      envOr("CONTROLLER_PORT", "9090"),
+		"Provision":            true,
+	}
+	return data, nil
 }
 
 // natsRenderData builds the NATS cluster node render context.
@@ -423,6 +456,7 @@ func jsonTags(tags []string) string {
 	}
 	return "[" + strings.Join(quoted, ",") + "]"
 }
+
 // meshAdvertise returns the address the peers reach this node by. When the
 // node and every NATS peer are on a private network, the private IP is used
 // (firewall allows the private source); otherwise the public host is used so
@@ -530,7 +564,8 @@ func maybeWriteSingleVPS(renderDir string, data map[string]any, name, hostName s
 	return writeSingleVPSSetup(renderDir, data, replicas, hostName)
 }
 
-func bcryptHash(pass string) (string, error) {	if pass == "" {
+func bcryptHash(pass string) (string, error) {
+	if pass == "" {
 		return "", fmt.Errorf("empty password — set NATS_*_PASSWORD in the environment")
 	}
 	b, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)

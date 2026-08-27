@@ -21,6 +21,19 @@ var skipRender = map[string]bool{
 	"test":          true,
 }
 
+// renderVerbatim lists file names that must be copied as-is even when they
+// contain "{{" — Go source files use template syntax of their own (the
+// controller/router exec the etcd JSON templates) and must never be run
+// through the sdk-ops render engine. main.go.txt is the embed-safe shipping
+// name of the controller/router sources (renamed back in the Dockerfile).
+var renderVerbatim = map[string]bool{
+	"main.go":     true,
+	"main.go.txt": true,
+	"go.mod":      true,
+	"go.sum":      true,
+	"Dockerfile":  true,
+}
+
 // LoadProfiles parses a directory template's profiles.yaml
 // (map of profile name -> variables). Profiles let one scalable template
 // serve nodes of different sizes (e.g. lite vs rs) without copying configs.
@@ -71,7 +84,7 @@ func renderWalk(src, dst string, data any) error {
 			return fmt.Errorf("read %s: %w", srcPath, err)
 		}
 		var rendered []byte
-		if strings.Contains(string(content), "{{") {
+		if !renderVerbatim[e.Name()] && strings.Contains(string(content), "{{") {
 			t, err := template.New(e.Name()).Option("missingkey=zero").Parse(string(content))
 			if err != nil {
 				return fmt.Errorf("parse template %s: %w", e.Name(), err)

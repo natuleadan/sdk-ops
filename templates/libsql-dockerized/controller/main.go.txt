@@ -1,0 +1,699 @@
+
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+)
+
+type LeaderInfo struct {
+	Node  string `json:"node"`
+	Epoch int64  `json:"epoch"`
+}
+
+type NodeStatus struct {
+	Name      string
+	Role      string
+	Healthy   bool
+	FailCount int
+	HTTPAddr  string
+}
+
+type Controller struct {
+	etcd     *clientv3.Client
+	scope    string
+	prefix   string
+	nodes    map[string]*NodeStatus
+	mu       sync.RWMutex
+	leader   LeaderInfo
+	leaderMu sync.RWMutex
+	httpPort string
+}
+
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func envIntOrDefault(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return def
+}
+
+func NewController() (*Controller, error) {
+	etcdEndpoints := envOrDefault("ETCD_ENDPOINTS", "http://etcd:2379")
+	scope := envOrDefault("CLUSTER_SCOPE", "libsql-dockerized")
+	httpPort := envOrDefault("HTTP_PORT", "9090")
+
+	etcdCli, err := clientv3.New(clientv3.Config{
+		Endpoints:   strings.Split(etcdEndpoints, ","),
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("etcd connect: %w", err)
+	}
+
+	return &Controller{
+		etcd:     etcdCli,
+		scope:    scope,
+		prefix:   fmt.Sprintf("/cluster/%s/", scope),
+		nodes:    make(map[string]*NodeStatus),
+		httpPort: httpPort,
+	}, nil
+}
+
+func (c *Controller) loadLeader(ctx context.Context) error {
+	resp, err := c.etcd.Get(ctx, c.prefix+"leader")
+	if err != nil {
+		return err
+	}
+	if len(resp.Kvs) == 0 {
+		return nil
+	}
+	var leader LeaderInfo
+	if err := json.Unmarshal(resp.Kvs[0].Value, &leader); err != nil {
+		return err
+	}
+	c.leaderMu.Lock()
+	c.leader = leader
+	c.leaderMu.Unlock()
+	log.Printf("[controller] loaded leader: %s (epoch %d)", leader.Node, leader.Epoch)
+	return nil
+}
+
+func (c *Controller) saveLeader(ctx context.Context, info LeaderInfo) error {
+	data, _ := json.Marshal(info)
+	_, err := c.etcd.Put(ctx, c.prefix+"leader", string(data))
+	if err != nil {
+		return err
+	}
+	c.leaderMu.Lock()
+	c.leader = info
+	c.leaderMu.Unlock()
+	log.Printf("[controller] saved leader: %s (epoch %d)", info.Node, info.Epoch)
+	return nil
+}
+
+func (c *Controller) getCurrentLeader() string {
+	c.leaderMu.RLock()
+	defer c.leaderMu.RUnlock()
+	return c.leader.Node
+}
+
+func (c *Controller) getEpoch() int64 {
+	c.leaderMu.RLock()
+	defer c.leaderMu.RUnlock()
+	return c.leader.Epoch
+}
+
+func dockerCmd(args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+func dockerCmdLong(timeout time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+func (c *Controller) discoverNodes(ctx context.Context) {
+	out, err := dockerCmd("ps", "-a", "--format", "{{.Names}}\t{{.Status}}", "--filter", "label=com.docker.compose.project="+c.scope)
+	if err != nil {
+		log.Printf("[controller] docker ps: %v", err)
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, line := range strings.Split(out, "\n") {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) < 1 {
+			continue
+		}
+		name := strings.TrimSpace(parts[0])
+		if name == "" {
+			continue
+		}
+		role := ""
+		if strings.Contains(name, "primary") {
+			role = "primary"
+		} else if strings.Contains(name, "replica") {
+			role = "replica"
+		} else {
+			continue
+		}
+		if _, exists := c.nodes[name]; !exists {
+			svcName := c.resolveHost(name)
+			c.nodes[name] = &NodeStatus{
+				Name:     name,
+				Role:     role,
+				HTTPAddr: "http://" + svcName + ":8080",
+			}
+			log.Printf("[controller] discovered: %s (role=%s, addr=%s)", name, role, "http://"+svcName+":8080")
+		}
+	}
+}
+
+func (c *Controller) resolveHost(containerName string) string {
+	svcName := containerName
+	svcName = strings.TrimPrefix(svcName, c.scope+"-")
+	if idx := strings.LastIndex(svcName, "-"); idx > 0 {
+		svcName = svcName[:idx]
+	}
+	return svcName
+}
+
+func (c *Controller) healthCheck(ctx context.Context) {
+	c.mu.RLock()
+	nodes := make([]*NodeStatus, 0, len(c.nodes))
+	for _, n := range c.nodes {
+		nodes = append(nodes, n)
+	}
+	c.mu.RUnlock()
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	for _, node := range nodes {
+		req, err := http.NewRequestWithContext(ctx, "GET", node.HTTPAddr+"/health", nil)
+		if err != nil {
+			continue
+		}
+		resp, err := client.Do(req)
+		healthy := err == nil && resp.StatusCode == 200
+		if resp != nil {
+			resp.Body.Close()
+		}
+		c.mu.Lock()
+		if healthy {
+			node.FailCount = 0
+			node.Healthy = true
+		} else {
+			node.FailCount++
+			node.Healthy = false
+		}
+		c.mu.Unlock()
+	}
+}
+
+func (c *Controller) findBestReplica() *NodeStatus {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var best *NodeStatus
+	for _, n := range c.nodes {
+		if n.Role == "replica" && n.Healthy {
+			if best == nil || n.FailCount < best.FailCount {
+				best = n
+			}
+		}
+	}
+	return best
+}
+
+func (c *Controller) getContainerConfig(containerName string) (image string, cmd []string, env []string, binds []string, err error) {
+	out, err := dockerCmd("inspect", containerName, "--format", "{{.Config.Image}}")
+	if err != nil {
+		return "", nil, nil, nil, fmt.Errorf("inspect image: %w", err)
+	}
+	image = strings.TrimSpace(out)
+
+	cmdOut, err := dockerCmd("inspect", containerName, "--format", "{{json .Config.Cmd}}")
+	if err == nil {
+		json.Unmarshal([]byte(cmdOut), &cmd)
+	}
+
+	envOut, err := dockerCmd("inspect", containerName, "--format", "{{json .Config.Env}}")
+	if err == nil {
+		json.Unmarshal([]byte(envOut), &env)
+	}
+
+	bindsOut, err := dockerCmd("inspect", containerName, "--format", "{{json .HostConfig.Binds}}")
+	if err == nil {
+		json.Unmarshal([]byte(bindsOut), &binds)
+	}
+
+	return image, cmd, env, binds, nil
+}
+
+func (c *Controller) stopAndRemove(name string) {
+	log.Printf("[controller] stopping %s", name)
+	dockerCmd("stop", "-t", "10", name)
+	dockerCmd("rm", name)
+	c.mu.Lock()
+	delete(c.nodes, name)
+	c.mu.Unlock()
+}
+
+func (c *Controller) waitForHealth(addr string, timeout time.Duration) bool {
+	client := &http.Client{Timeout: 3 * time.Second}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(addr + "/health")
+		if err == nil && resp.StatusCode == 200 {
+			resp.Body.Close()
+			return true
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return false
+}
+
+func (c *Controller) failover(ctx context.Context) {
+	leaderName := c.getCurrentLeader()
+	if leaderName == "" {
+		return
+	}
+	c.mu.RLock()
+	leaderNode, exists := c.nodes[leaderName]
+	c.mu.RUnlock()
+	if !exists || leaderNode.Healthy {
+		return
+	}
+	threshold := envIntOrDefault("HEALTH_THRESHOLD", 3)
+	if leaderNode.FailCount < threshold {
+		return
+	}
+
+	log.Printf("[controller] primary %s failed %d times — initiating failover", leaderName, leaderNode.FailCount)
+
+	bestReplica := c.findBestReplica()
+	if bestReplica == nil {
+		log.Printf("[controller] no healthy replica available")
+		return
+	}
+
+	epoch := c.getEpoch() + 1
+	log.Printf("[controller] failover: promoting %s (epoch %d)", bestReplica.Name, epoch)
+
+	// Step 1: Get promoted replica's volume
+	_, _, _, replicaBinds, err := c.getContainerConfig(bestReplica.Name)
+	if err != nil {
+		log.Printf("[controller] ERROR get replica config: %v", err)
+		return
+	}
+	replicaVolume := ""
+	for _, b := range replicaBinds {
+		if strings.Contains(b, "replica") && strings.Contains(b, ":/var/lib/sqld") {
+			replicaVolume = strings.SplitN(b, ":", 2)[0]
+			break
+		}
+	}
+	if replicaVolume == "" {
+		for _, b := range replicaBinds {
+			if strings.Contains(b, ":/var/lib/sqld") {
+				replicaVolume = strings.SplitN(b, ":", 2)[0]
+				break
+			}
+		}
+	}
+	log.Printf("[controller] promoted replica volume: %s", replicaVolume)
+
+	// Step 1.5: Capture ALL replica configs BEFORE stopping
+	type replicaConfig struct {
+		Name   string
+		Volume string
+	}
+	var otherReplicas []replicaConfig
+	c.mu.RLock()
+	allNames := make([]string, 0)
+	for _, n := range c.nodes {
+		if strings.Contains(n.Name, "sqld") {
+			allNames = append(allNames, n.Name)
+		}
+	}
+	c.mu.RUnlock()
+	for _, name := range allNames {
+		if name == bestReplica.Name || !strings.Contains(name, "replica") {
+			continue
+		}
+		_, _, _, binds, err := c.getContainerConfig(name)
+		if err != nil {
+			continue
+		}
+		vol := ""
+		for _, b := range binds {
+			if strings.Contains(b, ":/var/lib/sqld") {
+				vol = strings.SplitN(b, ":", 2)[0]
+				break
+			}
+		}
+		otherReplicas = append(otherReplicas, replicaConfig{Name: name, Volume: vol})
+	}
+
+	// Step 2: Stop ALL sqld containers
+	log.Printf("[controller] stopping all sqld containers...")
+	allNames = allNames[:0]
+	c.mu.RLock()
+	for _, n := range c.nodes {
+		if strings.Contains(n.Name, "sqld") {
+			allNames = append(allNames, n.Name)
+		}
+	}
+	c.mu.RUnlock()
+	for _, name := range allNames {
+		c.stopAndRemove(name)
+	}
+
+	// Step 3: Create new primary with the promoted replica's volume
+	image, cmd, env, _, err := c.getContainerConfig(bestReplica.Name)
+	if err != nil {
+		// Container was removed, use defaults
+		image = "libsql-dockerized:v0.24.33"
+		cmd = []string{"sqld", "--http-listen-addr=0.0.0.0:8080", "--grpc-listen-addr=0.0.0.0:5001", "--snapshot-exec=/snapshot.sh", "--max-log-duration=30"}
+		env = []string{"SQLD_NODE=primary"}
+	}
+
+	// Build primary command (remove --primary-grpc-url)
+	var primaryCmd []string
+	for _, arg := range cmd {
+		if !strings.Contains(arg, "--primary-grpc-url") {
+			primaryCmd = append(primaryCmd, arg)
+		}
+	}
+
+	// Build primary env
+	var primaryEnv []string
+	for _, e := range env {
+		if !strings.HasPrefix(e, "SQLD_NODE=") {
+			primaryEnv = append(primaryEnv, e)
+		}
+	}
+	primaryEnv = append(primaryEnv, "SQLD_NODE=primary")
+
+	newPrimaryName := c.scope + "-sqld-primary-1"
+	newPrimarySvc := "sqld-primary"
+	runArgs := []string{"run", "-d",
+		"--name", newPrimaryName,
+		"--label", "com.docker.compose.project=" + c.scope,
+		"--network", c.scope + "_default",
+		"--network-alias", newPrimarySvc,
+		"--restart", "unless-stopped",
+	}
+	if replicaVolume != "" {
+		runArgs = append(runArgs, "-v", replicaVolume+":/var/lib/sqld")
+	}
+	for _, e := range primaryEnv {
+		runArgs = append(runArgs, "-e", e)
+	}
+	runArgs = append(runArgs, image)
+	runArgs = append(runArgs, primaryCmd...)
+
+	log.Printf("[controller] creating new primary: %s (volume=%s)", newPrimaryName, replicaVolume)
+	if _, err := dockerCmd(runArgs...); err != nil {
+		log.Printf("[controller] ERROR create primary: %v", err)
+		return
+	}
+
+	// Step 4: Wait for new primary health
+	primaryAddr := "http://" + c.resolveHost(newPrimaryName) + ":8080"
+	log.Printf("[controller] waiting for new primary at %s...", primaryAddr)
+	if !c.waitForHealth(primaryAddr, 30*time.Second) {
+		log.Printf("[controller] ERROR new primary not healthy after 30s")
+		return
+	}
+	log.Printf("[controller] new primary healthy")
+
+	// Step 5: Register new primary
+	c.mu.Lock()
+	c.nodes[newPrimaryName] = &NodeStatus{
+		Name:     newPrimaryName,
+		Role:     "primary",
+		Healthy:  true,
+		HTTPAddr: primaryAddr,
+	}
+	c.mu.Unlock()
+
+	// Step 6: Create new replicas from pre-captured configs
+	newPrimaryGRPC := "http://" + c.resolveHost(newPrimaryName) + ":5001"
+	replicaIdx := 1
+	for _, rc := range otherReplicas {
+
+		newReplicaName := fmt.Sprintf("%s-sqld-replica-%d", c.scope, replicaIdx)
+		newReplicaSvc := "sqld-replica"
+		if replicaIdx > 1 {
+			newReplicaSvc = fmt.Sprintf("sqld-replica-%d", replicaIdx)
+		}
+		replicaIdx++
+
+		rCmd := []string{"sqld", "--http-listen-addr=0.0.0.0:8080", "--primary-grpc-url=" + newPrimaryGRPC}
+		rEnv := []string{"SQLD_NODE=replica"}
+
+		rRunArgs := []string{"run", "-d",
+			"--name", newReplicaName,
+			"--label", "com.docker.compose.project=" + c.scope,
+			"--network", c.scope + "_default",
+			"--network-alias", newReplicaSvc,
+			"--restart", "unless-stopped",
+		}
+		if rc.Volume != "" {
+			rRunArgs = append(rRunArgs, "-v", rc.Volume+":/var/lib/sqld")
+		}
+		for _, e := range rEnv {
+			rRunArgs = append(rRunArgs, "-e", e)
+		}
+		rRunArgs = append(rRunArgs, image)
+		rRunArgs = append(rRunArgs, rCmd...)
+
+		log.Printf("[controller] creating replica: %s -> %s", newReplicaName, newPrimaryGRPC)
+		if _, err := dockerCmd(rRunArgs...); err != nil {
+			log.Printf("[controller] ERROR create replica %s: %v", newReplicaName, err)
+			continue
+		}
+
+		rHost := c.resolveHost(newReplicaName)
+		c.mu.Lock()
+		c.nodes[newReplicaName] = &NodeStatus{
+			Name:     newReplicaName,
+			Role:     "replica",
+			Healthy:  false,
+			HTTPAddr: "http://" + rHost + ":8080",
+		}
+		c.mu.Unlock()
+
+		rAddr := "http://" + rHost + ":8080"
+		if c.waitForHealth(rAddr, 30*time.Second) {
+			c.mu.Lock()
+			c.nodes[newReplicaName].Healthy = true
+			c.nodes[newReplicaName].FailCount = 0
+			c.mu.Unlock()
+			log.Printf("[controller] replica %s healthy", newReplicaName)
+		}
+	}
+
+	// Step 7: Save leader
+	newLeader := LeaderInfo{Node: newPrimaryName, Epoch: epoch}
+	if err := c.saveLeader(ctx, newLeader); err != nil {
+		log.Printf("[controller] save leader: %v", err)
+	}
+
+	log.Printf("[controller] failover complete: %s is now primary (epoch %d)", newPrimaryName, epoch)
+}
+
+// rejoinLostNode repairs the cluster back to the full replica count after a
+// failover. A dead node degrades the cluster (3→2→1); this recreates the lost
+// replica as an empty container that re-syncs from the current primary via
+// gRPC, restoring the read/replication capacity. Idempotent — no-op when the
+// replica count is already at the desired 2 (primary + 2 replicas).
+func (c *Controller) rejoinLostNode(ctx context.Context) {
+	desired := envIntOrDefault("DESIRED_REPLICAS", 2)
+	leaderName := c.getCurrentLeader()
+	if leaderName == "" {
+		return
+	}
+	leaderHost := c.resolveHost(leaderName)
+
+	c.mu.RLock()
+	var liveReplicas []string
+	for _, n := range c.nodes {
+		if n.Role == "replica" && n.Healthy {
+			liveReplicas = append(liveReplicas, n.Name)
+		}
+	}
+	c.mu.RUnlock()
+
+	if len(liveReplicas) >= desired {
+		return
+	}
+
+	// Determine the image from the current primary (it must be running).
+	image, _, _, _, err := c.getContainerConfig(leaderName)
+	if err != nil || image == "" {
+		log.Printf("[controller] rejoin: cannot read primary image (%v)", err)
+		return
+	}
+
+	// Pick the next replica slot that is free.
+	newIdx := 1
+	for {
+		name := fmt.Sprintf("%s-sqld-replica-%d", c.scope, newIdx)
+		c.mu.RLock()
+		_, exists := c.nodes[name]
+		live := false
+		for _, n := range c.nodes {
+			if n.Name == name && n.Healthy {
+				live = true
+			}
+		}
+		c.mu.RUnlock()
+		if !exists || !live {
+			break
+		}
+		newIdx++
+	}
+
+	newReplicaName := fmt.Sprintf("%s-sqld-replica-%d", c.scope, newIdx)
+	newReplicaSvc := "sqld-replica"
+	if newIdx > 1 {
+		newReplicaSvc = fmt.Sprintf("sqld-replica-%d", newIdx)
+	}
+	primaryGRPC := "http://" + leaderHost + ":5001"
+
+	rCmd := []string{"sqld", "--http-listen-addr=0.0.0.0:8080", "--primary-grpc-url=" + primaryGRPC}
+	rEnv := []string{"SQLD_NODE=replica"}
+	rRunArgs := []string{"run", "-d",
+		"--name", newReplicaName,
+		"--label", "com.docker.compose.project=" + c.scope,
+		"--network", c.scope + "_default",
+		"--network-alias", newReplicaSvc,
+		"--restart", "unless-stopped",
+	}
+	for _, e := range rEnv {
+		rRunArgs = append(rRunArgs, "-e", e)
+	}
+	rRunArgs = append(rRunArgs, image)
+	rRunArgs = append(rRunArgs, rCmd...)
+
+	log.Printf("[controller] rejoin: recreating lost replica %s -> %s", newReplicaName, primaryGRPC)
+	if _, err := dockerCmd(rRunArgs...); err != nil {
+		log.Printf("[controller] rejoin: create %s: %v", newReplicaName, err)
+		return
+	}
+
+	rHost := c.resolveHost(newReplicaName)
+	c.mu.Lock()
+	c.nodes[newReplicaName] = &NodeStatus{
+		Name:     newReplicaName,
+		Role:     "replica",
+		Healthy:  false,
+		HTTPAddr: "http://" + rHost + ":8080",
+	}
+	c.mu.Unlock()
+	log.Printf("[controller] rejoin: %s re-joined (cluster back to primary + %d replicas)", newReplicaName, len(liveReplicas)+1)
+}
+
+func (c *Controller) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (c *Controller) handleLeader(w http.ResponseWriter, r *http.Request) {
+	c.leaderMu.RLock()
+	leader := c.leader
+	c.leaderMu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(leader)
+}
+
+func (c *Controller) handleNodes(w http.ResponseWriter, r *http.Request) {
+	c.mu.RLock()
+	nodes := make([]*NodeStatus, 0, len(c.nodes))
+	for _, n := range c.nodes {
+		nodes = append(nodes, n)
+	}
+	c.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(nodes)
+}
+
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ctrl, err := NewController()
+	if err != nil {
+		log.Fatalf("[controller] init: %v", err)
+	}
+
+	log.Printf("[controller] starting (scope=%s, etcd=%s)", ctrl.scope, os.Getenv("ETCD_ENDPOINTS"))
+
+	_ = ctrl.loadLeader(ctx)
+	ctrl.discoverNodes(ctx)
+
+	if ctrl.getCurrentLeader() == "" {
+		candidates := make([]*NodeStatus, 0)
+		ctrl.mu.RLock()
+		for _, n := range ctrl.nodes {
+			if n.Role == "primary" {
+				candidates = append(candidates, n)
+			}
+		}
+		ctrl.mu.RUnlock()
+		if len(candidates) > 0 {
+			_ = ctrl.saveLeader(ctx, LeaderInfo{Node: candidates[0].Name, Epoch: 1})
+		}
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				ctrl.healthCheck(ctx)
+				ctrl.failover(ctx)
+				ctrl.rejoinLostNode(ctx)
+			}
+		}
+	}()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", ctrl.handleHealth)
+	mux.HandleFunc("/leader", ctrl.handleLeader)
+	mux.HandleFunc("/nodes", ctrl.handleNodes)
+
+	server := &http.Server{Addr: ":" + ctrl.httpPort, Handler: mux}
+
+	go func() {
+		log.Printf("[controller] HTTP :%s", ctrl.httpPort)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[controller] HTTP: %v", err)
+		}
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	log.Println("[controller] shutting down...")
+	cancel()
+	server.Shutdown(context.Background())
+	ctrl.etcd.Close()
+}

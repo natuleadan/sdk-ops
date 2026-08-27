@@ -1,17 +1,24 @@
 #!/bin/sh
-# libsql-dockerized backup-cron — install daily backup cron
+# libsql-dockerized backup-cron — install daily backup cron to S3
 set -e
 
 CRON_SCHEDULE="${CRON_SCHEDULE:-0 4 * * *}"
-BACKUP_SCRIPT="$(cd "$(dirname "$0")" && pwd)/backup.sh"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BACKUP_SCRIPT="$SCRIPT_DIR/backup-s3.sh"
 
 echo "=== libsql-dockerized backup-cron ==="
 echo "  Schedule: $CRON_SCHEDULE"
-echo "  Docker:   backup via docker exec (no host tools needed)"
+echo "  Script:   $BACKUP_SCRIPT"
+echo "  S3:       s3://${S3_BUCKET:-libsql-backups}/${S3_PREFIX:-libsql}/"
 
-cmd="$CRON_SCHEDULE cd $(dirname "$BACKUP_SCRIPT") && bash ./backup.sh >> /var/log/libsql-dockerized-backup.log 2>&1"
-(crontab -l 2>/dev/null; echo "$cmd") | crontab -
+if [ ! -f "$BACKUP_SCRIPT" ]; then
+  echo "ERROR: $BACKUP_SCRIPT not found"
+  exit 1
+fi
+
+cmd="$CRON_SCHEDULE cd $SCRIPT_DIR && bash ./backup-s3.sh >> /var/log/libsql-backup.log 2>&1"
+(crontab -l 2>/dev/null | grep -v "backup-s3.sh"; echo "$cmd") | crontab -
 
 echo "  ✓ Cron installed"
-echo "  Logs: /var/log/libsql-dockerized-backup.log"
+echo "  Logs: /var/log/libsql-backup.log"
 echo "  Verify: crontab -l"

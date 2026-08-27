@@ -1,22 +1,26 @@
 name: libsql-dockerized
-description: libSQL (sqld) primary + replica + HAProxy TLS + WAL snapshots
+description: libSQL (sqld) 3-node cluster — cloud-native stack with etcd leader election + controller failover + write-aware TLS router + S3 backup/restore (DR). Declarative YAML-driven via sdk-ops; the controller self-heals primary death and rejoins lost replicas.
 services:
-  - sqld-primary (libSQL HTTP server :8080, gRPC :5001)
-  - sqld-replica (libSQL replica HTTP :8081)
-  - haproxy (TLS termination :8443 primary, :8444 replica)
-  - minio (optional S3-compatible storage via --profile s3)
+  - etcd (leader election DCS :2379)
+  - controller (failover orchestrator :9090)
+  - router (TLS + read/write splitting :8443)
+  - sqld-primary (libSQL HTTP :8080, gRPC :5001)
+  - sqld-replica-1 (libSQL replica HTTP :8081)
+  - sqld-replica-2 (libSQL replica HTTP :8082)
 ports:
   - "8080:8080"    # Primary HTTP (plain)
-  - "8443:8443"    # Primary HTTP (TLS via HAProxy)
-  - "8081:8080"    # Replica HTTP (plain)
-  - "8444:8444"    # Replica HTTP (TLS via HAProxy)
+  - "8443:8443"    # Router HTTP (TLS, write-aware)
+  - "8081:8080"    # Replica-1 HTTP (plain)
+  - "8082:8080"    # Replica-2 HTTP (plain)
+  - "9090:9090"    # Controller HTTP (leader query)
 env:
-  LIBSQL_DB: libsql.db
+  S3_BUCKET: natuleadan-pg-backup
+  S3_PREFIX: libsql
 health:
   path: /health
   interval: 15
 commands:
   init: bash init.sh
-  backup: bash backup.sh
-  restore: bash restore.sh [-y|--yes] <backup>
+  backup: bash backup-s3.sh
+  restore: bash restore-s3.sh [-y|--yes] [backup-name]
   validate: bash validate.sh

@@ -2,7 +2,7 @@ name: libsql-dockerized
 services:
   sqld-primary:
     build: .
-    image: libsql-dockerized:latest
+    image: libsql-dockerized:v0.24.33
     command:
       - sqld
       - --http-listen-addr=0.0.0.0:8080
@@ -10,114 +10,155 @@ services:
       - --snapshot-exec=/snapshot.sh
       - --max-log-duration=30
     ports:
-      - "${LIBSQL_HTTP:-8080}:8080"
+      - "{{ .LIBSQL_HTTP }}:8080"
     volumes:
       - primary_data:/var/lib/sqld
       - ./backups:/backups
       - ./tls:/tls:ro
     environment:
       SQLD_NODE: primary
+    mem_limit: {{ .SQLD_MEM }}
+    cpus: {{ .SQLD_CPUS }}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
     networks:
       - default
 
   sqld-replica:
     build: .
-    image: libsql-dockerized:latest
+    image: libsql-dockerized:v0.24.33
     command:
       - sqld
       - --http-listen-addr=0.0.0.0:8080
       - --primary-grpc-url=http://sqld-primary:5001
     depends_on:
       sqld-primary:
-        condition: service_started
+        condition: service_healthy
     ports:
-      - "${LIBSQL_REPLICA_HTTP:-8081}:8080"
+      - "{{ .LIBSQL_REPLICA_HTTP }}:8080"
     volumes:
       - replica_data:/var/lib/sqld
       - ./tls:/tls:ro
     environment:
       SQLD_NODE: replica
+    mem_limit: {{ .SQLD_MEM }}
+    cpus: {{ .SQLD_CPUS }}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
     networks:
       - default
 
   sqld-replica-2:
     build: .
-    image: libsql-dockerized:latest
+    image: libsql-dockerized:v0.24.33
     command:
       - sqld
       - --http-listen-addr=0.0.0.0:8080
       - --primary-grpc-url=http://sqld-primary:5001
     depends_on:
       sqld-primary:
-        condition: service_started
+        condition: service_healthy
     ports:
-      - "${LIBSQL_REPLICA2_HTTP:-8082}:8080"
+      - "{{ .LIBSQL_REPLICA2_HTTP }}:8080"
     volumes:
       - replica2_data:/var/lib/sqld
       - ./tls:/tls:ro
     environment:
       SQLD_NODE: replica
-    restart: unless-stopped
-    networks:
-      - default
-
-  haproxy:
-    image: haproxy:3.1-alpine
-    ports:
-      - "${LIBSQL_HTTP_TLS:-8443}:8443"
-    volumes:
-      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
-      - ./tls:/tls:ro
-    depends_on:
-      sqld-primary:
-        condition: service_started
-      sqld-replica:
-        condition: service_started
-      sqld-replica-2:
-        condition: service_started
-    restart: unless-stopped
-    networks:
-      - default
-
-  minio:
-    image: minio/minio:latest
-    profiles:
-      - s3
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${S3_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET:-minioadmin}
-    ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "9001:9001"
+    mem_limit: {{ .SQLD_MEM }}
+    cpus: {{ .SQLD_CPUS }}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
       interval: 5s
       timeout: 3s
-      retries: 10
-    volumes:
-      - minio_data:/data
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
     networks:
       - default
 
-  createbucket:
-    image: minio/mc:latest
-    profiles:
-      - s3
+  router:
+    image: libsql-dockerized-router:v0.24.33
+    ports:
+      - "{{ .LIBSQL_HTTP_TLS }}:8443"
+    volumes:
+      - ./tls:/tls:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      minio:
+      etcd:
+        condition: service_healthy
+      sqld-primary:
+        condition: service_healthy
+      sqld-replica:
+        condition: service_healthy
+      sqld-replica-2:
         condition: service_healthy
     environment:
-      MINIO_ROOT_USER: ${S3_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET:-minioadmin}
-      S3_BUCKET: ${S3_BUCKET:-libsql-backups}
-    entrypoint: >
-      sh -c "
-      mc alias set s3 http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
-      mc mb s3/$${S3_BUCKET} --ignore-existing
-      "
+      ETCD_ENDPOINTS: http://etcd:2379
+      CLUSTER_SCOPE: libsql-dockerized
+      TLS_CERT: /tls/server_cert.pem
+      TLS_KEY: /tls/server_key.pem
+    mem_limit: {{ .ROUTER_MEM }}
+    cpus: {{ .ROUTER_CPUS }}
+    restart: unless-stopped
+    networks:
+      - default
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.15
+    command:
+      - etcd
+      - --name=etcd-0
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --initial-cluster=etcd-0=http://etcd:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=libsql
+      - --enable-v2=true
+    volumes:
+      - etcd_data:/etcd-data
+    mem_limit: {{ .ETCD_MEM }}
+    cpus: {{ .ETCD_CPUS }}
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - default
+
+  controller:
+    image: libsql-dockerized-controller:v0.24.33
+    depends_on:
+      etcd:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      ETCD_ENDPOINTS: http://etcd:2379
+      CLUSTER_SCOPE: libsql-dockerized
+      HEALTH_INTERVAL: 5s
+      HEALTH_THRESHOLD: 3
+      HTTP_PORT: 9090
+    ports:
+      - "{{ .CONTROLLER_PORT }}:9090"
+    mem_limit: {{ .CONTROLLER_MEM }}
+    cpus: {{ .CONTROLLER_CPUS }}
+    restart: unless-stopped
     networks:
       - default
 
@@ -125,4 +166,4 @@ volumes:
   primary_data:
   replica_data:
   replica2_data:
-  minio_data:
+  etcd_data:
