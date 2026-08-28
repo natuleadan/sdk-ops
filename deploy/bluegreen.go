@@ -12,7 +12,7 @@ import (
 )
 
 func DeployBlueGreen(client *goss.Client, name, serviceDir, version string) error {
-	fmt.Println("  → Blue/green deploy starting...")
+	fmt.Println("  -> Blue/green deploy starting...")
 
 	currentPort := getCurrentPort(client, name)
 	greenPort := currentPort + 1
@@ -20,7 +20,7 @@ func DeployBlueGreen(client *goss.Client, name, serviceDir, version string) erro
 		greenPort = 8080
 	}
 
-	fmt.Printf("  → Current port: %d, New port: %d\n", currentPort, greenPort)
+	fmt.Printf("  -> Current port: %d, New port: %d\n", currentPort, greenPort)
 
 	versionDir := fmt.Sprintf("%s/%s", serviceDir, version)
 
@@ -36,7 +36,7 @@ func DeployBlueGreen(client *goss.Client, name, serviceDir, version string) erro
 		return err
 	}
 
-	fmt.Printf("  → Blue/green complete. Now on port %d\n", greenPort)
+	fmt.Printf("  -> Blue/green complete. Now on port %d\n", greenPort)
 	return nil
 }
 
@@ -55,7 +55,7 @@ services:
 
 	if _, _, err := ssh.Run(client, fmt.Sprintf("cat > %s << 'EOF'\n%s\nEOF", greenComposePath, greenCompose)); err != nil { log.Printf("bluegreen: write compose error: %v", err) }
 
-	fmt.Printf("  → Starting green container on port %d...\n", greenPort)
+	fmt.Printf("  -> Starting green container on port %d...\n", greenPort)
 	_, _, err := ssh.Run(client, fmt.Sprintf("cd %s && sudo docker compose -f docker-compose.green.yml up -d 2>&1", versionDir))
 	if err != nil {
 		if _, _, rErr := ssh.Run(client, fmt.Sprintf("cd %s && sudo docker compose -f docker-compose.green.yml down 2>&1 || true", versionDir)); rErr != nil { log.Printf("bluegreen: rollback error: %v", rErr) }
@@ -65,7 +65,7 @@ services:
 }
 
 func healthCheckGreen(client *goss.Client, greenPort int, versionDir string) error {
-	fmt.Println("  → Health checking green container...")
+	fmt.Println("  -> Health checking green container...")
 	healthOK := false
 	for range 15 {
 		check, _, _ := ssh.Run(client, fmt.Sprintf("curl -sf http://localhost:%d/health 2>/dev/null || echo 'fail'", greenPort))
@@ -85,7 +85,7 @@ func healthCheckGreen(client *goss.Client, greenPort int, versionDir string) err
 }
 
 func switchToGreen(client *goss.Client, name, serviceDir, versionDir string, greenPort int) error {
-	fmt.Println("  → Switching traffic to green...")
+	fmt.Println("  -> Switching traffic to green...")
 	proxyType := DetectProxy(client)
 	if proxyType != "" {
 		proxy := NewProxy(proxyType)
@@ -95,7 +95,7 @@ func switchToGreen(client *goss.Client, name, serviceDir, versionDir string, gre
 		}
 	}
 
-	fmt.Println("  → Stopping old (blue) container...")
+	fmt.Println("  -> Stopping old (blue) container...")
 	greenComposePath := fmt.Sprintf("%s/docker-compose.green.yml", versionDir)
 	if _, _, err := ssh.Run(client, fmt.Sprintf("cd %s && sudo docker compose down 2>&1 || true", versionDir)); err != nil { log.Printf("bluegreen: stop error: %v", err) }
 	if _, _, err := ssh.Run(client, fmt.Sprintf("rm -f %s", greenComposePath)); err != nil { log.Printf("bluegreen: remove error: %v", err) }

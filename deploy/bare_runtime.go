@@ -27,7 +27,7 @@ func DeployBare(client *goss.Client, name, versionDir string) error {
 
 	if binary == "" {
 		// No executable found, just return OK (upload-only mode)
-		fmt.Printf("  → Bare mode: files uploaded to %s\n", versionDir)
+		fmt.Printf("  -> Bare mode: files uploaded to %s\n", versionDir)
 		return nil
 	}
 
@@ -65,6 +65,6 @@ echo "ok"`, unitName, unitContent, unitName, unitName)
 		return fmt.Errorf("systemd install failed: %s", strings.TrimSpace(out2))
 	}
 
-	fmt.Printf("  → Bare metal: %s running as systemd service\n", name)
+	fmt.Printf("  -> Bare metal: %s running as systemd service\n", name)
 	return nil
 }

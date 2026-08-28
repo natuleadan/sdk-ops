@@ -107,9 +107,9 @@ if [ "$RESTORE_COUNT" = "3" ] && \
    [ "$KEY_CHARLIE" = "value-charlie" ] && \
    [ -z "$KEY_DELTA" ] && \
    [ -z "$KEY_ECHO" ]; then
-  echo "  ✅ 3 keys restored (correct PITR without WAL)"
+  echo "  [OK] 3 keys restored (correct PITR without WAL)"
 elif [ "$RESTORE_COUNT" = "5" ]; then
-  echo "  ⚠ 5 keys restored (with WAL replay)"
+  echo "  [WARN] 5 keys restored (with WAL replay)"
 else
   echo "FAIL: expected 3 keys, got $RESTORE_COUNT"
   exit 1

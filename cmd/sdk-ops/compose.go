@@ -28,7 +28,7 @@ func newComposeCmd() *cobra.Command {
 			if err := compose.Init(path, name); err != nil {
 				return err
 			}
-			fmt.Printf("  ✅ Created %s\n", path)
+			fmt.Printf("  [OK] Created %s\n", path)
 			return nil
 		},
 	}
@@ -53,7 +53,7 @@ func newComposeCmd() *cobra.Command {
 			if err := compose.AddService(filePath, args[0], image, port); err != nil {
 				return err
 			}
-			fmt.Printf("  ✅ Service %q added to %s\n", args[0], filePath)
+			fmt.Printf("  [OK] Service %q added to %s\n", args[0], filePath)
 			return nil
 		},
 	}
@@ -67,7 +67,7 @@ func newComposeCmd() *cobra.Command {
 			if err := compose.RemoveService(filePath, args[0]); err != nil {
 				return err
 			}
-			fmt.Printf("  ✅ Service %q removed from %s\n", args[0], filePath)
+			fmt.Printf("  [OK] Service %q removed from %s\n", args[0], filePath)
 			return nil
 		},
 	}
@@ -91,7 +91,7 @@ func newComposeCmd() *cobra.Command {
 			if err := compose.SetEnv(filePath, service, parts[0], parts[1]); err != nil {
 				return err
 			}
-			fmt.Printf("  ✅ %s=%s set on service %q\n", parts[0], parts[1], service)
+			fmt.Printf("  [OK] %s=%s set on service %q\n", parts[0], parts[1], service)
 			return nil
 		},
 	}
@@ -105,7 +105,7 @@ func newComposeCmd() *cobra.Command {
 			if err := compose.UnsetEnv(filePath, args[0], args[1]); err != nil {
 				return err
 			}
-			fmt.Printf("  ✅ %s unset on service %q\n", args[1], args[0])
+			fmt.Printf("  [OK] %s unset on service %q\n", args[1], args[0])
 			return nil
 		},
 	}
@@ -139,7 +139,7 @@ func newComposeCmd() *cobra.Command {
 			if err := compose.Validate(filePath); err != nil {
 				return fmt.Errorf("validation failed: %w", err)
 			}
-			fmt.Printf("  ✅ %s is valid\n", filePath)
+			fmt.Printf("  [OK] %s is valid\n", filePath)
 			return nil
 		},
 	}

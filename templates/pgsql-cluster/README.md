@@ -12,8 +12,8 @@ via `provision.yaml`: `services: { pgsql-cluster: { profile: <name> } }`.
   (`exclude_primary`), round-robin reads, `role="auto"` follows the leader.
 - **etcd** (shared DCS — deploy `templates/etcd/` too): 3 members, quorum 2/3,
   v2 API (`--enable-v2=true` — Patroni uses python-etcd v2).
-- **pgbackrest**: WAL archiving + full/diff/incr → S3 (aes-256-cbc). The backup
-  runs on the **backup-server** node (backup-standby → the standby is the source).
+- **pgbackrest**: WAL archiving + full/diff/incr -> S3 (aes-256-cbc). The backup
+  runs on the **backup-server** node (backup-standby -> the standby is the source).
   The restore runs ON the postgres host (pgbackrest 2.59 requirement).
 - **DR**: `restore: true|false` — idempotent (if the cluster is operational, skip).
 
@@ -30,8 +30,8 @@ via `provision.yaml`: `services: { pgsql-cluster: { profile: <name> } }`.
 - `bin_dir=/usr/local/bin` (alpine layout); the socket lives at `/run/postgresql`
   (mount `./run:/run/postgresql` — `/var/run` is a symlink).
 - The restored node must start FIRST (an empty node bootstrapping first creates a
-  fresh cluster → system-id mismatch).
+  fresh cluster -> system-id mismatch).
 - The stanza must match the `archive_command` (`stanza main`); after a wipe the
-  system-id changes → `stop` + `stanza-delete` + `start` + `stanza-create`.
-- The provision re-applies the firewall peers per-port (last wins) → re-expose
+  system-id changes -> `stop` + `stanza-delete` + `start` + `stanza-create`.
+- The provision re-applies the firewall peers per-port (last wins) -> re-expose
   the etcd ports combined + re-apply the nft bridge fixes after each provision.

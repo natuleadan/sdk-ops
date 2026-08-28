@@ -29,7 +29,7 @@ helm upgrade --install "$RELEASE" yugabytedb/yugabyte \
   --set "resource.tserver.requests.cpu=0.5,resource.tserver.requests.memory=0.5Gi"
 
 # 3. Wait for the masters to come up.
-echo "  → waiting for the yugabyte masters..."
+echo "  -> waiting for the yugabyte masters..."
 kubectl -n "$NAMESPACE" rollout status statefulset/yb-master --timeout=300s || \
   kubectl -n "$NAMESPACE" wait --for=condition=ready pod -l app=yb-master -n "$NAMESPACE" --timeout=300s
 

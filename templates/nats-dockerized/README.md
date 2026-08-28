@@ -26,7 +26,7 @@ services:
 - `certs/` — server.pem/server.key/ca.pem + client certs.
 - `.env` — the secrets (0600).
 - `nats` — the NATS CLI.
-- `backup.sh` / `backup-cron.sh` — daily JetStream seal → S3 (NKey curve).
+- `backup.sh` / `backup-cron.sh` — daily JetStream seal -> S3 (NKey curve).
 - `restore.sh` — unseal + restore (operator side, needs the recipient NKey).
 - `validate.sh` — health assertions.
 

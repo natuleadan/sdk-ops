@@ -51,10 +51,10 @@ services:
   **dual-stack** (`listen: "*:5432"` — IPv4 + IPv6).
 - **PgDog per node** (v0.1.52): EVERY postgres node runs its own PgDog (6432) —
   the "local-read" pattern: each app reads via its internal PgDog
-  (round-robin → replicas, `exclude_primary`) and writes go to the primary.
+  (round-robin -> replicas, `exclude_primary`) and writes go to the primary.
   One URL per app — the pooler does the split (the SQL parser + the role
   detection — it follows the leader on failover).
-- **pgbackrest**: WAL archiving + full/diff/incr → S3 (aes-256-cbc) — the
+- **pgbackrest**: WAL archiving + full/diff/incr -> S3 (aes-256-cbc) — the
   backup runs on the CURRENT primary (`backup_mode: leader` — the replicas skip).
 - **DR**: `restore: true` + idempotent — restores the LATEST FULL from S3 only
   when the data is missing and the node is the primary candidate; the replicas
@@ -122,8 +122,8 @@ services:
    ```
    Covers connection, sync (RPO=0), split, pooling, TLS/mTLS, backups
    (full/diff/incr), PITR, WAL, clone, config, capacity, failover_ready.
-5. **Drills**: kill the primary → the Patroni promotes alone (~35s); the DR is
-   `recreate: true` + `restore: true` → the data comes back from S3.
+5. **Drills**: kill the primary -> the Patroni promotes alone (~35s); the DR is
+   `recreate: true` + `restore: true` -> the data comes back from S3.
 
 ## When to scale
 
@@ -133,9 +133,9 @@ The k3s cluster + the TLS + the registry images: see `docs/k3s.md`.
 ## Validated
 
 - Failover AUTO + re-join + switchover + sync RPO=0.
-- DR drill: `recreate: true` + `restore: true` → the data comes back from S3
+- DR drill: `recreate: true` + `restore: true` -> the data comes back from S3
   (the marker verified) + leader + sync standby.
-- The read/write split: writes → the primary, reads → the replicas (via each
+- The read/write split: writes -> the primary, reads -> the replicas (via each
   node's PgDog), the data consistent (RPO=0).
 - **The connectivity variants** (each with its own YAML):
   - Intra (VLAN `10.0.0.x`) — all the traffic private.
@@ -145,8 +145,8 @@ The k3s cluster + the TLS + the registry images: see `docs/k3s.md`.
   - Mixed (VLAN + IPv6 per host — the `peer_ip` decides per node).
 - **OS matrix**: Ubuntu 22.04 / 24.04 / 26.04 + Debian 13 (trixie).
 - **No-hardening matrix** (`hardening: false`, 2026-08-14): the suite **27/27
-  ALL PASS** + the failover real (kill primary → promote) + the DR
-  (marker → S3 → restore) on every connectivity variant:
+  ALL PASS** + the failover real (kill primary -> promote) + the DR
+  (marker -> S3 -> restore) on every connectivity variant:
   - VLAN mesh (`10.0.0.x`) — the v4/v6 only for egress.
   - IPv6 mesh (`::/64`, the internet) — no VLAN.
   - IPv4 mesh (the public v4, the internet) — no VLAN.
@@ -166,7 +166,7 @@ The k3s cluster + the TLS + the registry images: see `docs/k3s.md`.
 - pgbackrest **2.59 PGDG** (the apt 2.50 does not support postgres 18).
 - The Patroni container runs as `user: "70:70"`; the socket at `/run/postgresql`.
 - The restored node must start FIRST (an empty node bootstrapping first creates
-  a fresh cluster → system-id mismatch); the wire waits for the primary ready.
+  a fresh cluster -> system-id mismatch); the wire waits for the primary ready.
 - The S3 repo's stanza: a fresh cluster needs `stanza-create` (the empty repo)
   or `stanza-upgrade` (the old system-id) — handled by the post-bootstrap.
 - The backup scripts use `set -euo pipefail` — a failed backup must NOT report
@@ -174,9 +174,9 @@ The k3s cluster + the TLS + the registry images: see `docs/k3s.md`.
 - `ghcr.io` has no IPv6: the PgDog image fallback (see above) is the only
   non-native step — the data path (S3, streaming, the mesh) is always native.
 - **SSH as `sdkops`** (not root) after hardening — the root's `authorized_keys`
-  can carry a stale entry ("Server accepts key → Permission denied"); the
+  can carry a stale entry ("Server accepts key -> Permission denied"); the
   sdkops account always works.
-- **Backup cadence**: `backup: { full, diff, incr }` (all optional) → three
+- **Backup cadence**: `backup: { full, diff, incr }` (all optional) -> three
   systemd timers (`pgx-backup-full/diff/incr`). The full + diff share the
   00:15 slot by default — the diff is only scheduled when `diff:` is set.
 - **Validation**: the granular suite (`pgx-test.sh`) is copied to the primary

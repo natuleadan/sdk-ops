@@ -51,16 +51,16 @@ BREAKING CHANGE: new format drops legacy flags
 
 ```
 1. Push commits to PR on `main`
-   → CI validates conventional commits format + scope presence
-   → CI runs lint + tests + build
+   -> CI validates conventional commits format + scope presence
+   -> CI runs lint + tests + build
 
 2. Merge squash to `main` with a conventional commit message
 
 3. Push to `main` triggers CI:
-   → reads the squash commit message
-   → auto-detects version bump (see table below)
-   → creates git tag vX.Y.Z
-   → GoReleaser builds binaries + publishes GitHub Release
+   -> reads the squash commit message
+   -> auto-detects version bump (see table below)
+   -> creates git tag vX.Y.Z
+   -> GoReleaser builds binaries + publishes GitHub Release
 ```
 
 No manual "Run workflow" step needed. The CI reads the commit message on push to `main`.

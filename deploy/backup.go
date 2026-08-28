@@ -72,7 +72,7 @@ func BackupServices(client *goss.Client, destDir string) (string, error) {
 
 	if _, _, err := ssh.Run(client, fmt.Sprintf("rm -f %s", remotePath)); err != nil { log.Printf("backup: cleanup error: %v", err) }
 
-	fmt.Printf("  → Backup saved: %s (%d bytes)\n", localPath, len(outBytes))
+	fmt.Printf("  -> Backup saved: %s (%d bytes)\n", localPath, len(outBytes))
 	return localPath, nil
 }
 
@@ -122,7 +122,7 @@ func BackupDatabase(client *goss.Client, dbType DBType, dbName, containerName st
 	}
 
 	if _, _, err := ssh.Run(client, fmt.Sprintf("rm -f %s", remotePath)); err != nil { log.Printf("backup: cleanup error: %v", err) }
-	fmt.Printf("  → Database backup saved: %s (%d bytes)\n", localPath, len(catBytes))
+	fmt.Printf("  -> Database backup saved: %s (%d bytes)\n", localPath, len(catBytes))
 	return localPath, nil
 }
 
@@ -167,7 +167,7 @@ func UploadToS3(localPath string, cfg S3Config) error {
 		return fmt.Errorf("s3 upload: %w", err)
 	}
 
-	fmt.Printf("  → Uploaded to s3://%s/%s\n", cfg.Bucket, key)
+	fmt.Printf("  -> Uploaded to s3://%s/%s\n", cfg.Bucket, key)
 	return nil
 }
 
@@ -239,8 +239,8 @@ echo "ok"
 		return fmt.Errorf("schedule install failed: %s", strings.TrimSpace(out))
 	}
 
-	fmt.Printf("  → Backup scheduled: %s (%s)\n", unitName, cronExpr)
-	fmt.Printf("  → Systemd timer: %s.timer\n", unitName)
+	fmt.Printf("  -> Backup scheduled: %s (%s)\n", unitName, cronExpr)
+	fmt.Printf("  -> Systemd timer: %s.timer\n", unitName)
 	return nil
 }
 
@@ -259,7 +259,7 @@ echo "ok"
 	if err != nil || !strings.Contains(out, "ok") {
 		return fmt.Errorf("unschedule: %w", err)
 	}
-	fmt.Printf("  → Backup schedule removed: %s\n", unitName)
+	fmt.Printf("  -> Backup schedule removed: %s\n", unitName)
 	return nil
 }
 
@@ -311,7 +311,7 @@ func RestoreServices(client *goss.Client, backupPath string) error {
 		[ -d "$d/current" ] && (cd "$d/current" && docker compose up -d 2>/dev/null || true)
 	done`); err != nil { log.Printf("backup: restart error: %v", err) }
 
-	fmt.Printf("  → Services restored from %s\n", backupPath)
+	fmt.Printf("  -> Services restored from %s\n", backupPath)
 	return nil
 }
 
@@ -328,7 +328,7 @@ func cronToSystemdCalendar(expr string) string {
 	month := parts[3]
 	weekday := parts[4]
 
-	// Handle step expressions: "*/30" → "0/30", "*/2" → "0/2"
+	// Handle step expressions: "*/30" -> "0/30", "*/2" -> "0/2"
 	if strings.HasPrefix(minute, "*/") {
 		minute = "0/" + minute[2:]
 	}

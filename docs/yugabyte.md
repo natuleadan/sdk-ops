@@ -36,7 +36,7 @@ asynchronously.
 |---|---|
 | `bash init.sh` | Start the 3 nodes, wait for quorum, create the app DB/user |
 | `bash validate.sh` | Health + YSQL/YCQL write/read + replication + quorum |
-| `bash backup.sh` | Logical dump (`ysql_dump`) → local + S3 (retention) |
+| `bash backup.sh` | Logical dump (`ysql_dump`) -> local + S3 (retention) |
 | `bash restore.sh [-y]` | Restore the latest dump from S3 / local |
 | `bash test/test.sh` | Integration: write/read, replication, failover, DR cycle |
 
@@ -92,7 +92,7 @@ verifies it. A lost node re-joins and re-syncs on restart.
 ## Validated
 
 - 3-node cluster: masters quorum (3), YSQL + YCQL read/write, follower reads.
-- Failover: kill one node → cluster stays healthy → node re-joins.
+- Failover: kill one node -> cluster stays healthy -> node re-joins.
 - Backup to real S3 (B2): `ysql_dump` shipped and confirmed in the bucket.
 - Resource profiles in `profiles.yaml` (`lite`/`normal`/`medium`/`large`).
 

@@ -66,12 +66,12 @@ func TestStatusIcon(t *testing.T) {
 		status string
 		want   string
 	}{
-		{"active", "✅"},
-		{"yes", "✅"},
-		{"OK", "✅"},
-		{"inactive", "❌"},
-		{"failed", "❌"},
-		{"", "❌"},
+		{"active", "[OK]"},
+		{"yes", "[OK]"},
+		{"OK", "[OK]"},
+		{"inactive", "[X]"},
+		{"failed", "[X]"},
+		{"", "[X]"},
 	}
 	for _, tt := range tests {
 		got := statusIcon(tt.status)

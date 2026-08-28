@@ -165,7 +165,7 @@ func dbCreateRunE(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Printf("  ✅ %s database ready\n", result.Image)
+	fmt.Printf("  [OK] %s database ready\n", result.Image)
 	fmt.Printf("     Container: %s\n", result.ContainerName)
 	fmt.Printf("     Connection: %s\n", result.ConnString)
 	if result.ExposedPort > 0 {
@@ -299,7 +299,7 @@ func newDbRemoveCmd() *cobra.Command {
 			if err := deploy.RemoveDatabase(conn, name); err != nil {
 				return err
 			}
-			fmt.Printf("  ✅ Database %s removed\n", name)
+			fmt.Printf("  [OK] Database %s removed\n", name)
 			return nil
 		},
 	}

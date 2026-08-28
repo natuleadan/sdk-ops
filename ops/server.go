@@ -167,7 +167,7 @@ func applyHardening(s *Server) error {
 		hardCfg.SSHPort = s.cfg.HardSSHPort
 	}
 	if err := hardening.Apply(s.conn, hardCfg); err != nil {
-		fmt.Printf("  ⚠️  Hardening partially failed, continuing...\n")
+		fmt.Printf("  [WARN]  Hardening partially failed, continuing...\n")
 	}
 	if err := s.conn.Close(); err != nil {
 		log.Printf("server: conn close error: %v", err)
@@ -183,7 +183,7 @@ func applyHardening(s *Server) error {
 }
 
 func reconnectAfterHardening(s *Server, user string, port int) error {
-	fmt.Printf("  → Reconnecting as %s@%s port %d...\n", user, s.cfg.Host, port)
+	fmt.Printf("  -> Reconnecting as %s@%s port %d...\n", user, s.cfg.Host, port)
 	for attempt := 1; attempt <= 10; attempt++ {
 		opts := []ssh.Option{ssh.WithPort(port)}
 		if s.cfg.SSHKey != "" {
@@ -234,7 +234,7 @@ func installRuntime(s *Server) error {
 }
 
 func installCrowdSec(client *gossh.Client) error {
-	fmt.Println("  → Installing CrowdSec...")
+	fmt.Println("  -> Installing CrowdSec...")
 	script := `#!/bin/bash
 set -euo pipefail
 if command -v cscli &>/dev/null; then
@@ -324,7 +324,7 @@ func (s *Server) DeployPush(sourceDir, name string) (*deploy.DeployResult, error
 
 	reg := deploy.DefaultRegistry()
 	if _, err := deploy.BuildAndPushImage(sourceDir, name, reg); err != nil {
-		fmt.Printf("  ⚠️  Docker build+push failed: %v\n", err)
+		fmt.Printf("  [WARN]  Docker build+push failed: %v\n", err)
 	}
 
 	cfg := deploy.UploadConfig{
@@ -345,7 +345,7 @@ func (s *Server) DeployPush(sourceDir, name string) (*deploy.DeployResult, error
 	}
 
 	if err := deploy.HealthCheck(s.conn, name, 30, ""); err != nil {
-		fmt.Printf("\n  ⚠️  Health check failed, rolling back...\n")
+		fmt.Printf("\n  [WARN]  Health check failed, rolling back...\n")
 		if rbErr := deploy.Rollback(s.conn, name, ""); rbErr != nil {
 			return nil, fmt.Errorf("health: %v\nrollback also failed: %v", err, rbErr)
 		}

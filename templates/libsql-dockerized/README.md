@@ -6,7 +6,7 @@ libSQL (sqld) cluster: 1 primary + 2 replicas, etcd-based controller (automatic 
 
 | Role | Port | TLS | Description |
 |------|:----:|:---:|-------------|
-| **Router** | **8443** | Yes | **Entrypoint** — writes → primary, reads → replicas |
+| **Router** | **8443** | Yes | **Entrypoint** — writes -> primary, reads -> replicas |
 | **Controller** | **9090** | No | Leader election (etcd), automatic failover |
 | **etcd** | 2379 (int) | No | DCS — stores leader state with epoch fencing |
 | **sqld-primary** | 8080 (int) | No | Read/write, gRPC :5001 |
@@ -78,26 +78,26 @@ bash test/test.sh       # PITR cycle + failover test
 ## Architecture
 
 ```
-                           ┌──────────────┐
-                           │   Clients     │
-                           └──────┬───────┘
-                                  │ 8443 (TLS, write-aware)
-                           ┌──────▼───────┐
-                           │   Router     │
-                           │  POST → P    │
-                           │  GET  → R    │
-                           └──┬───────┬───┘
-                              │       │
-                     ┌────────▼──┐ ┌──▼──────┐ ┌───▼──────┐
-                     │ Primary    │ │ Rep-1    │ │ Rep-2    │
-                     │ :8080      │ │ :8081    │ │ :8082    │
-                     │ gRPC:5001  │ │ gRPC ↓   │ │ gRPC ↓   │
-                     └────────────┘ └──────────┘ └──────────┘
-                              │
-                     ┌────────▼────────┐
-                     │   Controller    │ ←── etcd (leader, epoch)
-                     │   (failover)    │
-                     └─────────────────┘
+                           +--------------+
+                           |   Clients     |
+                           +------+-------+
+                                  | 8443 (TLS, write-aware)
+                           +------▼-------+
+                           |   Router     |
+                           |  POST -> P    |
+                           |  GET  -> R    |
+                           +--+-------+---+
+                              |       |
+                     +--------▼--+ +--▼------+ +---▼------+
+                     | Primary    | | Rep-1    | | Rep-2    |
+                     | :8080      | | :8081    | | :8082    |
+                     | gRPC:5001  | | gRPC v   | | gRPC v   |
+                     +------------+ +----------+ +----------+
+                              |
+                     +--------▼--------+
+                     |   Controller    | <--- etcd (leader, epoch)
+                     |   (failover)    |
+                     +-----------------+
 ```
 
 ## Files

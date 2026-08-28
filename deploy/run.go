@@ -26,7 +26,7 @@ func RunService(client *goss.Client, cfg ServiceConfig) error {
 	currentDir := fmt.Sprintf("%s/current", serviceDir)
 
 	runtime := detectRuntime(client, currentDir, cfg.Type)
-	fmt.Printf("  → Runtime detected: %s\n", runtime)
+	fmt.Printf("  -> Runtime detected: %s\n", runtime)
 
 	switch runtime {
 	case "docker":
@@ -74,10 +74,10 @@ func runDockerCompose(client *goss.Client, dir string) error {
 		return fmt.Errorf("check compose file on remote: %w", err)
 	}
 	if strings.TrimSpace(out) != "yes" {
-		fmt.Println("  → No docker-compose file, checking for Dockerfile...")
+		fmt.Println("  -> No docker-compose file, checking for Dockerfile...")
 		return buildAndRun(client, dir)
 	}
-	fmt.Println("  → Pulling image from registry and starting...")
+	fmt.Println("  -> Pulling image from registry and starting...")
 	// Stop leftover containers of previous versions of this service — a
 	// failed deploy/rollback can leave them running and holding the ports.
 	err = ssh.RunStream(client, fmt.Sprintf(`cd %s && sudo bash -c 'for c in $(docker ps -aq --filter name=%s- 2>/dev/null); do docker rm -f $c >/dev/null 2>&1; done' && sudo docker compose pull && sudo docker compose up -d --remove-orphans`, dir, projectName(dir)))
@@ -104,15 +104,15 @@ func buildAndRun(client *goss.Client, dir string) error {
 	out, _, err := ssh.Run(client, fmt.Sprintf(
 		`test -f "%s/Dockerfile" && echo yes || echo no`, dir))
 	if err != nil {
-		fmt.Printf("  ⚠ Could not check for Dockerfile: %v\n", err)
+		fmt.Printf("  [WARN] Could not check for Dockerfile: %v\n", err)
 	}
 	if strings.TrimSpace(out) != "yes" {
-		fmt.Println("  → No Dockerfile found, skipping build")
+		fmt.Println("  -> No Dockerfile found, skipping build")
 		return nil
 	}
 	svcName := filepath.Base(dir)
 	tag := fmt.Sprintf("%s:latest", svcName)
-	fmt.Printf("  → Building Docker image: %s\n", tag)
+	fmt.Printf("  -> Building Docker image: %s\n", tag)
 	err = ssh.RunStream(client, fmt.Sprintf("cd %s && sudo docker build -t %s .", dir, tag))
 	if err != nil {
 		return fmt.Errorf("docker build: %w", err)
@@ -124,7 +124,7 @@ func runKubectl(client *goss.Client, dir string) error {
 	kubeconfig := "/etc/rancher/k3s/k3s.yaml"
 	out, _, _ := ssh.Run(client, fmt.Sprintf(`ls %s/*.yaml %s/*.yml 2>/dev/null | head -5`, dir, dir))
 	if strings.TrimSpace(out) == "" {
-		fmt.Println("  → No k8s YAML files, skipping")
+		fmt.Println("  -> No k8s YAML files, skipping")
 		return nil
 	}
 	files := strings.FieldsSeq(out)
@@ -133,7 +133,7 @@ func runKubectl(client *goss.Client, dir string) error {
 		if base == "docker-compose.yml" || base == "docker-compose.yaml" || base == "service.yaml" {
 			continue
 		}
-		fmt.Printf("  → Applying %s...\n", base)
+		fmt.Printf("  -> Applying %s...\n", base)
 		kOut, _, err := ssh.Run(client, fmt.Sprintf("KUBECONFIG=%s kubectl apply -f %s", kubeconfig, f))
 		if err != nil {
 			return fmt.Errorf("kubectl apply %s: %w\n%s", f, err, kOut)
@@ -148,7 +148,7 @@ func runSystemd(client *goss.Client, name, dir string) error {
 		`F=$(ls "%s/sdk-ops-%s-amd64" 2>/dev/null); if [ -n "$F" ]; then echo "$F"; else ls "%s/run.sh" "%s/%s" 2>/dev/null | head -1 || echo "none"; fi`,
 		dir, name, dir, dir, name))
 	if err != nil {
-		fmt.Printf("  ⚠ Could not find binary: %v\n", err)
+		fmt.Printf("  [WARN] Could not find binary: %v\n", err)
 	}
 	binaryPath := strings.TrimSpace(binaryOut)
 	execStart := binaryPath
@@ -157,10 +157,10 @@ func runSystemd(client *goss.Client, name, dir string) error {
 	}
 
 	if binaryPath == "none" || binaryPath == "" {
-		fmt.Println("  → No binary or run.sh, skipping systemd setup")
+		fmt.Println("  -> No binary or run.sh, skipping systemd setup")
 		return nil
 	}
-	fmt.Printf("  → Binary found: %s\n", binaryPath)
+	fmt.Printf("  -> Binary found: %s\n", binaryPath)
 
 	serviceContent := fmt.Sprintf(`[Unit]
 Description=%s
@@ -192,7 +192,7 @@ echo "systemd_ok"
 	if err != nil {
 		return fmt.Errorf("systemd: %w\n%s", err, cmdOut)
 	}
-	fmt.Printf("  → Systemd service %s started\n", name)
+	fmt.Printf("  -> Systemd service %s started\n", name)
 	return nil
 }
 
@@ -236,7 +236,7 @@ fi`, name, tail))
 }
 
 func HealthCheck(client *goss.Client, name string, timeout int, healthURL string) error {
-	fmt.Printf("  → Health check (%ds timeout)...\n", timeout)
+	fmt.Printf("  -> Health check (%ds timeout)...\n", timeout)
 
 	var script string
 	if healthURL != "" {
@@ -288,7 +288,7 @@ exit 1
 	if err != nil {
 		return fmt.Errorf("health check failed: %s", strings.TrimSpace(out))
 	}
-	fmt.Printf("  → %s", strings.TrimSpace(out))
+	fmt.Printf("  -> %s", strings.TrimSpace(out))
 	return nil
 }
 

@@ -45,7 +45,7 @@ echo "=== sdk-ops: Docker installed ==="
 `
 
 func Install(client *goss.Client) error {
-	fmt.Println("  → Installing Docker...")
+	fmt.Println("  -> Installing Docker...")
 	out, _, err := ssh.Run(client, dockerScript)
 	if err != nil {
 		return fmt.Errorf("docker install failed: %w\noutput: %s", err, out)
@@ -62,7 +62,7 @@ func EnsureNetworking(client *goss.Client) error {
 	script := `
 sudo modprobe iptable_nat ip6table_nat 2>/dev/null || true
 if ! sudo nft list table ip nat 2>/dev/null | grep -q 'chain DOCKER'; then
-  echo "  → docker networking: recreating nat chains (restarting docker)..."
+  echo "  -> docker networking: recreating nat chains (restarting docker)..."
   sudo systemctl restart docker
   sleep 3
 fi

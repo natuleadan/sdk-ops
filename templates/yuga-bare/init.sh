@@ -31,7 +31,7 @@ echo "Version: $YB_VERSION  install: $INSTALL_DIR  join: ${JOIN:-<seed>}"
 if [ ! -x "$APP_DIR/bin/yugabyted" ]; then
   mkdir -p "$INSTALL_DIR"
   cd "$INSTALL_DIR"
-  echo "  → downloading $YB_URL"
+  echo "  -> downloading $YB_URL"
   TBALL="yugabyte-$YB_VERSION-$YB_TARBALL_ARCH.tar.gz"
   if ! curl -fsSL -o "$TBALL" "$YB_URL"; then
     echo "ERROR: download failed (version $YB_VERSION may not exist)"
@@ -40,10 +40,10 @@ if [ ! -x "$APP_DIR/bin/yugabyted" ]; then
   echo "$(curl -Ls "$YB_SHA_URL") *$TBALL" | shasum --check -
   tar xzf "$TBALL"
   rm -f "$TBALL"
-  echo "  → running post_install.sh"
+  echo "  -> running post_install.sh"
   (cd "$APP_DIR" && ./bin/post_install.sh)
 else
-  echo "  → already installed"
+  echo "  -> already installed"
 fi
 
 # 2. Create the data dir + a non-root user for yugabyted (best practice).
@@ -56,7 +56,7 @@ chown -R yugabyte:yugabyte "$DATA_DIR" "$APP_DIR"
 #    first start returns only after the cluster is up — no-op on re-run).
 YUGABYTED="$APP_DIR/bin/yugabyted"
 if su -s /bin/sh yugabyte -c "$YUGABYTED status --base_dir=$DATA_DIR" 2>&1 | grep -q "Running"; then
-  echo "  → yugabyted already running"
+  echo "  -> yugabyted already running"
 else
   JOIN_ARGS=""
   [ -n "$JOIN" ] && JOIN_ARGS="--join=$JOIN"
@@ -76,7 +76,7 @@ else
 fi
 
 # Wait for YSQL to accept connections (the yugabyted start was backgrounded).
-echo "  → waiting for YSQL..."
+echo "  -> waiting for YSQL..."
 YSQLSH="$APP_DIR/bin/ysqlsh"
 for i in $(seq 1 60); do
   if su -s /bin/sh yugabyte -c "$YSQLSH -h ${YB_ADVERTISE:-127.0.0.1} -p 5433 -U yugabyte -d postgres -c 'SELECT 1'" >/dev/null 2>&1; then

@@ -39,7 +39,7 @@ func (b *NixpacksBuilder) Build(dir, name string, reg RegistryConfig) (string, e
 
 	// Check if nixpacks is available
 	if _, err := exec.LookPath("nixpacks"); err != nil {
-		fmt.Println("  → Installing nixpacks...")
+		fmt.Println("  -> Installing nixpacks...")
 		install := exec.CommandContext(context.Background(), "npx", "nixpacks", "--version")
 		install.Stderr = os.Stderr
 		if err := install.Run(); err != nil {
@@ -53,7 +53,7 @@ func (b *NixpacksBuilder) Build(dir, name string, reg RegistryConfig) (string, e
 	}
 
 	// Login to registry
-	fmt.Printf("  → Logging in to %s...\n", reg.Server)
+	fmt.Printf("  -> Logging in to %s...\n", reg.Server)
 	login := exec.CommandContext(context.Background(), "docker")
 	login.Args = append(login.Args, "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
 	login.Stdout = os.Stdout
@@ -62,7 +62,7 @@ func (b *NixpacksBuilder) Build(dir, name string, reg RegistryConfig) (string, e
 		return "", fmt.Errorf("docker login: %w", err)
 	}
 
-	fmt.Printf("  → Building with nixpacks...\n")
+	fmt.Printf("  -> Building with nixpacks...\n")
 	args := []string{"build", dir,
 		"--name", tag,
 		"--tags", tag, versionTag,

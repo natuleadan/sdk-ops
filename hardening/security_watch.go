@@ -39,14 +39,14 @@ OUT_K=$(journalctl -k --since "${WINDOW} minutes ago" --no-pager -o short-iso 2>
 declare -A CNT
 declare -A PORTS
 
-# 1. sshd attempts → port 22
+# 1. sshd attempts -> port 22
 while IFS= read -r ip; do
   [ -z "$ip" ] && continue
   CNT[$ip]=$(( ${CNT[$ip]:-0} + 1 ))
   PORTS[$ip]="${PORTS[$ip]} 22"
 done < <(echo "$OUT_S" | grep -oE 'Failed (password|publickey) for [^ ]+ from [0-9a-fA-F:.]+|Invalid user [^ ]+ from [0-9a-fA-F:.]+' | grep -oE '[0-9a-fA-F:.]+$')
 
-# 2. firewall drops → every other port (kernel log, prefix sdk-drop:)
+# 2. firewall drops -> every other port (kernel log, prefix sdk-drop:)
 while IFS= read -r line; do
   ip=$(echo "$line" | grep -oE 'SRC=[0-9a-fA-F:.]+' | cut -d= -f2)
   dpt=$(echo "$line" | grep -oE 'DPT=[0-9]+' | cut -d= -f2)
@@ -63,7 +63,7 @@ for ip in "${!CNT[@]}"; do TOTAL=$((TOTAL + CNT[$ip])); done
 NUNIQ=${#CNT[@]}
 
 if [ "$NUNIQ" -gt 50 ] || [ "$TOTAL" -gt 100 ]; then
-  notify "⚠️ DDoS $(hostname): $NUNIQ unique IPs, $TOTAL attempts in ${WINDOW}min"
+  notify "[WARN] DDoS $(hostname): $NUNIQ unique IPs, $TOTAL attempts in ${WINDOW}min"
   log "DDoS: $NUNIQ IPs, $TOTAL attempts"
 fi
 

@@ -40,7 +40,7 @@ if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_BUCKET" ] && [ -n "$S3_ACCESS_KEY" ] && [ 
     mc alias set s3 https://$S3_ENDPOINT $S3_ACCESS_KEY $S3_SECRET_KEY --api S3v4 >/dev/null &&
     mc cp /backup/$FNAME s3/$S3_BUCKET/yugabyte/$FNAME
   "
-  echo "  → uploaded to s3://$S3_BUCKET/yugabyte/$FNAME"
+  echo "  -> uploaded to s3://$S3_BUCKET/yugabyte/$FNAME"
   # Retention: list JSON on the host (the mc image has no sed/awk), keep the
   # newest RETENTION, purge the rest.
   docker run --rm --entrypoint sh -v "$(pwd)/$LOCAL_DIR:/backup:ro" minio/mc:latest -c \

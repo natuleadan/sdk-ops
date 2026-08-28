@@ -399,7 +399,7 @@ func runProvision(path, tags string) error {
 		return err
 	}
 
-	fmt.Printf("→ Provisioning %d hosts (mode=%s, parallel=%d)\n", len(hosts), pf.Mode, parallel)
+	fmt.Printf("-> Provisioning %d hosts (mode=%s, parallel=%d)\n", len(hosts), pf.Mode, parallel)
 	results := provisionHosts(pf, hosts, parallel)
 	failed := countProvisionFailures(results)
 	if failed > 0 {
@@ -451,7 +451,7 @@ func ensureTopologyVPS(hosts []ProvisionHost) error {
 				}
 			}
 		}
-		fmt.Printf("→ Creating VPS %s via %s (plan=%s, location=%s)...\n", h.Name, h.Provider, h.Plan, h.Location)
+		fmt.Printf("-> Creating VPS %s via %s (plan=%s, location=%s)...\n", h.Name, h.Provider, h.Plan, h.Location)
 		vps, err := p.CreateVPS(context.Background(), cfg)
 		if err != nil {
 			return fmt.Errorf("host %s create vps: %w", h.Name, err)
@@ -520,7 +520,7 @@ func runDestroy(path string) error {
 		if err != nil {
 			return fmt.Errorf("host %s: %w", h.Name, err)
 		}
-		fmt.Printf("→ Deleting VPS %s (%s)...\n", h.Name, h.Provider)
+		fmt.Printf("-> Deleting VPS %s (%s)...\n", h.Name, h.Provider)
 		if err := deleteProviderVPS(p, h.Name); err != nil {
 			return err
 		}
@@ -696,7 +696,7 @@ func provisionHost(pf ProvisionFile, h ProvisionHost) provisionResult {
 		noTraefik:         pf.NoTraefik,
 		noHardening:       pf.Hardening != nil && !*pf.Hardening,
 	}
-	fmt.Printf("\n━━━ Host %s (%s) [group=%s] ━━━\n", h.Name, h.Host, h.Group)
+	fmt.Printf("\n--- Host %s (%s) [group=%s] ---\n", h.Name, h.Host, h.Group)
 	already := hostAlreadyInitialized(h, &f)
 	if !already {
 		err := runInfraInitSSH(h.Host, f)
@@ -704,7 +704,7 @@ func provisionHost(pf ProvisionFile, h ProvisionHost) provisionResult {
 			return provisionResult{Name: h.Name, Host: h.Host, Error: err}
 		}
 	} else {
-		fmt.Println("  → already initialized, applying phases only")
+		fmt.Println("  -> already initialized, applying phases only")
 	}
 
 	// Swap override per host (when explicitly sized).
@@ -803,7 +803,7 @@ func provisionHosts(pf ProvisionFile, hosts []ProvisionHost, parallel int) []pro
 			}
 		}
 		if len(wave) > 0 {
-			fmt.Printf("→ Deploy wave: %s\n", waveNames(wave))
+			fmt.Printf("-> Deploy wave: %s\n", waveNames(wave))
 			results = append(results, provisionWave(pf, wave, parallel)...)
 		}
 	}
@@ -1158,13 +1158,13 @@ func hasAnyTraefikDomains(pf *ProvisionFile) bool {
 // traefik/security phases after all hosts are initialized.
 func applyProvisionPhases(pf ProvisionFile, names map[string]string) error {
 	if len(pf.Peers) > 0 {
-		fmt.Println("\n→ Configuring peers...")
+		fmt.Println("\n-> Configuring peers...")
 		for _, peer := range pf.Peers {
 			if err := applyProvisionPeer(pf, names, peer); err != nil {
 				return err
 			}
 		}
-		fmt.Println("→ Peers configured")
+		fmt.Println("-> Peers configured")
 	}
 	if len(pf.Bans) > 0 {
 		if err := applyProvisionBans(pf); err != nil {
@@ -1180,7 +1180,7 @@ func applyProvisionPhases(pf ProvisionFile, names map[string]string) error {
 	if err := applyPerHostPhases(pf); err != nil {
 		return err
 	}
-	fmt.Println("→ Host phases applied")
+	fmt.Println("-> Host phases applied")
 	return nil
 }
 
@@ -1228,7 +1228,7 @@ func applyFleetEtcd(pf ProvisionFile) error {
 		if err != nil {
 			return fmt.Errorf("fleet etcd %s: %w", h.Name, err)
 		}
-		fmt.Printf("→ fleet etcd up on %s\n", h.Name)
+		fmt.Printf("-> fleet etcd up on %s\n", h.Name)
 	}
 	return nil
 }
@@ -1539,7 +1539,7 @@ ROUTEREOF
 		if _, _, err := ssh.Run(conn, script); err != nil {
 			return fmt.Errorf("traefik router %s: %w", d.Domain, err)
 		}
-		fmt.Printf("  → %s -> %s on %s\n", d.Domain, target, hostName)
+		fmt.Printf("  -> %s -> %s on %s\n", d.Domain, target, hostName)
 	}
 
 	caServer := "https://acme-v02.api.letsencrypt.org/directory"
@@ -1712,11 +1712,11 @@ func applyProvisionPeer(pf ProvisionFile, names map[string]string, peer Provisio
 	for _, p := range peer.Ports {
 		if f.noHardening {
 			// No firewall in the no-hardening mode — the mesh is open.
-			fmt.Printf("  → %s can reach %s:%d (no firewall)\n", peer.From, peer.To, p)
+			fmt.Printf("  -> %s can reach %s:%d (no firewall)\n", peer.From, peer.To, p)
 			continue
 		}
 		_ = hardening.AllowlistUnexposePort(conn, p)
-		fmt.Printf("  → %s can reach %s:%d\n", peer.From, peer.To, p)
+		fmt.Printf("  -> %s can reach %s:%d\n", peer.From, peer.To, p)
 		if err := hardening.AllowlistExposePort(conn, p, "tcp", hardening.PortScopeIPs, fromIP); err != nil {
 			return fmt.Errorf("peer %s -> %s port %d: %w", peer.From, peer.To, p, err)
 		}
@@ -1726,7 +1726,7 @@ func applyProvisionPeer(pf ProvisionFile, names map[string]string, peer Provisio
 
 // applyProvisionBans bans every explicit IP on every host.
 func applyProvisionBans(pf ProvisionFile) error {
-	fmt.Println("\n→ Applying bans...")
+	fmt.Println("\n-> Applying bans...")
 	for _, h := range pf.Hosts {
 		port := h.Port
 		if port == 0 {
@@ -1739,20 +1739,20 @@ func applyProvisionBans(pf ProvisionFile) error {
 		}
 		defer closeConn(conn)
 		for _, b := range pf.Bans {
-			fmt.Printf("  → banning %s on %s\n", b, h.Name)
+			fmt.Printf("  -> banning %s on %s\n", b, h.Name)
 			if err := hardening.Fail2banBan(conn, b); err != nil {
 				return err
 			}
 		}
 	}
-	fmt.Println("→ Bans applied")
+	fmt.Println("-> Bans applied")
 	return nil
 }
 
 // applyTelegramNotify writes the notify.env used by the allowlist updater to
 // alert on refresh failures via Telegram.
 func applyTelegramNotify(pf ProvisionFile) error {
-	fmt.Println("\n→ Configuring Telegram alerts...")
+	fmt.Println("\n-> Configuring Telegram alerts...")
 	for _, h := range pf.Hosts {
 		port := h.Port
 		if port == 0 {
@@ -1775,10 +1775,10 @@ echo "telegram: %s configured"`, pf.Telegram.APIKey, pf.Telegram.ChatID, h.Name)
 			closeConn(conn)
 			return fmt.Errorf("telegram: %s: %w", h.Name, err)
 		}
-		fmt.Printf("  → telegram alerts on %s\n", h.Name)
+		fmt.Printf("  -> telegram alerts on %s\n", h.Name)
 		closeConn(conn)
 	}
-	fmt.Println("→ Telegram configured")
+	fmt.Println("-> Telegram configured")
 	return nil
 }
 

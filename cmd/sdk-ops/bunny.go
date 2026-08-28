@@ -94,12 +94,12 @@ func newBunnyCmd() *cobra.Command {
 Requires BUNNY_API_KEY environment variable or --api-key flag.
 
 Region aliases:
-  bogota, colombia, latam     → CO (default)
-  miami, usa, us, na          → MI
-  frankfurt, germany, europe  → DE
-  london, uk                  → UK
-  tokyo, japan                → JP
-  singapore                   → SG`,
+  bogota, colombia, latam     -> CO (default)
+  miami, usa, us, na          -> MI
+  frankfurt, germany, europe  -> DE
+  london, uk                  -> UK
+  tokyo, japan                -> JP
+  singapore                   -> SG`,
 	}
 
 	cmd.PersistentFlags().StringVar(&bf.apiKey, "api-key", "", "bunny.net API key (or BUNNY_API_KEY env)")

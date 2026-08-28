@@ -57,14 +57,14 @@ func Apply(client *goss.Client, cfg Config) error {
 	for i, s := range steps {
 		fmt.Printf("  Step %d/%d: %s\n", i+1, len(steps), s.label)
 		if err := s.fn(client, cfg); err != nil {
-			fmt.Printf("  ⚠️  Step %s had issues: %v\n", s.label, err)
-			fmt.Printf("  → Continuing to next step...\n\n")
+			fmt.Printf("  [WARN]  Step %s had issues: %v\n", s.label, err)
+			fmt.Printf("  -> Continuing to next step...\n\n")
 			continue
 		}
 		fmt.Printf("  ✓ %s done\n\n", s.label)
 	}
 
-	fmt.Println("  → Hardening complete!")
+	fmt.Println("  -> Hardening complete!")
 	return nil
 }
 

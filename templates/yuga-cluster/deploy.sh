@@ -30,7 +30,7 @@ helm upgrade --install "$RELEASE" yugabytedb/yugabyte \
   --set "resource.tserver.requests.cpu=0.5,resource.tserver.requests.memory=0.5Gi"
 
 # 3. Wait for the masters to form the quorum (RF=3).
-echo "  → waiting for the yugabyte masters (quorum 2/3)..."
+echo "  -> waiting for the yugabyte masters (quorum 2/3)..."
 kubectl -n "$NAMESPACE" rollout status statefulset/yb-master --timeout=600s || \
   kubectl -n "$NAMESPACE" wait --for=condition=ready pod -l app=yb-master -n "$NAMESPACE" --timeout=600s
 

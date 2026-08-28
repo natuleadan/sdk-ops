@@ -35,7 +35,7 @@ func DeploySwarm(client *goss.Client, name, versionDir, imageRef string) error {
 	if err != nil {
 		return fmt.Errorf("stack deploy: %w\n%s", err, out)
 	}
-	fmt.Printf("  → Swarm stack %q deployed\n", stackName)
+	fmt.Printf("  -> Swarm stack %q deployed\n", stackName)
 	return nil
 }
 
@@ -44,6 +44,6 @@ func RemoveSwarmStack(client *goss.Client, name string) error {
 	if err != nil {
 		return fmt.Errorf("stack rm: %w", err)
 	}
-	fmt.Printf("  → Swarm stack %q removed\n%s", name, out)
+	fmt.Printf("  -> Swarm stack %q removed\n%s", name, out)
 	return nil
 }

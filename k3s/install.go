@@ -44,7 +44,7 @@ func DefaultInstallConfig(publicIP string) InstallConfig {
 }
 
 func Install(client *goss.Client, cfg InstallConfig) error {
-	fmt.Println("  → Installing k3s...")
+	fmt.Println("  -> Installing k3s...")
 
 	installCmd := buildInstallCmd(cfg)
 
@@ -67,7 +67,7 @@ func Install(client *goss.Client, cfg InstallConfig) error {
 
 	postInstallCIS(client, cfg)
 
-	fmt.Println("  → k3s installed successfully!")
+	fmt.Println("  -> k3s installed successfully!")
 	return nil
 }
 
@@ -119,7 +119,7 @@ func buildInstallCmd(cfg InstallConfig) string {
 }
 
 func waitForK3s(client *goss.Client) error {
-	fmt.Println("  → Waiting for k3s to be ready...")
+	fmt.Println("  -> Waiting for k3s to be ready...")
 	waitCmd := `for i in $(seq 1 30); do
   if sudo kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes 2>/dev/null | grep -q Ready; then
     echo "k3s ready"
@@ -137,7 +137,7 @@ exit 1`
 }
 
 func fetchKubeconfig(client *goss.Client, publicIP string) (kubeconfig, token string, err error) {
-	fmt.Println("  → Fetching kubeconfig...")
+	fmt.Println("  -> Fetching kubeconfig...")
 	kubeconfig, _, err = ssh.Run(client, "sudo cat /etc/rancher/k3s/k3s.yaml")
 	if err != nil {
 		return "", "", fmt.Errorf("fetch kubeconfig: %w", err)
@@ -166,15 +166,15 @@ func saveKubeconfig(kubeconfig, token string, cfg InstallConfig) {
 		if err := writeKubeconfig([]byte(kubeconfig)); err != nil {
 			log.Printf("write kubeconfig: %v", err)
 		}
-		fmt.Printf("  → Kubeconfig saved to /tmp/sdk-ops-kubeconfig (context: %s)\n", cfg.Context)
+		fmt.Printf("  -> Kubeconfig saved to /tmp/sdk-ops-kubeconfig (context: %s)\n", cfg.Context)
 	} else {
 		if err := os.WriteFile(filepath.Clean(cfg.LocalPath), []byte(kubeconfig), 0600); err != nil {
 			log.Printf("write kubeconfig: %v", err)
 		}
-		fmt.Printf("  → Kubeconfig saved to %s\n", cfg.LocalPath)
+		fmt.Printf("  -> Kubeconfig saved to %s\n", cfg.LocalPath)
 	}
 
-	fmt.Printf("  → Token: %s", token)
+	fmt.Printf("  -> Token: %s", token)
 }
 
 func postInstallCIS(client *goss.Client, cfg InstallConfig) {
@@ -195,7 +195,7 @@ func postInstallCIS(client *goss.Client, cfg InstallConfig) {
 }
 
 func applyCISPSA(client *goss.Client, kcmd string) {
-	fmt.Println("  → CIS: enforcing Pod Security Admission (restricted)...")
+	fmt.Println("  -> CIS: enforcing Pod Security Admission (restricted)...")
 	script := fmt.Sprintf(`
 %s label --overwrite namespace default pod-security.kubernetes.io/enforce=restricted 2>/dev/null || true
 %s label --overwrite namespace default pod-security.kubernetes.io/audit=restricted 2>/dev/null || true
@@ -204,14 +204,14 @@ echo "psa: OK"
 `, kcmd, kcmd, kcmd)
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
-		fmt.Printf("  ⚠️  PSA label failed: %v\n", err)
+		fmt.Printf("  [WARN]  PSA label failed: %v\n", err)
 	} else {
 		fmt.Print(out)
 	}
 }
 
 func applyCISAuditLog(client *goss.Client, _ string) {
-	fmt.Println("  → CIS: enabling kube-apiserver audit logs...")
+	fmt.Println("  -> CIS: enabling kube-apiserver audit logs...")
 	auditPolicy := `apiVersion: audit.k8s.io/v1
 kind: Policy
 metadata:
@@ -241,14 +241,14 @@ echo "audit-log: OK"
 `, auditPolicy)
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
-		fmt.Printf("  ⚠️  Audit log setup failed: %v\n", err)
+		fmt.Printf("  [WARN]  Audit log setup failed: %v\n", err)
 	} else {
 		fmt.Print(out)
 	}
 }
 
 func applyCISNetPol(client *goss.Client, kcmd string) {
-	fmt.Println("  → CIS: applying default-deny NetworkPolicy...")
+	fmt.Println("  -> CIS: applying default-deny NetworkPolicy...")
 	script := fmt.Sprintf(`
 %s apply -f - << 'EOF'
 apiVersion: networking.k8s.io/v1
@@ -266,21 +266,21 @@ echo "netpol: OK"
 `, kcmd)
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
-		fmt.Printf("  ⚠️  NetworkPolicy apply failed: %v\n", err)
+		fmt.Printf("  [WARN]  NetworkPolicy apply failed: %v\n", err)
 	} else {
 		fmt.Print(out)
 	}
 }
 
 func applyCISSvcAcc(client *goss.Client, kcmd string) {
-	fmt.Println("  → CIS: patching default ServiceAccount...")
+	fmt.Println("  -> CIS: patching default ServiceAccount...")
 	script := fmt.Sprintf(`
 %s patch serviceaccount default -n default -p '{"automountServiceAccountToken": false}' 2>/dev/null || true
 echo "svcacc: OK"
 `, kcmd)
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
-		fmt.Printf("  ⚠️  ServiceAccount patch failed: %v\n", err)
+		fmt.Printf("  [WARN]  ServiceAccount patch failed: %v\n", err)
 	} else {
 		fmt.Print(out)
 	}

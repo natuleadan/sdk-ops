@@ -64,7 +64,7 @@ func newKeyGenerateCmd() *cobra.Command {
 				return fmt.Errorf("ssh-keygen: %w\n%s", err, string(out))
 			}
 
-			fmt.Printf("  ✅ Key pair generated:\n")
+			fmt.Printf("  [OK] Key pair generated:\n")
 			fmt.Printf("     Private: %s\n", privPath)
 			fmt.Printf("     Public:  %s\n", pubPath)
 			return nil
@@ -157,7 +157,7 @@ func newKeyDeployCmd() *cobra.Command {
 				return fmt.Errorf("ssh deploy: %w", err)
 			}
 
-			fmt.Printf("  ✅ Key %q deployed to %s@%s\n", name, sshUser, server)
+			fmt.Printf("  [OK] Key %q deployed to %s@%s\n", name, sshUser, server)
 			return nil
 		},
 	}

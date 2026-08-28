@@ -31,13 +31,13 @@ func newNotifyCmd() *cobra.Command {
 
 			errs := notify.SendAll(nn, title, message)
 			for _, err := range errs {
-				if _, fErr := fmt.Fprintf(cmd.ErrOrStderr(), "  ⚠️  %v\n", err); fErr != nil {
+				if _, fErr := fmt.Fprintf(cmd.ErrOrStderr(), "  [WARN]  %v\n", err); fErr != nil {
 					log.Printf("notify: write error: %v", fErr)
 				}
 			}
 
 			success := len(nn) - len(errs)
-			fmt.Printf("  → Sent to %d/%d notifiers\n", success, len(nn))
+			fmt.Printf("  -> Sent to %d/%d notifiers\n", success, len(nn))
 			return nil
 		},
 	}
@@ -56,13 +56,13 @@ func newNotifyCmd() *cobra.Command {
 
 			errs := notify.SendAll(nn, title, message)
 			for _, err := range errs {
-				if _, fErr := fmt.Fprintf(cmd.ErrOrStderr(), "  ⚠️  %v\n", err); fErr != nil {
+				if _, fErr := fmt.Fprintf(cmd.ErrOrStderr(), "  [WARN]  %v\n", err); fErr != nil {
 					log.Printf("notify: write error: %v", fErr)
 				}
 			}
 
 			success := len(nn) - len(errs)
-			fmt.Printf("  → %d/%d notifiers responded OK\n", success, len(nn))
+			fmt.Printf("  -> %d/%d notifiers responded OK\n", success, len(nn))
 			if len(errs) > 0 {
 				return fmt.Errorf("%d notifier(s) failed", len(errs))
 			}

@@ -51,7 +51,7 @@ tar xzf ... && ./bin/post_install.sh
 |---|---|
 | `bash init.sh` | Download + install + start the yugabyted node (join if `YB_JOIN`) |
 | `bash validate.sh` | yugabyted status + YSQL write/read |
-| `bash backup.sh` | Dump → local + external S3 |
+| `bash backup.sh` | Dump -> local + external S3 |
 | `bash restore.sh [-y]` | Restore from S3 / local |
 
 ## Gotchas

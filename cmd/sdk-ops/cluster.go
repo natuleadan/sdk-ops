@@ -462,7 +462,7 @@ func k3sExec(ip, user, key string, port int, kubectlCmd string) error {
 	// Auto-install k3s if not present
 	k3sOut, _, _ := ssh.Run(conn, "command -v k3s || echo 'no-k3s'")
 	if strings.TrimSpace(k3sOut) == "no-k3s" {
-		fmt.Println("  → k3s not found, installing...")
+		fmt.Println("  -> k3s not found, installing...")
 		installCfg := k3s.DefaultInstallConfig(ip)
 		if err := k3s.Install(conn, installCfg); err != nil {
 			return fmt.Errorf("auto-install k3s: %w", err)
@@ -606,7 +606,7 @@ func runClusterRestart(cmd *cobra.Command) error {
 			fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err)
 		}
 	}()
-	fmt.Println("  → Restarting k3s...")
+	fmt.Println("  -> Restarting k3s...")
 	out, _, err := ssh.Run(conn, "sudo systemctl restart k3s && echo 'k3s restarted'")
 	if err != nil {
 		return fmt.Errorf("restart: %w\n%s", err, out)
@@ -655,7 +655,7 @@ func runClusterUpgrade(version string, cmd *cobra.Command) error {
 		}
 	}()
 
-	fmt.Println("  → Upgrading k3s...")
+	fmt.Println("  -> Upgrading k3s...")
 	installCmd := "curl -sfL https://get.k3s.io | sudo sh -"
 	if version != "" {
 		installCmd = fmt.Sprintf("INSTALL_K3S_VERSION=%s %s", version, installCmd)
@@ -665,7 +665,7 @@ func runClusterUpgrade(version string, cmd *cobra.Command) error {
 		return fmt.Errorf("upgrade: %w\n%s", err, out)
 	}
 	fmt.Print(out)
-	fmt.Println("  → k3s upgraded successfully")
+	fmt.Println("  -> k3s upgraded successfully")
 	return nil
 }
 
@@ -682,7 +682,7 @@ func runClusterEtcdSnapshot(cmd *cobra.Command) error {
 			fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err)
 		}
 	}()
-	fmt.Println("  → Creating etcd snapshot...")
+	fmt.Println("  -> Creating etcd snapshot...")
 	out, _, err := ssh.Run(conn, "sudo k3s etcd-snapshot save && echo 'etcd-snapshot: OK' || echo 'etcd-snapshot: FAIL'")
 	if err != nil {
 		return fmt.Errorf("etcd-snapshot: %w\n%s", err, out)
@@ -704,7 +704,7 @@ func runClusterCertRotate(cmd *cobra.Command) error {
 			fmt.Fprintf(os.Stderr, "cluster: conn close error: %v\n", err)
 		}
 	}()
-	fmt.Println("  → Rotating certificates...")
+	fmt.Println("  -> Rotating certificates...")
 	out, _, err := ssh.Run(conn, "sudo k3s certificate rotate && sudo systemctl restart k3s && echo 'cert-rotate: OK'")
 	if err != nil {
 		return fmt.Errorf("cert-rotate: %w\n%s", err, out)
@@ -740,7 +740,7 @@ func runClusterHelm(kargs string, cmd *cobra.Command) error {
 	// Auto-install helm if not present
 	out, _, _ := ssh.Run(conn, "command -v helm || echo 'no-helm'")
 	if strings.TrimSpace(out) == "no-helm" {
-		fmt.Println("  → Installing helm...")
+		fmt.Println("  -> Installing helm...")
 		installOut, _, err := ssh.Run(conn, `curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | sudo bash 2>&1 | tail -1`)
 		if err != nil {
 			return fmt.Errorf("helm install: %w\n%s", err, installOut)
@@ -788,7 +788,7 @@ func runClusterNodeSSH(nodeName string, cmd *cobra.Command) error {
 	if idx := strings.IndexAny(nodeIP, " \t\n"); idx >= 0 {
 		nodeIP = nodeIP[:idx]
 	}
-	fmt.Printf("  → SSH to %s (%s)...\n", nodeName, nodeIP)
+	fmt.Printf("  -> SSH to %s (%s)...\n", nodeName, nodeIP)
 	fmt.Printf("  ssh %s@%s -p %d -i %s\n", user, nodeIP, port, key)
 
 	// Try SSH into the node directly
@@ -826,7 +826,7 @@ func runClusterPortForward(pod, portMapping, namespace string, cmd *cobra.Comman
 		kargs += fmt.Sprintf(" -n %s", namespace)
 	}
 	fullCmd := fmt.Sprintf("sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl %s", kargs)
-	fmt.Printf("  → Forwarding %s on %s\n", portMapping, ip)
+	fmt.Printf("  -> Forwarding %s on %s\n", portMapping, ip)
 	fmt.Println("  Press Ctrl+C to stop")
 	return ssh.RunPTY(conn, fullCmd)
 }
@@ -845,7 +845,7 @@ func runClusterEtcdRestore(snapshotFile string, cmd *cobra.Command) error {
 		}
 	}()
 
-	fmt.Printf("  → Restoring etcd from %s...\n", snapshotFile)
+	fmt.Printf("  -> Restoring etcd from %s...\n", snapshotFile)
 	script := fmt.Sprintf(`
 sudo systemctl stop k3s
 sudo k3s server --cluster-reset --cluster-reset-restore-path=%s 2>&1

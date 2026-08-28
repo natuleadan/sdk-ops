@@ -44,7 +44,7 @@ func (b *DockerfileBuilder) Build(dir, name string, reg RegistryConfig) (string,
 		binaryName := fmt.Sprintf("sdk-ops-%s-amd64", name)
 		binaryPath := filepath.Join(dir, binaryName)
 
-		fmt.Printf("  → Building Go binary for linux/amd64...\n")
+		fmt.Printf("  -> Building Go binary for linux/amd64...\n")
 		build := exec.CommandContext(context.Background(), "go")
 		build.Args = append(build.Args, "build", "-a", "-o", binaryPath, "-ldflags=-s -w", ".")
 		build.Dir = dir
@@ -77,7 +77,7 @@ CMD ["/app"]
 }
 
 func (b *DockerfileBuilder) buildAndPush(dir, name string, reg RegistryConfig, tag, dockerfilePath string) (string, error) {
-	fmt.Printf("  → Logging in to %s...\n", reg.Server)
+	fmt.Printf("  -> Logging in to %s...\n", reg.Server)
 	login := exec.CommandContext(context.Background(), "docker")
 	login.Args = append(login.Args, "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
 	login.Stdout = os.Stdout
@@ -89,7 +89,7 @@ func (b *DockerfileBuilder) buildAndPush(dir, name string, reg RegistryConfig, t
 	versionTag := fmt.Sprintf("%s/%s:latest", reg.Server, name)
 	buildID := fmt.Sprintf("%d", time.Now().UnixNano())
 
-	fmt.Printf("  → Building + pushing %s...\n", tag)
+	fmt.Printf("  -> Building + pushing %s...\n", tag)
 	push := exec.CommandContext(context.Background(), "docker")
 	push.Args = append(push.Args, "buildx", "build",
 		"--platform", "linux/amd64",

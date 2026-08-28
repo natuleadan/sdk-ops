@@ -6,11 +6,11 @@ Dragonfly cluster (1 primary + 2 replicas) with HAProxy TLS (single entrypoint) 
 
 | Role | Internal port | TLS | Description |
 |------|:------------:|:---:|-------------|
-| **HAProxy** | **6379** | ✅ | **Entrypoint** — round_robin primary + rep-1 + rep-2 |
-| **Primary** | 6379 (int) | ❌ | Read/write, all hash slots |
-| **Replica-1** | 6380 (int) | ❌ | Read-only, follows primary |
-| **Replica-2** | 6381 (int) | ❌ | Read-only, follows primary |
-| **MinIO** | 9000 | ❌ | S3 storage (profile: s3) |
+| **HAProxy** | **6379** | [OK] | **Entrypoint** — round_robin primary + rep-1 + rep-2 |
+| **Primary** | 6379 (int) | [X] | Read/write, all hash slots |
+| **Replica-1** | 6380 (int) | [X] | Read-only, follows primary |
+| **Replica-2** | 6381 (int) | [X] | Read-only, follows primary |
+| **MinIO** | 9000 | [X] | S3 storage (profile: s3) |
 
 ## Quick start
 
@@ -29,7 +29,7 @@ redis-cli --tls --cacert ssl/ca.crt -h <VPS_IP> -p 6379 -a dragonfly
 ## Backups
 
 ```bash
-bash backup.sh              # BGSAVE → local + MinIO
+bash backup.sh              # BGSAVE -> local + MinIO
 bash backup-cron.sh          # daily cron at 3 AM
 ```
 
@@ -49,7 +49,7 @@ bash validate.sh
 ## Test
 
 ```bash
-bash test/test.sh       # PITR cycle: SET → BGSAVE → FLUSHALL → restore → verify
+bash test/test.sh       # PITR cycle: SET -> BGSAVE -> FLUSHALL -> restore -> verify
 ```
 
 ## Env vars
@@ -65,21 +65,21 @@ bash test/test.sh       # PITR cycle: SET → BGSAVE → FLUSHALL → restore �
 ## Architecture
 
 ```
-                          ┌──────────────┐
-                          │   Clients     │
-                          └──────┬───────┘
-                                 │ 6379 (único puerto expuesto)
-                          ┌──────▼───────┐
-                          │   HAProxy      │  round_robin
-                          │   TLS term     │  server primary
-                          │                │  server rep-1
-                          └──┬────────┬────┘  server rep-2
-                             │        │
-                     ┌───────▼──┐ ┌───▼──────┐ ┌───▼──────┐
-                     │ Primary   │ │ Rep-1    │ │ Rep-2    │
-                     │ :6379     │ │ :6380    │ │ :6381    │
-                     │ cluster   │ │ replica  │ │ replica  │
-                     └───────────┘ └──────────┘ └──────────┘
+                          +--------------+
+                          |   Clients     |
+                          +------+-------+
+                                 | 6379 (único puerto expuesto)
+                          +------▼-------+
+                          |   HAProxy      |  round_robin
+                          |   TLS term     |  server primary
+                          |                |  server rep-1
+                          +--+--------+----+  server rep-2
+                             |        |
+                     +-------▼--+ +---▼------+ +---▼------+
+                     | Primary   | | Rep-1    | | Rep-2    |
+                     | :6379     | | :6380    | | :6381    |
+                     | cluster   | | replica  | | replica  |
+                     +-----------+ +----------+ +----------+
 ```
 
 ## Files
@@ -89,7 +89,7 @@ bash test/test.sh       # PITR cycle: SET → BGSAVE → FLUSHALL → restore �
 | `docker-compose.yml` | Dragonfly primary + 2 replicas + HAProxy + MinIO |
 | `init.sh` | SSL + start + REPLICAOF + DFLYCLUSTER CONFIG |
 | `validate.sh` | Health check (PING, role, replication, TLS via HAProxy) |
-| `backup.sh` | BGSAVE → local dir + S3 (MinIO) |
+| `backup.sh` | BGSAVE -> local dir + S3 (MinIO) |
 | `restore.sh` | Restore from .dfs snapshot (--yes flag, dir/file modes) |
 | `backup-cron.sh` | Daily backup cron |
 | `haproxy.cfg` | Round-robin TLS termination |

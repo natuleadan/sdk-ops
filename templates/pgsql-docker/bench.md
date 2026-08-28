@@ -25,7 +25,7 @@ All benchmarks run **inside** the Docker container (same network, no network lat
 |-------------|:---:|:---:|------|
 | **Mac baremetal** | 10c ARM (Apple Silicon) | 32GB | Local Docker (Postgres directo) |
 | **4c x86_64 VPS** | 4c high-frequency x86_64 | 8GB | Dedicated VPS (Postgres directo) |
-| **4c x86_64 VPS via PgDog** | Same VPS + PgDog proxy | 8GB | VPS Docker (PgDog → Postgres) |
+| **4c x86_64 VPS via PgDog** | Same VPS + PgDog proxy | 8GB | VPS Docker (PgDog -> Postgres) |
 
 ## Results
 

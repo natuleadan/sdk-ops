@@ -25,32 +25,32 @@ as the `AccessKey` header (fetched automatically by the CLI).
 
 ```
 bunny/
-├── client.go           # HTTP client with AccessKey auth (GET/POST/PUT/PATCH/DELETE)
-├── types.go            # All shared type definitions (800+ lines)
-├── dns.go              # DNS zone and record management + geo-routing
-├── pullzone.go         # CDN Pull Zones + edge rules + hostnames + cache purge
-├── mc_app.go           # Magic Containers app CRUD + deploy/undeploy/restart
-├── mc_container.go     # Container templates, env vars, image config
-├── mc_deploy.go        # Deploy flow: image registry auto-detect + CDN/Anycast
-├── mc_endpoint.go      # Endpoints (CDN + Anycast)
-├── mc_region.go        # Regions, autoscaling, nodes
-├── mc_registry.go      # Container registries (Docker Hub, GHCR)
-├── mc_volume.go        # Persistent volumes, log forwarding
-├── storage.go          # Edge Storage zones + file upload/download/list/delete
-├── stream.go           # Stream video libraries + video CRUD + fetch
-├── shield.go           # Shield WAF zones + rate limits + bot detection
-├── edgescript.go       # Edge Scripting (23 endpoints)
-├── logging.go          # CDN logging query (v2 API)
-├── origin_errors.go    # Origin error log retrieval
-└── spec/               # 8 OpenAPI JSON specs downloaded
-    ├── core.json       # Core Platform API
-    ├── mc.json         # Magic Containers API
-    ├── compute.json    # Edge Scripting API
-    ├── shield.json     # Shield WAF API
-    ├── stream.json     # Stream Video API
-    ├── storage.json    # Edge Storage API
-    ├── logging.json    # CDN Logging API
-    └── origin-errors.json # Origin Errors API
++-- client.go           # HTTP client with AccessKey auth (GET/POST/PUT/PATCH/DELETE)
++-- types.go            # All shared type definitions (800+ lines)
++-- dns.go              # DNS zone and record management + geo-routing
++-- pullzone.go         # CDN Pull Zones + edge rules + hostnames + cache purge
++-- mc_app.go           # Magic Containers app CRUD + deploy/undeploy/restart
++-- mc_container.go     # Container templates, env vars, image config
++-- mc_deploy.go        # Deploy flow: image registry auto-detect + CDN/Anycast
++-- mc_endpoint.go      # Endpoints (CDN + Anycast)
++-- mc_region.go        # Regions, autoscaling, nodes
++-- mc_registry.go      # Container registries (Docker Hub, GHCR)
++-- mc_volume.go        # Persistent volumes, log forwarding
++-- storage.go          # Edge Storage zones + file upload/download/list/delete
++-- stream.go           # Stream video libraries + video CRUD + fetch
++-- shield.go           # Shield WAF zones + rate limits + bot detection
++-- edgescript.go       # Edge Scripting (23 endpoints)
++-- logging.go          # CDN logging query (v2 API)
++-- origin_errors.go    # Origin error log retrieval
++-- spec/               # 8 OpenAPI JSON specs downloaded
+    +-- core.json       # Core Platform API
+    +-- mc.json         # Magic Containers API
+    +-- compute.json    # Edge Scripting API
+    +-- shield.json     # Shield WAF API
+    +-- stream.json     # Stream Video API
+    +-- storage.json    # Edge Storage API
+    +-- logging.json    # CDN Logging API
+    +-- origin-errors.json # Origin Errors API
 ```
 
 ## Services
@@ -71,9 +71,9 @@ Deploy containerized applications globally on Bunny's edge network.
 | `sdk-ops bunny app delete <id>` | Delete an app |
 | `sdk-ops bunny app endpoint add-anycast <id> -p <port>` | Add Anycast IP endpoint |
 
-Region aliases: `bogota`/`latam` → CO, `miami`/`usa` → MI, `frankfurt`/`europe` → DE
+Region aliases: `bogota`/`latam` -> CO, `miami`/`usa` -> MI, `frankfurt`/`europe` -> DE
 
-Registry auto-detection: `ghcr.io/*` → GHCR (ID 1156), others → Docker Hub (ID 1155).
+Registry auto-detection: `ghcr.io/*` -> GHCR (ID 1156), others -> Docker Hub (ID 1155).
 Override with `--registry-id`.
 
 **Private images:** use `--digest sha256:...` to skip image digest lookup (required for

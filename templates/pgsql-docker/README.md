@@ -6,11 +6,11 @@ PostgreSQL 18 + 2 streaming replicas + PgDog connection pooler (read/write split
 
 | Role | Port | TLS | Description |
 |------|:----:|:---:|-------------|
-| **PgDog** | **6432** | ✅ | **Entrypoint** — LB round_robin, exclude_primary, role=auto |
-| **PostgreSQL (primary)** | 5432 (internal) | ✅ | WAL archiving, pgbackrest |
-| **PostgreSQL (replica-1)** | 5433 (internal) | ✅ | Streaming standby, hot standby |
-| **PostgreSQL (replica-2)** | 5434 (internal) | ✅ | Streaming standby, hot standby |
-| **MinIO** | 9000/9001 | ❌ | S3 storage (`--profile s3`) |
+| **PgDog** | **6432** | [OK] | **Entrypoint** — LB round_robin, exclude_primary, role=auto |
+| **PostgreSQL (primary)** | 5432 (internal) | [OK] | WAL archiving, pgbackrest |
+| **PostgreSQL (replica-1)** | 5433 (internal) | [OK] | Streaming standby, hot standby |
+| **PostgreSQL (replica-2)** | 5434 (internal) | [OK] | Streaming standby, hot standby |
+| **MinIO** | 9000/9001 | [X] | S3 storage (`--profile s3`) |
 
 ## Quick start
 
@@ -49,7 +49,7 @@ bash validate.sh
 ## Test
 
 ```bash
-bash test/test.sh       # PITR cycle: backup → disaster → restore → verify
+bash test/test.sh       # PITR cycle: backup -> disaster -> restore -> verify
 ```
 
 ## Env vars
@@ -73,27 +73,27 @@ bash test/test.sh       # PITR cycle: backup → disaster → restore → verify
 ## Architecture
 
 ```
-                    ┌──────────────┐
-                    │   Clients     │
-                    └──────┬───────┘
-                           │ 6432 (único puerto expuesto)
-                    ┌──────▼───────┐
-                    │   PgDog      │  LB round_robin
-                    │  role=auto   │  exclude_primary
-                    │  repl check  │  lsn_check_interval=1s
-                    └──┬────────┬──┘
-                       │        │          ┌───────────┐
-                ┌──────▼──┐ ┌──▼────┐ ┌────▼──────────┐
-                │ Primary  │ │ Rep-1 │ │ Rep-2        │
-                │ :5432    │ │:5433  │ │ :5434        │
-                │ pgbackrest│ │stream │ │ stream      │
-                └────┬─────┘ └───────┘ └──────────────┘
-                     │
-              ┌──────▼──────┐
-              │ pgbackrest   │
-              │ repo (local  │
-              │ or S3/MinIO) │
-              └─────────────┘
+                    +--------------+
+                    |   Clients     |
+                    +------+-------+
+                           | 6432 (único puerto expuesto)
+                    +------▼-------+
+                    |   PgDog      |  LB round_robin
+                    |  role=auto   |  exclude_primary
+                    |  repl check  |  lsn_check_interval=1s
+                    +--+--------+--+
+                       |        |          +-----------+
+                +------▼--+ +--▼----+ +----▼----------+
+                | Primary  | | Rep-1 | | Rep-2        |
+                | :5432    | |:5433  | | :5434        |
+                | pgbackrest| |stream | | stream      |
+                +----+-----+ +-------+ +--------------+
+                     |
+              +------▼------+
+              | pgbackrest   |
+              | repo (local  |
+              | or S3/MinIO) |
+              +-------------+
 ```
 
 ## Files
@@ -102,7 +102,7 @@ bash test/test.sh       # PITR cycle: backup → disaster → restore → verify
 |------|---------|
 | `docker-compose.yml` | Primary + replica + PgDog + MinIO (profile: s3) |
 | `service.yaml` | Metadata for deploy |
-| `init.sh` | SSL → primary → replicator → stanza → replica → PgDog |
+| `init.sh` | SSL -> primary -> replicator -> stanza -> replica -> PgDog |
 | `validate.sh` | Health checks (primary, replica, PgDog, streaming, pgbackrest) |
 | `backup.sh` | pgbackrest full backup (docker exec) |
 | `restore.sh` | Restore latest/full/PITR via temp container |

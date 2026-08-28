@@ -25,7 +25,7 @@ sdk-ops apply fleet.yaml --check    # dry-run: parse + render, no changes
 
 | Role | Port | TLS | Description |
 |------|:----:|:---:|-------------|
-| **Router** | **8443** | Yes | **Entrypoint** — writes → primary, reads → replicas (round-robin) |
+| **Router** | **8443** | Yes | **Entrypoint** — writes -> primary, reads -> replicas (round-robin) |
 | **Controller** | **9090** | No | Leader election (etcd), automatic failover + rejoin |
 | **etcd** | 2379 (int) | No | DCS — stores leader state with epoch fencing |
 | **sqld-primary** | 8080 (int) | No | Read/write, gRPC :5001 |
@@ -67,14 +67,14 @@ directory and uploads to S3-compatible storage with retention:
 # Set S3 credentials (never in the repo)
 export S3_ENDPOINT=... S3_BUCKET=... S3_ACCESS_KEY=... S3_SECRET_KEY=...
 
-bash backup-s3.sh                 # snapshot → upload → retention (keep 7)
+bash backup-s3.sh                 # snapshot -> upload -> retention (keep 7)
 bash restore-s3.sh                # restore latest from S3 (interactive)
 bash restore-s3.sh --yes libsql-2026-08-27-102242.tar.gz   # specific backup
 ```
 
 Restore semantics: the snapshot returns the data **as of the backup moment** —
 writes after the backup are not replayed (clean point-in-time). The
-`test/test.sh` PITR cycle verifies exactly this (3 rows pre-backup → restore →
+`test/test.sh` PITR cycle verifies exactly this (3 rows pre-backup -> restore ->
 exactly 3 rows).
 
 `init.sh` also auto-restores from S3 on a fresh node when the data volume is
@@ -84,10 +84,10 @@ empty (idempotent DR: re-applying an existing node skips it).
 
 | Command | What |
 |---|---|
-| `bash init.sh` | TLS → etcd → (DR restore if empty) → sqld ×3 → controller/router → schema |
+| `bash init.sh` | TLS -> etcd -> (DR restore if empty) -> sqld x3 -> controller/router -> schema |
 | `bash validate.sh` | etcd, controller, leader, 3× sqld health+SQL, router TLS, replication, 3-node |
 | `bash backup.sh` | Local `data.sqld` tar.gz snapshot |
-| `bash backup-s3.sh` | Snapshot → S3 upload → retention |
+| `bash backup-s3.sh` | Snapshot -> S3 upload -> retention |
 | `bash restore-s3.sh [-y] [backup]` | Download from S3 + restore (full data dir) |
 | `bash test/test.sh` | PITR cycle + failover + S3 + router routing (14 steps) |
 | `bash backup-cron.sh` | Install a daily backup cron |

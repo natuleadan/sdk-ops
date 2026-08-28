@@ -92,7 +92,7 @@ echo "Generating $OUTPUT ..."
 
     # If still Unknown and no override, fail the build
     if [ "$license_type" = "Unknown" ]; then
-      echo "❌ Unknown license for $pkg — add override to resolve_override() in scripts/generate-third-party.sh" >&2
+      echo "[X] Unknown license for $pkg — add override to resolve_override() in scripts/generate-third-party.sh" >&2
       exit 1
     fi
 

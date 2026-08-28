@@ -132,13 +132,13 @@ echo "Traefik certificate configured for %s"
 	// The cert-manager operator must be present — install it once if missing.
 	crdOut, _, _ := ssh.Run(client, "kubectl get crd certificates.cert-manager.io 2>/dev/null || echo missing")
 	if strings.Contains(crdOut, "missing") {
-		fmt.Println("  → Installing cert-manager (the operator)...")
+		fmt.Println("  -> Installing cert-manager (the operator)...")
 		_, _, _ = ssh.Run(client, "kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.3/cert-manager.yaml")
 		time.Sleep(20 * time.Second)
 	}
 	checkIssuer, _, _ := ssh.Run(client, "kubectl get clusterissuer letsencrypt-prod 2>/dev/null || echo 'missing'")
 	if strings.Contains(checkIssuer, "missing") {
-		fmt.Println("  → Creating Let's Encrypt ClusterIssuer for Traefik...")
+		fmt.Println("  -> Creating Let's Encrypt ClusterIssuer for Traefik...")
 		issuerScript := fmt.Sprintf(`
 cat << 'EOF' | kubectl apply -f -
 apiVersion: cert-manager.io/v1
@@ -191,7 +191,7 @@ func installCertManual(client *goss.Client, cfg CertConfig) error {
 		return fmt.Errorf("upload key: %w", err)
 	}
 
-	fmt.Printf("  → Manual cert installed for %s\n", cfg.Domain)
+	fmt.Printf("  -> Manual cert installed for %s\n", cfg.Domain)
 	return nil
 }
 
@@ -219,14 +219,14 @@ func uploadCertFile(client *goss.Client, data []byte, remotePath string) error {
 }
 
 func installCertCloudflare(client *goss.Client, cfg CertConfig) error {
-	fmt.Println("  → Cloudflare Origin CA: domain uses Cloudflare proxy")
-	fmt.Println("  → Install Cloudflare Origin Certificate manually via CF dashboard")
-	fmt.Println("  → Or use --provider letsencrypt for automatic cert")
+	fmt.Println("  -> Cloudflare Origin CA: domain uses Cloudflare proxy")
+	fmt.Println("  -> Install Cloudflare Origin Certificate manually via CF dashboard")
+	fmt.Println("  -> Or use --provider letsencrypt for automatic cert")
 
 	if cfg.Runtime == "k3s" || cfg.Runtime == "" {
 		script := `
 kubectl annotate ingress --all kubernetes.io/ingress.class=traefik 2>/dev/null || true
-echo "  → Marked ingresses for Traefik with Cloudflare proxy"
+echo "  -> Marked ingresses for Traefik with Cloudflare proxy"
 `
 		out, _, err := ssh.Run(client, script)
 		if err != nil {

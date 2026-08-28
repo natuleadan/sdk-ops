@@ -15,15 +15,15 @@ sdk-ops apply fleet.yaml
 
 ```
                  Clients
-                    │
-           ┌────────┴─────────┐
-           │ yugabyte-0 (EP)  │   YSQL :5433 · YCQL :9042 · UI :7000/9000
-           └────────┬─────────┘
-        ┌───────────┼───────────┐
+                    |
+           +--------+---------+
+           | yugabyte-0 (EP)  |   YSQL :5433 · YCQL :9042 · UI :7000/9000
+           +--------+---------+
+        +-----------+-----------+
         ▼           ▼           ▼
    yugabyte-0    yugabyte-1   yugabyte-2   (each = master + tserver, RF=3)
-        └───────────┼───────────┘
-                    │
+        +-----------+-----------+
+                    |
                  docker network (advertise_address = service name)
 ```
 
@@ -38,7 +38,7 @@ pattern the `pg`/`nats` templates use for inter-node mesh.
 |---|---|
 | `bash init.sh` | Start the 3 nodes, wait for quorum, create the app DB/user |
 | `bash validate.sh` | Health + YSQL/YCQL write/read + replication + quorum |
-| `bash backup.sh` | Logical dump (`pg_dump`) → local + S3 (retention) |
+| `bash backup.sh` | Logical dump (`pg_dump`) -> local + S3 (retention) |
 | `bash restore.sh [-y]` | Restore the latest dump from S3 / local |
 | `bash test/test.sh` | Integration: write/read, replication, failover, DR cycle |
 

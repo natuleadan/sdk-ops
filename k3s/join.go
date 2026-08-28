@@ -19,7 +19,7 @@ type JoinConfig struct {
 }
 
 func Join(agentClient, serverClient *goss.Client, cfg JoinConfig) error {
-	fmt.Printf("  → Joining agent to server %s...\n", cfg.ServerIP)
+	fmt.Printf("  -> Joining agent to server %s...\n", cfg.ServerIP)
 
 	// Get token from server if not provided
 	token := cfg.Token
@@ -52,6 +52,6 @@ func Join(agentClient, serverClient *goss.Client, cfg JoinConfig) error {
 	}
 	fmt.Print(out)
 
-	fmt.Println("  → Agent joined successfully!")
+	fmt.Println("  -> Agent joined successfully!")
 	return nil
 }

@@ -85,7 +85,7 @@ func (c *Client) CreateVPS(ctx context.Context, cfg providers.VPSCreateConfig) (
 		if err == nil && current.Status == "active" {
 			vps.IP = current.IP
 			vps.Status = current.Status
-			fmt.Printf("  ✅ VPS %s is active @ %s\n", vps.ID, vps.IP)
+			fmt.Printf("  [OK] VPS %s is active @ %s\n", vps.ID, vps.IP)
 			break
 		}
 		if i%6 == 0 {

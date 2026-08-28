@@ -95,7 +95,7 @@ func DeployK3s(client *goss.Client, name, imageRef, domain string, port int) err
 	if err != nil {
 		return fmt.Errorf("k3s deploy: %w\n%s", err, string(out))
 	}
-	fmt.Printf("  → Applied k3s manifests for %s\n", name)
+	fmt.Printf("  -> Applied k3s manifests for %s\n", name)
 	return nil
 }
 

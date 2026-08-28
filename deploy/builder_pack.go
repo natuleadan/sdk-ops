@@ -39,7 +39,7 @@ func (b *PackBuilder) Build(dir, name string, reg RegistryConfig) (string, error
 	}
 
 	// Login to registry
-	fmt.Printf("  → Logging in to %s...\n", reg.Server)
+	fmt.Printf("  -> Logging in to %s...\n", reg.Server)
 	login := exec.CommandContext(context.Background(), "docker")
 	login.Args = append(login.Args, "login", reg.Server, "-u", reg.Username, "-p", reg.Password)
 	login.Stdout = os.Stdout
@@ -48,7 +48,7 @@ func (b *PackBuilder) Build(dir, name string, reg RegistryConfig) (string, error
 		return "", fmt.Errorf("docker login: %w", err)
 	}
 
-	fmt.Printf("  → Building with pack (CNB)...\n")
+	fmt.Printf("  -> Building with pack (CNB)...\n")
 	args := []string{"build", tag,
 		"--builder", "heroku/builder:24",
 		"--platform", "linux/amd64",

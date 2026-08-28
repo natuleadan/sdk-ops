@@ -478,7 +478,7 @@ sdk-ops certs remove --node <ip>                                  # uninstall ti
 sdk-ops certs import --domain example.com --cert-file c.pem --key-file k.pem --node <ip>
 ```
 
-- `issue` writes a Traefik router (`Host(example.com)` → the `notfound` 404
+- `issue` writes a Traefik router (`Host(example.com)` -> the `notfound` 404
   service, `certResolver: letsencrypt` on websecure) so Traefik issues the
   certificate, cross-compiles + uploads the sync worker (`/opt/sdk-ops/certs/sdk-ops`),
   installs the daily systemd timer and syncs the first certificate.

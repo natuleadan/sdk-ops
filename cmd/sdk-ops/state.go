@@ -155,7 +155,7 @@ func newStateShowCmd() *cobra.Command {
 			}
 
 			fmt.Printf("  %s  %-20s %-15s %-10s %-10s  %s\n", colorBold, "NAME", "NODE", "TYPE", "STATUS", "VERSION")
-			fmt.Println(strings.Repeat("  ", 1) + strings.Repeat("─", 75))
+			fmt.Println(strings.Repeat("  ", 1) + strings.Repeat("-", 75))
 			for _, r := range rows {
 				statusColor := colorGreen
 				switch r.Status {

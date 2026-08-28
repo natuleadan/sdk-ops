@@ -200,7 +200,7 @@
           {
             "name": "includeOriginShield",
             "in": "query",
-            "description": "Include origin-shield (edge → shield) requests. Defaults to `false` to match v1.",
+            "description": "Include origin-shield (edge -> shield) requests. Defaults to `false` to match v1.",
             "schema": {
               "type": "boolean"
             }

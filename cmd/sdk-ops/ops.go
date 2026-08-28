@@ -254,7 +254,7 @@ func newOpsApplyCmd(f *infraFlags, of *opsFlags) *cobra.Command {
 			}
 			table := opsComponents()
 			for _, h := range hosts {
-				fmt.Printf("\n━━━ %s (%s) ━━━\n", h.Name, h.Host)
+				fmt.Printf("\n--- %s (%s) ---\n", h.Name, h.Host)
 				conn, err := opsConnect(h, *f)
 				if err != nil {
 					fmt.Printf("  ✗ connect: %v\n", err)

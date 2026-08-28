@@ -217,7 +217,7 @@ func statusRenderAll(c *cobra.Command, nodes []nodeWork, results []statusResult)
 	for _, r := range results {
 		totalServices += len(r.services)
 
-		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s━━━ %s ━━━%s\n", colorCyan, r.ip, colorReset); err != nil {
+		if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s--- %s ---%s\n", colorCyan, r.ip, colorReset); err != nil {
 			log.Printf("status: write error: %v", err)
 		}
 		if r.err != nil {
@@ -377,7 +377,7 @@ func statusClassifyNode(r statusResult) (crit, warn bool) {
 }
 
 func statusRenderSummary(c *cobra.Command, nodes []nodeWork, totalServices, healthyNodes, warnNodes, criticalNodes int) {
-	if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s━━━ Summary ━━━%s\n", colorBold, colorReset); err != nil {
+	if _, err := fmt.Fprintf(c.OutOrStdout(), "  %s--- Summary ---%s\n", colorBold, colorReset); err != nil {
 		log.Printf("status: write error: %v", err)
 	}
 	if _, err := fmt.Fprintf(c.OutOrStdout(), "  Nodes:    %d total\n", len(nodes)); err != nil {

@@ -25,7 +25,7 @@ func Run(client *goss.Client, phase string, vars map[string]string) error {
 	scripts := strings.FieldsSeq(strings.TrimSpace(out))
 	for script := range scripts {
 		name := filepath.Base(script)
-		fmt.Printf("  → Hook [%s] running %s...\n", phase, name)
+		fmt.Printf("  -> Hook [%s] running %s...\n", phase, name)
 
 		// Build env vars
 		var envVars strings.Builder
@@ -98,6 +98,6 @@ func InstallHook(client *goss.Client, name, phase string, content []byte) error 
 	if out, err := sess.CombinedOutput(uploadCmd); err != nil {
 		return fmt.Errorf("upload hook: %w\n%s", err, string(out))
 	}
-	fmt.Printf("  → Hook %s/%s installed\n", phase, name)
+	fmt.Printf("  -> Hook %s/%s installed\n", phase, name)
 	return nil
 }

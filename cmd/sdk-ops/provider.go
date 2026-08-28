@@ -610,7 +610,7 @@ func newProviderLBListenerCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("[%s] :%d → :%d\n", listener.ID, listener.Port, listener.TargetPort)
+			fmt.Printf("[%s] :%d -> :%d\n", listener.ID, listener.Port, listener.TargetPort)
 			return nil
 		},
 	}
@@ -703,7 +703,7 @@ func newProviderLBTargetCmd() *cobra.Command {
 				return err
 			}
 			for _, t := range tgts {
-				fmt.Printf("[%s] %s → %s:%d (%s)\n", t.ID, t.Type, t.TargetID, t.Port, t.Status)
+				fmt.Printf("[%s] %s -> %s:%d (%s)\n", t.ID, t.Type, t.TargetID, t.Port, t.Status)
 			}
 			return nil
 		},

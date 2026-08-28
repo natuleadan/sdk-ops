@@ -9,7 +9,7 @@ import (
 )
 
 func installPackages(client *goss.Client, cfg Config) error {
-	fmt.Println("  → Installing packages (nftables, fail2ban, htop)...")
+	fmt.Println("  -> Installing packages (nftables, fail2ban, htop)...")
 
 	script := `
 for i in $(seq 1 30); do
@@ -38,7 +38,7 @@ fi
 `
 	}
 
-	fmt.Printf("  → Creating user %s...\n", cfg.User)
+	fmt.Printf("  -> Creating user %s...\n", cfg.User)
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
 		return fmt.Errorf("create user: %w\n%s", err, out)
@@ -48,7 +48,7 @@ fi
 }
 
 func kernelTuning(client *goss.Client, cfg Config) error {
-	fmt.Println("  → Kernel tuning (sysctl)...")
+	fmt.Println("  -> Kernel tuning (sysctl)...")
 	// Idempotent: only append keys that are not already present.
 	script := `
 for kv in \
@@ -105,7 +105,7 @@ UP
 echo "unattended-upgrades: OK"
 `, sshPort)
 
-	fmt.Println("  → fail2ban + unattended-upgrades...")
+	fmt.Println("  -> fail2ban + unattended-upgrades...")
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
 		return fmt.Errorf("fail2ban: %w", err)
@@ -154,7 +154,7 @@ else
 fi
 `
 
-	fmt.Printf("  → SSH hardening (keep port 22, no password auth)...\n")
+	fmt.Printf("  -> SSH hardening (keep port 22, no password auth)...\n")
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
 		return fmt.Errorf("ssh: %w", err)
@@ -167,12 +167,12 @@ fi
 // Rule (bottom-up): 0.5x RAM base (always), +0.5x RAM per 10GB of free disk,
 // capped at 2x RAM. Existing swapfiles are resized to the computed size.
 func setupSwap(client *goss.Client, cfg Config) error {
-	fmt.Println("  → Swap setup (0.5x base, +0.5x per 10GB free, cap 2x)...")
+	fmt.Println("  -> Swap setup (0.5x base, +0.5x per 10GB free, cap 2x)...")
 	return ApplySwap(client)
 }
 
 func removeUnusedServices(client *goss.Client, cfg Config) error {
-	fmt.Println("  → Removing unused services (telnet, ftp, rsh, rpcbind, avahi, cups)...")
+	fmt.Println("  -> Removing unused services (telnet, ftp, rsh, rpcbind, avahi, cups)...")
 	script := `
 for svc in telnet ftp rsh rpcbind avahi-daemon cups; do
     sudo systemctl disable --now "$svc" 2>/dev/null || true
@@ -218,7 +218,7 @@ NFT
 sudo systemctl enable nftables && sudo systemctl restart nftables && echo "nftables: OK (ports %s)"
 `, openPorts, openPorts)
 
-	fmt.Println("  → nftables (locking down ports)...")
+	fmt.Println("  -> nftables (locking down ports)...")
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
 		return fmt.Errorf("nftables: %w", err)
@@ -229,10 +229,10 @@ sudo systemctl enable nftables && sudo systemctl restart nftables && echo "nftab
 
 func installAuditd(client *goss.Client, cfg Config) error {
 	if !cfg.EnableAuditd {
-		fmt.Println("  → Skipping auditd (not enabled)")
+		fmt.Println("  -> Skipping auditd (not enabled)")
 		return nil
 	}
-	fmt.Println("  → Installing auditd...")
+	fmt.Println("  -> Installing auditd...")
 	script := `
 if ! command -v auditd &>/dev/null; then
     sudo apt-get install -y -qq auditd audispd-plugins 2>&1 | tail -1
@@ -246,10 +246,10 @@ echo "auditd: OK"
 
 func installLynis(client *goss.Client, cfg Config) error {
 	if !cfg.EnableLynis {
-		fmt.Println("  → Skipping Lynis (not enabled)")
+		fmt.Println("  -> Skipping Lynis (not enabled)")
 		return nil
 	}
-	fmt.Println("  → Installing Lynis security auditor...")
+	fmt.Println("  -> Installing Lynis security auditor...")
 	script := `
 if ! command -v lynis &>/dev/null; then
     sudo apt-get install -y -qq lynis 2>&1 | tail -1
@@ -261,10 +261,10 @@ echo "lynis: OK"
 
 func installUSG(client *goss.Client, cfg Config) error {
 	if !cfg.EnableUSG {
-		fmt.Println("  → Skipping Ubuntu Security Guide (not enabled)")
+		fmt.Println("  -> Skipping Ubuntu Security Guide (not enabled)")
 		return nil
 	}
-	fmt.Println("  → Installing Ubuntu Security Guide...")
+	fmt.Println("  -> Installing Ubuntu Security Guide...")
 	script := `
 if ! command -v usg &>/dev/null; then
     sudo apt-get install -y -qq ubuntu-advantage-tools 2>&1 | tail -1
@@ -278,11 +278,11 @@ echo "usg: OK"
 
 func installNodeExporter(client *goss.Client, cfg Config) error {
 	if !cfg.EnableMonitor {
-		fmt.Println("  → Skipping node_exporter (not enabled)")
+		fmt.Println("  -> Skipping node_exporter (not enabled)")
 		return nil
 	}
 
-	fmt.Println("  → Installing node_exporter...")
+	fmt.Println("  -> Installing node_exporter...")
 	script := `
 NODE_EXPORTER_VER="1.8.2"
 if command -v node_exporter &>/dev/null; then

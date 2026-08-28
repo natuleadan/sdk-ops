@@ -63,7 +63,7 @@ over Docker network.
 ## Notes
 
 - **INSERT is not comparable across environments**: Mac Docker Desktop uses
-  `virtiofs` storage driver (writes go through VM → macOS APFS), while Linux
+  `virtiofs` storage driver (writes go through VM -> macOS APFS), while Linux
   uses native `overlay2`. SQLite WAL fsync is significantly slower on Mac
   Docker. The VPS number represents true sqld write throughput.
 - **SELECT is CPU-bound** and comparable (~2-3k rps on both). The raw CPU

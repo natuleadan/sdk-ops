@@ -802,7 +802,7 @@ func runProvisionCheck(path, tags string) error {
 		}
 	}
 	if missing := missingEnvSecrets(); len(missing) > 0 {
-		fmt.Printf("[check] ⚠ env vars NOT set (deploy would fail): %s\n", strings.Join(missing, ", "))
+		fmt.Printf("[check] [WARN] env vars NOT set (deploy would fail): %s\n", strings.Join(missing, ", "))
 	} else {
 		fmt.Println("[check] env secrets: OK")
 	}
@@ -813,7 +813,7 @@ func runProvisionCheck(path, tags string) error {
 		for _, h := range hosts {
 			hasV6 := strings.Contains(h.Host, ":") || strings.Contains(h.PeerIP, ":")
 			if !hasV6 {
-				fmt.Printf("[check] ⚠ %s has no IPv6 (%s) — the docker-mode install (docker, images, S3) needs a public route (IPv6 or a NAT egress); without it the deploy fails at the install step\n", h.Name, h.Host)
+				fmt.Printf("[check] [WARN] %s has no IPv6 (%s) — the docker-mode install (docker, images, S3) needs a public route (IPv6 or a NAT egress); without it the deploy fails at the install step\n", h.Name, h.Host)
 			}
 		}
 	}

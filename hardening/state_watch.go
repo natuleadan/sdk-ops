@@ -167,17 +167,17 @@ if [ -x "$ALLOWLIST" ] && sudo "$ALLOWLIST" >/dev/null 2>&1; then
   if [ $((NOW - LAST)) -lt "$COOLDOWN" ]; then
     log "repair done but notify suppressed (cooldown): $STILL"
   elif [ -z "$STILL" ]; then
-    notify "🛡️ $(hostname): allowlist repaired — $REASON"
+    notify "[OK] $(hostname): allowlist repaired — $REASON"
     log "repaired: re-ran allowlist.sh ($REASON)"
     echo "$HASH $NOW" | sudo tee -a "$NOTIFY_STATE" > /dev/null 2>&1 || true
   else
-    notify "🚨 $(hostname): allowlist repair incomplete — $STILL"
+    notify "[ALERT] $(hostname): allowlist repair incomplete — $STILL"
     log "repair INCOMPLETE: $STILL"
     echo "$HASH $NOW" | sudo tee -a "$NOTIFY_STATE" > /dev/null 2>&1 || true
   fi
 else
   if [ $((NOW - LAST)) -ge "$COOLDOWN" ]; then
-    notify "🚨 $(hostname): allowlist repair FAILED — $REASON"
+    notify "[ALERT] $(hostname): allowlist repair FAILED — $REASON"
     echo "$HASH $NOW" | sudo tee -a "$NOTIFY_STATE" > /dev/null 2>&1 || true
   else
     log "repair failed but notify suppressed (cooldown): $REASON"

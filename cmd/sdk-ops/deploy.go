@@ -234,7 +234,7 @@ func resolveSourceDir(cmd *cobra.Command, args []string) (sourceDir string, clea
 			fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=no", gitSSHKey))
 	}
 
-	fmt.Printf("  → Cloning %s", gitURL)
+	fmt.Printf("  -> Cloning %s", gitURL)
 	if gitBranch != "" {
 		fmt.Printf(" (branch: %s)", gitBranch)
 	}
@@ -271,12 +271,12 @@ func decryptSecretsIfNeeded(svcYamlPath, sopsKey string) (reencrypt func(), err 
 	if !secrets.FileIsEncrypted(svcYamlPath) {
 		return
 	}
-	fmt.Println("  → Decrypting service.yaml...")
+	fmt.Println("  -> Decrypting service.yaml...")
 	if err := secrets.DecryptFileInPlace(svcYamlPath); err != nil {
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}
 	reencrypt = func() {
-		fmt.Println("  → Re-encrypting service.yaml...")
+		fmt.Println("  -> Re-encrypting service.yaml...")
 		if err := secrets.EncryptFile(svcYamlPath, sopsKey); err != nil {
 			log.Printf("deploy: re-encrypt error: %v", err)
 		}
@@ -291,7 +291,7 @@ func buildImage(sourceDir, name, builderType string, reg deploy.RegistryConfig) 
 		imageRef, buildErr := deploy.BuildImage(sourceDir, name, reg, bt)
 		if buildErr != nil {
 			stopSpinner("")
-			fmt.Printf("  %s⚠ Build failed: %v%s\n", colorYellow, buildErr, colorReset)
+			fmt.Printf("  %s[WARN] Build failed: %v%s\n", colorYellow, buildErr, colorReset)
 			return ""
 		}
 		stopSpinner("Image pushed to registry via " + builderType)
@@ -300,15 +300,15 @@ func buildImage(sourceDir, name, builderType string, reg deploy.RegistryConfig) 
 
 	detected := deploy.DetectBuilder(sourceDir)
 	if detected == "" {
-		fmt.Println("  → docker-compose detected, skipping build")
+		fmt.Println("  -> docker-compose detected, skipping build")
 		return ""
 	}
-	fmt.Printf("  → Detected builder: %s\n", detected)
+	fmt.Printf("  -> Detected builder: %s\n", detected)
 	startSpinner("Building...")
 	imageRef, buildErr := deploy.BuildImage(sourceDir, name, reg, detected)
 	if buildErr != nil {
 		stopSpinner("")
-		fmt.Printf("  %s⚠ Build failed: %v%s\n", colorYellow, buildErr, colorReset)
+		fmt.Printf("  %s[WARN] Build failed: %v%s\n", colorYellow, buildErr, colorReset)
 		return ""
 	}
 	stopSpinner("Image pushed to registry via " + string(detected))
@@ -329,7 +329,7 @@ func ensureDockerOnNode(nodeIP, user, key string, port int, reg deploy.RegistryC
 
 	dockerOut, _, _ := ssh.Run(checkConn, "command -v docker || echo 'no-docker'")
 	if strings.TrimSpace(dockerOut) == "no-docker" {
-		fmt.Println("  → Docker not found on node, installing...")
+		fmt.Println("  -> Docker not found on node, installing...")
 		if err := docker.Install(checkConn); err != nil {
 			log.Printf("deploy: docker install error: %v", err)
 		}
@@ -426,7 +426,7 @@ func runTemplateInit(conn *golang_ssh.Client, name string, meta serviceMeta) err
 	if meta.initCmd == "" {
 		return nil
 	}
-	fmt.Printf("  → Running template init (%s)...\n", meta.initCmd)
+	fmt.Printf("  -> Running template init (%s)...\n", meta.initCmd)
 	if _, _, err := ssh.Run(conn, fmt.Sprintf("cd /opt/sdk-ops/services/%s/current && sudo bash -c '%s'", name, meta.initCmd)); err != nil {
 		return fmt.Errorf("service init: %w", err)
 	}
@@ -565,7 +565,7 @@ func generateComposeAndServiceYaml(imageRef, name string, appPort int, hasDB boo
 	if err := os.WriteFile(filepath.Join(sourceDir, "docker-compose.yml"), composeData, 0600); err != nil {
 		return fmt.Errorf("write compose: %w", err)
 	}
-	fmt.Printf("  → Generated docker-compose.yml (port %d, postgres: %v)\n", appPort, hasDB)
+	fmt.Printf("  -> Generated docker-compose.yml (port %d, postgres: %v)\n", appPort, hasDB)
 
 	if hasDB {
 		if data, err := os.ReadFile(filepath.Clean(svcYamlPath)); err == nil {
@@ -574,7 +574,7 @@ func generateComposeAndServiceYaml(imageRef, name string, appPort int, hasDB boo
 			if err := writeFileSafe(filepath.Join(sourceDir, "service.yaml"), []byte(updated), 0600); err != nil {
 				log.Printf("deploy: update service yaml error: %v", err)
 			}
-			fmt.Printf("  → Updated service.yaml to use %s-db hostname\n", name)
+			fmt.Printf("  -> Updated service.yaml to use %s-db hostname\n", name)
 		}
 	}
 	return nil
@@ -646,7 +646,7 @@ func deployToOne(nip, nuser, nkey string, nport int, name, sourceDir, runtimeMod
 		"port": fmt.Sprintf("%d", appPort),
 	})
 
-	fmt.Printf("\n%s✅ %s deployed on %s (v%s)%s\n", colorGreen, name, nip, result.Version, colorReset)
+	fmt.Printf("\n%s[OK] %s deployed on %s (v%s)%s\n", colorGreen, name, nip, result.Version, colorReset)
 	return nil
 }
 
@@ -658,7 +658,7 @@ func deployRuntimeOnNode(conn *golang_ssh.Client, name string, result *deploy.De
 			return fmt.Errorf("k3s deploy: %w", err)
 		}
 		if deployDomain != "" {
-			fmt.Printf("  → Access at http://%s/\n", deployDomain)
+			fmt.Printf("  -> Access at http://%s/\n", deployDomain)
 		}
 	case "swarm":
 		versionDir := fmt.Sprintf("/opt/sdk-ops/services/%s/%s", name, result.Version)
@@ -697,7 +697,7 @@ func runServiceWithHealthCheck(conn *golang_ssh.Client, name, healthURL string, 
 		return fmt.Errorf("deploy failed: %w", err)
 	}
 	if err := deploy.HealthCheck(conn, name, healthTimeout, healthURL); err != nil {
-		fmt.Printf("\n  ⚠️  Health check failed on %s, rolling back...\n", nip)
+		fmt.Printf("\n  [WARN]  Health check failed on %s, rolling back...\n", nip)
 		if rbErr := deploy.Rollback(conn, name, ""); rbErr != nil {
 			return fmt.Errorf("health: %v\nrollback also failed: %v", err, rbErr)
 		}
@@ -710,7 +710,7 @@ func runServiceWithHealthCheck(conn *golang_ssh.Client, name, healthURL string, 
 }
 
 func deployToAllNodes(flags deployPushFlags, nodes []NodeConfig, sourceDir string, appPort int, healthURL string, healthTimeout int, imageRef string) {
-	fmt.Printf("  → Deploying %s to %d nodes...\n", flags.name, len(nodes))
+	fmt.Printf("  -> Deploying %s to %d nodes...\n", flags.name, len(nodes))
 	var wg sync.WaitGroup
 	errs := make(chan error, len(nodes))
 
@@ -818,19 +818,19 @@ Examples:
 				if err := templates.InitCICD(dir, ciType); err != nil {
 					return fmt.Errorf("ci init: %w", err)
 				}
-				fmt.Printf("  → CI/CD: %s\n", ciType)
+				fmt.Printf("  -> CI/CD: %s\n", ciType)
 			}
 
 			tested, _ := cmd.Flags().GetBool("tested")
 			if tested {
-				fmt.Printf("  → Running integration test...\n")
+				fmt.Printf("  -> Running integration test...\n")
 				if err := templates.RunTest(tmpl, dir); err != nil {
 					return fmt.Errorf("test failed: %w", err)
 				}
-				fmt.Printf("  ✅ Integration test passed\n")
+				fmt.Printf("  [OK] Integration test passed\n")
 			}
 
-			fmt.Printf("\n✅ %s scaffolded in %s\n", tmpl, dir)
+			fmt.Printf("\n[OK] %s scaffolded in %s\n", tmpl, dir)
 			fmt.Printf("   Edit service.yaml, then:\n")
 			fmt.Printf("   sdk-ops deploy push %s --node <ip>\n", dir)
 			return nil
@@ -1204,7 +1204,7 @@ func runServiceRollback(ip, name, user, key string, port int, version string, sh
 			fmt.Printf("  No differences between %s and %s\n", current, target)
 			return nil
 		}
-		fmt.Printf("  Changes (%s → %s):\n", current, target)
+		fmt.Printf("  Changes (%s -> %s):\n", current, target)
 		for line := range strings.SplitSeq(strings.TrimSpace(diff), "\n") {
 			fmt.Printf("    %s\n", line)
 		}

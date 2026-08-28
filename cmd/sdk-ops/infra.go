@@ -394,7 +394,7 @@ func newInfraFirewallOpenCmd(f *infraFlags) *cobra.Command {
 				}
 			}()
 			for _, p := range ports {
-				fmt.Printf("→ Opening port %d/%s on %s...\n", p, proto, node)
+				fmt.Printf("-> Opening port %d/%s on %s...\n", p, proto, node)
 				if err := hardening.FirewallOpen(conn, p, proto); err != nil {
 					return err
 				}
@@ -450,7 +450,7 @@ func newInfraFirewallCloseCmd(f *infraFlags) *cobra.Command {
 				}
 			}()
 			for _, p := range ports {
-				fmt.Printf("→ Closing port %d/%s on %s...\n", p, proto, node)
+				fmt.Printf("-> Closing port %d/%s on %s...\n", p, proto, node)
 				if err := hardening.FirewallClose(conn, p, proto); err != nil {
 					return err
 				}
@@ -588,10 +588,10 @@ fails. This command requires --yes AND --admin-ips with at least one IP
 // printAdminSummary shows which admin IPs were seeded.
 func printAdminSummary(raw string, admin4, admin6 []string) {
 	if len(admin4)+len(admin6) == 0 {
-		fmt.Println("  → No admin IPs seeded (pass --admin-ips to grant yourself permanent access)")
+		fmt.Println("  -> No admin IPs seeded (pass --admin-ips to grant yourself permanent access)")
 		return
 	}
-	fmt.Printf("→ Admin IPs: %s\n", raw)
+	fmt.Printf("-> Admin IPs: %s\n", raw)
 }
 
 func runAllowlistInstall(f *infraFlags, profile hardening.AllowlistProfile, aw allowlistFlags) error {
@@ -630,7 +630,7 @@ func runAllowlistInstall(f *infraFlags, profile hardening.AllowlistProfile, aw a
 	if len(v4)+len(v6) < 4 {
 		return fmt.Errorf("source %q returned too few ranges (%d v4, %d v6)", aw.source, len(v4), len(v6))
 	}
-	fmt.Printf("→ Source %s: %d IPv4 + %d IPv6 ranges\n", aw.source, len(v4), len(v6))
+	fmt.Printf("-> Source %s: %d IPv4 + %d IPv6 ranges\n", aw.source, len(v4), len(v6))
 
 	cfg := hardening.AllowlistConfig{
 		Profile:  profile,
@@ -642,7 +642,7 @@ func runAllowlistInstall(f *infraFlags, profile hardening.AllowlistProfile, aw a
 	}
 	printAdminSummary(aw.adminIPs, admin4, admin6)
 
-	fmt.Printf("→ Installing allowlist on %s...\n", aw.node)
+	fmt.Printf("-> Installing allowlist on %s...\n", aw.node)
 	if err := installAndVerifyAllowlist(conn, aw.node, f, cfg); err != nil {
 		return err
 	}
@@ -714,7 +714,7 @@ func registerInitNode(ip string, f infraFlags, hardCfg hardening.Config, arch st
 		if err := saveConfig(cfg); err != nil {
 			log.Printf("infra: save config error: %v", err)
 		}
-		fmt.Printf("  → Registered node in %s\n", configPath())
+		fmt.Printf("  -> Registered node in %s\n", configPath())
 	} else if err := saveConfig(cfg); err != nil {
 		log.Printf("infra: save config error: %v", err)
 	}
@@ -723,7 +723,7 @@ func registerInitNode(ip string, f infraFlags, hardCfg hardening.Config, arch st
 // installTraefikPhase installs Docker (if missing) and Traefik with the
 // catch-all 404 as the node's default reverse proxy.
 func installTraefikPhase(conn *golang_ssh.Client) error {
-	fmt.Println("\n  → Installing Traefik (default reverse proxy, catch-all 404)...")
+	fmt.Println("\n  -> Installing Traefik (default reverse proxy, catch-all 404)...")
 	if err := docker.Install(conn); err != nil {
 		return fmt.Errorf("traefik needs docker: %w", err)
 	}
@@ -744,9 +744,9 @@ func installAllowlistPhase(conn *golang_ssh.Client, ip string, f infraFlags) err
 		return err
 	}
 	if profile == hardening.AllowlistStrict {
-		fmt.Println("\n  → Installing strict provider allowlist (all ports, including SSH)...")
+		fmt.Println("\n  -> Installing strict provider allowlist (all ports, including SSH)...")
 	} else {
-		fmt.Println("\n  → Installing provider allowlist (all ports except SSH)...")
+		fmt.Println("\n  -> Installing provider allowlist (all ports except SSH)...")
 	}
 	if err := installAllowlistOnNode(conn, ip, &f, profile, sourceRaw); err != nil {
 		return fmt.Errorf("allowlist: %w", err)
@@ -769,7 +769,7 @@ func installAllowlistOnNode(conn *golang_ssh.Client, node string, f *infraFlags,
 	if len(v4)+len(v6) < 4 {
 		return fmt.Errorf("source %q returned too few ranges (%d v4, %d v6)", sourceRaw, len(v4), len(v6))
 	}
-	fmt.Printf("  → Source %s: %d IPv4 + %d IPv6 ranges\n", sourceRaw, len(v4), len(v6))
+	fmt.Printf("  -> Source %s: %d IPv4 + %d IPv6 ranges\n", sourceRaw, len(v4), len(v6))
 
 	admin4, admin6, err := parseAdminIPs(f.adminIPs)
 	if err != nil {
@@ -787,9 +787,9 @@ func installAllowlistOnNode(conn *golang_ssh.Client, node string, f *infraFlags,
 		Admin6:   admin6,
 	}
 	if len(admin4)+len(admin6) == 0 {
-		fmt.Println("  → No admin IPs seeded (set admin_ips in the provision YAML to grant permanent access)")
+		fmt.Println("  -> No admin IPs seeded (set admin_ips in the provision YAML to grant permanent access)")
 	} else {
-		fmt.Printf("  → Admin IPs: %s\n", f.adminIPs)
+		fmt.Printf("  -> Admin IPs: %s\n", f.adminIPs)
 	}
 	return installAndVerifyAllowlist(conn, node, f, cfg)
 }
@@ -801,7 +801,7 @@ func installAndVerifyAllowlist(conn *golang_ssh.Client, node string, f *infraFla
 	if err := hardening.InstallAllowlist(conn, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("→ Verifying with a new SSH connection...\n")
+	fmt.Printf("-> Verifying with a new SSH connection...\n")
 	start := time.Now()
 	verifier := infraSSHClient(node, f.user, f.port, *f)
 	verifierConn, err := verifier.Connect()
@@ -812,7 +812,7 @@ func installAndVerifyAllowlist(conn *golang_ssh.Client, node string, f *infraFla
 	if err := hardening.CommitAllowlist(verifierConn); err != nil {
 		return err
 	}
-	fmt.Printf("→ Verified and committed (new connection OK)\n")
+	fmt.Printf("-> Verified and committed (new connection OK)\n")
 	return nil
 }
 
@@ -842,14 +842,14 @@ func syncCloudFirewall(ctx context.Context, providerName string, v4, v6 []string
 	}
 	cfw, ok := p.(providers.CloudFirewall)
 	if !ok {
-		fmt.Printf("→ Cloud firewall: provider %q does not support allowlist sync, skipping\n", providerName)
+		fmt.Printf("-> Cloud firewall: provider %q does not support allowlist sync, skipping\n", providerName)
 		return nil
 	}
-	fmt.Printf("→ Syncing %d IPv4 + %d IPv6 ranges to %s cloud firewall...\n", len(v4), len(v6), providerName)
+	fmt.Printf("-> Syncing %d IPv4 + %d IPv6 ranges to %s cloud firewall...\n", len(v4), len(v6), providerName)
 	if err := cfw.SyncFirewallAllowlist(ctx, v4, v6); err != nil {
 		return err
 	}
-	fmt.Printf("→ %s cloud firewall synced\n", providerName)
+	fmt.Printf("-> %s cloud firewall synced\n", providerName)
 	return nil
 }
 
@@ -1126,7 +1126,7 @@ func newInfraBackupCmd(f *infraFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("✅ Backup: %s\n", path)
+			fmt.Printf("[OK] Backup: %s\n", path)
 			return nil
 		},
 	}
@@ -1151,7 +1151,7 @@ func newInfraRestoreCmd(f *infraFlags) *cobra.Command {
 			if err := deploy.RestoreServices(conn, args[1]); err != nil {
 				return err
 			}
-			fmt.Println("✅ Restore complete")
+			fmt.Println("[OK] Restore complete")
 			return nil
 		},
 	}
@@ -1787,16 +1787,16 @@ func runInfraInit(ip string, f infraFlags) error {
 			}
 		}
 
-		fmt.Printf("\n🔧 Creating VPS via %s...\n", f.provider)
+		fmt.Printf("\n[SETUP] Creating VPS via %s...\n", f.provider)
 		vps, err := p.CreateVPS(context.Background(), createCfg)
 		if err != nil {
 			return fmt.Errorf("create vps: %w", err)
 		}
-		fmt.Printf("✅ VPS created: [%s] %s @ %s\n", vps.ID, vps.Name, vps.IP)
+		fmt.Printf("[OK] VPS created: [%s] %s @ %s\n", vps.ID, vps.Name, vps.IP)
 		ip = vps.IP
 	}
 
-	fmt.Printf("\n🔧 sdk-ops infra init %s\n", ip)
+	fmt.Printf("\n[SETUP] sdk-ops infra init %s\n", ip)
 	fmt.Printf("   Mode: %s\n", f.mode)
 	fmt.Printf("   User: %s\n", f.user)
 	fmt.Println()
@@ -1873,7 +1873,7 @@ func applyInitFleetPhases(ip string, f infraFlags) error {
 		if h.Host != ip {
 			continue
 		}
-		fmt.Printf("\n━━━ Finishing init with fleet phases for %s ━━━\n", h.Name)
+		fmt.Printf("\n--- Finishing init with fleet phases for %s ---\n", h.Name)
 		r := resolveHostConfig(&pf, h)
 		if r.firewallAllowlist != "" {
 			if err := installAllowlistOn(&pf, h); err != nil {
@@ -1883,7 +1883,7 @@ func applyInitFleetPhases(ip string, f infraFlags) error {
 		if err := applyPerHostPhaseOn(pf, h); err != nil {
 			return fmt.Errorf("init --provision-yaml: %w", err)
 		}
-		fmt.Println("✅ Fleet phases applied")
+		fmt.Println("[OK] Fleet phases applied")
 		return nil
 	}
 	return fmt.Errorf("init --provision-yaml: host %s not found in the fleet YAML", ip)
@@ -1913,7 +1913,7 @@ func applyInfraHardening(conn *golang_ssh.Client, ip string, f infraFlags) harde
 		hardCfg.SSHPort = p
 	}
 	if err := hardening.Apply(conn, hardCfg); err != nil {
-		fmt.Printf("  ⚠️  Hardening partially failed, continuing...\n")
+		fmt.Printf("  [WARN] Hardening partially failed, continuing...\n")
 	}
 	return hardCfg
 }
@@ -1945,7 +1945,7 @@ func reconnectAfterHardening(ip string, f infraFlags, hardCfg hardening.Config) 
 	if hardCfg.MigrateSSH() {
 		reconnectPort = hardCfg.SSHPort
 	}
-	fmt.Printf("  → Reconnecting as %s@%s port %d...\n", reconnectUser, ip, reconnectPort)
+	fmt.Printf("  -> Reconnecting as %s@%s port %d...\n", reconnectUser, ip, reconnectPort)
 	for attempt := 1; attempt <= 10; attempt++ {
 		reClient := infraSSHClient(ip, reconnectUser, reconnectPort, f)
 		conn2, err := reClient.Connect()
@@ -2097,7 +2097,7 @@ func runInfraInitPostInstall(conn *golang_ssh.Client, ip string, f infraFlags, h
 	}
 
 	// Create /opt/sdk-ops/ structure
-	fmt.Println("  → Creating /opt/sdk-ops/ structure...")
+	fmt.Println("  -> Creating /opt/sdk-ops/ structure...")
 	createSDKOpsStructure(conn)
 
 	// Detect architecture
@@ -2131,7 +2131,7 @@ func runInfraInitPostInstall(conn *golang_ssh.Client, ip string, f infraFlags, h
 		}
 	}
 
-	fmt.Println("\n✅ infra init complete!")
+	fmt.Println("\n[OK] infra init complete!")
 	sshHint := fmt.Sprintf("   SSH: ssh %s@%s", hardCfg.User, ip)
 	if hardCfg.SSHPort > 0 {
 		sshHint += fmt.Sprintf(" -p %d", hardCfg.SSHPort)
@@ -2154,7 +2154,7 @@ func downloadK3sBinary(localFile, version, arch string) error {
 		dlURL = fmt.Sprintf("https://github.com/k3s-io/k3s/releases/latest/download/k3s-%s", suffix)
 	}
 
-	fmt.Printf("  → Downloading %s...\n", dlURL)
+	fmt.Printf("  -> Downloading %s...\n", dlURL)
 	dlCmd := exec.CommandContext(context.Background(), "curl")
 	dlCmd.Args = append(dlCmd.Args, "-sfLo", localFile, dlURL)
 	if out, err := dlCmd.CombinedOutput(); err != nil {
@@ -2167,7 +2167,7 @@ func downloadK3sBinary(localFile, version, arch string) error {
 }
 
 func uploadBinaryToRemote(conn *golang_ssh.Client, localFile string) error {
-	fmt.Println("  → Copying binary to remote server...")
+	fmt.Println("  -> Copying binary to remote server...")
 	data, err := os.ReadFile(filepath.Clean(localFile))
 	if err != nil {
 		return fmt.Errorf("read k3s binary: %w", err)
@@ -2209,14 +2209,14 @@ func uploadBinaryToRemote(conn *golang_ssh.Client, localFile string) error {
 }
 
 func runInfraInitAirgap(conn *golang_ssh.Client, ip string) error {
-	fmt.Println("  → Airgap mode: downloading k3s binary locally...")
+	fmt.Println("  -> Airgap mode: downloading k3s binary locally...")
 	archOut, _, _ := ssh.Run(conn, "uname -m")
 	arch := strings.TrimSpace(archOut)
 
 	version := ""
 	k3sVerOut, _, _ := ssh.Run(conn, "k3s --version 2>/dev/null || true")
 	if strings.Contains(k3sVerOut, "k3s") {
-		fmt.Println("  → k3s already installed, skipping airgap download")
+		fmt.Println("  -> k3s already installed, skipping airgap download")
 	}
 
 	localFile := "/tmp/k3s-" + ip
@@ -2237,7 +2237,7 @@ func runInfraInitAirgap(conn *golang_ssh.Client, ip string) error {
 }
 
 func runInfraJoin(serverIP, agentIP, serverUser, token string, f infraFlags) error {
-	fmt.Printf("\n🔗 sdk-ops infra join %s → %s\n", agentIP, serverIP)
+	fmt.Printf("\n🔗 sdk-ops infra join %s -> %s\n", agentIP, serverIP)
 
 	if serverUser == "" {
 		serverUser = f.user
@@ -2322,13 +2322,13 @@ func runInfraJoin(serverIP, agentIP, serverUser, token string, f infraFlags) err
 		log.Printf("infra: hooks error: %v", err)
 	}
 
-	fmt.Printf("\n✅ Node %s joined to %s\n", agentIP, serverIP)
+	fmt.Printf("\n[OK] Node %s joined to %s\n", agentIP, serverIP)
 	fmt.Printf("   Run: export KUBECONFIG=%s\n", f.kubeconfig)
 	return nil
 }
 
 func installCrowdSec(conn *golang_ssh.Client) error {
-	fmt.Println("  → Installing CrowdSec...")
+	fmt.Println("  -> Installing CrowdSec...")
 	script := `#!/bin/bash
 set -euo pipefail
 if command -v cscli &>/dev/null; then
@@ -2362,7 +2362,7 @@ func runInfraStatus(ip string, f infraFlags) error {
 	}()
 
 	fmt.Printf("\n📊 sdk-ops infra status %s\n", ip)
-	fmt.Println(strings.Repeat("─", 50))
+	fmt.Println(strings.Repeat("-", 50))
 
 	sysInfo := `echo "Hostname: $(hostname)"
 echo "Kernel:   $(uname -r)"
@@ -2375,7 +2375,7 @@ echo "Disk:     $(df -h / | awk 'NR==2 {print $3 "/" $2}')"`
 		return fmt.Errorf("system info: %w", err)
 	}
 	fmt.Print(out)
-	fmt.Println(strings.Repeat("─", 50))
+	fmt.Println(strings.Repeat("-", 50))
 
 	// Hardening
 	hardenOut, err := hardening.Check(conn)
@@ -2401,7 +2401,7 @@ echo "Disk:     $(df -h / | awk 'NR==2 {print $3 "/" $2}')"`
 		fmt.Print(k3sOut)
 	}
 
-	fmt.Println(strings.Repeat("─", 50))
+	fmt.Println(strings.Repeat("-", 50))
 	return nil
 }
 
@@ -2455,7 +2455,7 @@ func runInfraReady(ip string, f infraFlags) error {
 		for line := range strings.SplitSeq(podsOut, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 && parts[1] != "Running" {
-				fmt.Printf("  ⚠ Pod %s is %s\n", parts[0], parts[1])
+				fmt.Printf("  [WARN] Pod %s is %s\n", parts[0], parts[1])
 				allRunning = false
 			}
 		}
@@ -2468,7 +2468,7 @@ func runInfraReady(ip string, f infraFlags) error {
 		return fmt.Errorf("cluster not ready: some nodes are not Ready")
 	}
 
-	fmt.Println("\n✅ Cluster is ready!")
+	fmt.Println("\n[OK] Cluster is ready!")
 	return nil
 }
 
@@ -2669,7 +2669,7 @@ func runInfraRemove(ip string, f infraFlags) error {
 		}
 	}()
 
-	fmt.Printf("\n🗑️  sdk-ops infra remove %s\n", ip)
+	fmt.Printf("\n[REMOVE] sdk-ops infra remove %s\n", ip)
 
 	out, _, err := ssh.Run(conn, "command -v k3s && echo 'k3s: yes' || echo 'k3s: no'; command -v docker && echo 'docker: yes' || echo 'docker: no'")
 	if err != nil {
@@ -2678,7 +2678,7 @@ func runInfraRemove(ip string, f infraFlags) error {
 	fmt.Print(out)
 
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Println("  → Skipping uninstall (non-interactive)")
+		fmt.Println("  -> Skipping uninstall (non-interactive)")
 		return nil
 	}
 
@@ -2733,7 +2733,7 @@ func runInfraRemoveComponents(conn *golang_ssh.Client, ip string, f infraFlags) 
 		log.Printf("infra: hooks error: %v", err)
 	}
 
-	fmt.Println("✅ sdk-ops removed from", ip)
+	fmt.Println("[OK] sdk-ops removed from", ip)
 }
 
 func firewalledNode(cmd *cobra.Command) string {

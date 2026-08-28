@@ -24,7 +24,7 @@ jobs:
           git log --format='%s' origin/main..HEAD | while IFS= read -r msg; do
             echo "$msg" | grep -qE '^Merge ' && continue
             if ! echo "$msg" | grep -qE '^(feat|fix|docs|refactor|test|chore|ci|perf|style|build|revert)\([^)]+\): '; then
-              echo "❌ Each commit must use format: type(scope): description"
+              echo "[X] Each commit must use format: type(scope): description"
               echo "   Example: feat(api): add pagination to list endpoint"
               echo "   Got:     $msg"
               exit 1
@@ -63,7 +63,7 @@ jobs:
         run: |
           bash .github/scripts/generate-third-party.sh
           if ! git diff --exit-code ThirdPartyNotices.txt; then
-            echo "❌ ThirdPartyNotices.txt is out of date. Run 'make third-party' and commit the result."
+            echo "[X] ThirdPartyNotices.txt is out of date. Run 'make third-party' and commit the result."
             exit 1
           fi
 

@@ -31,7 +31,7 @@ if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_BUCKET" ] && [ -n "$S3_ACCESS_KEY" ] && [ 
     mc alias set s3 https://$S3_ENDPOINT $S3_ACCESS_KEY $S3_SECRET_KEY --api S3v4 >/dev/null &&
     mc cp /backup/$FNAME s3/$S3_BUCKET/pgsql-bare/$FNAME
   "
-  echo "  → uploaded to s3://$S3_BUCKET/pgsql-bare/$FNAME"
+  echo "  -> uploaded to s3://$S3_BUCKET/pgsql-bare/$FNAME"
   # Retention: list JSON on the host (the mc image has no sed/awk).
   docker run --rm --entrypoint sh minio/mc:latest -c \
     "mc alias set s3 https://$S3_ENDPOINT $S3_ACCESS_KEY $S3_SECRET_KEY --api S3v4 >/dev/null && mc ls --json s3/$S3_BUCKET/pgsql-bare/" \

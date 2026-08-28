@@ -179,7 +179,7 @@ func UploadAndDeploy(client *goss.Client, cfg UploadConfig) (*DeployResult, erro
 	}
 
 	// Upload tar.gz via SSH
-	fmt.Printf("  → Uploading %d bytes...\n", buf.Len())
+	fmt.Printf("  -> Uploading %d bytes...\n", buf.Len())
 	session, err := client.NewSession()
 	if err != nil {
 		return nil, fmt.Errorf("ssh session: %w", err)
@@ -208,7 +208,7 @@ func UploadAndDeploy(client *goss.Client, cfg UploadConfig) (*DeployResult, erro
 		log.Printf("symlink update: %v", err)
 	}
 
-	fmt.Printf("  → Deployed v%s to %s\n", nextVer, versionDir)
+	fmt.Printf("  -> Deployed v%s to %s\n", nextVer, versionDir)
 	return &DeployResult{Version: nextVer, ServicePath: versionDir}, nil
 }
 
@@ -256,7 +256,7 @@ echo "rolled-back to $(basename $PREVIOUS)"
 	if out == "version-not-found" {
 		return fmt.Errorf("version %s not found for %s", targetVersion, serviceName)
 	}
-	fmt.Printf("  → %s: %s\n", serviceName, out)
+	fmt.Printf("  -> %s: %s\n", serviceName, out)
 	return nil
 }
 
@@ -363,7 +363,7 @@ func BuildAndPushImage(dir, name string, reg RegistryConfig) (string, error) {
 	versionTag := fmt.Sprintf("%s/%s:latest", reg.Server, name)
 
 	// Step 1: Build Go binary for linux/amd64
-	fmt.Printf("  → Building Go binary for linux/amd64...\n")
+	fmt.Printf("  -> Building Go binary for linux/amd64...\n")
 	build := exec.CommandContext(context.Background(), "go", "build")
 	build.Args = append(build.Args, "-a", "-o", binaryPath, "-ldflags=-s -w", ".")
 	build.Dir = dir
@@ -389,7 +389,7 @@ CMD ["/healthz-svc"]
 	}
 
 	// Step 3: Login to registry
-	fmt.Printf("  → Logging in to %s...\n", reg.Server)
+	fmt.Printf("  -> Logging in to %s...\n", reg.Server)
 	login := exec.CommandContext(context.Background(), "docker", "login")
 	login.Args = append(login.Args, reg.Server, "-u", reg.Username, "-p", reg.Password)
 	login.Stdout = os.Stdout
@@ -399,7 +399,7 @@ CMD ["/healthz-svc"]
 	}
 
 	// Step 4: Build and push for linux/amd64
-	fmt.Printf("  → Building + pushing %s...\n", tag)
+	fmt.Printf("  -> Building + pushing %s...\n", tag)
 	buildID := fmt.Sprintf("%d", time.Now().UnixNano())
 	push := exec.CommandContext(context.Background(), "docker", "buildx", "build")
 	push.Args = append(push.Args,
@@ -425,7 +425,7 @@ CMD ["/healthz-svc"]
 		log.Printf("cleanup binary: %v", err)
 	}
 
-	fmt.Printf("  → Image pushed: %s\n", tag)
+	fmt.Printf("  -> Image pushed: %s\n", tag)
 	return tag, nil
 }
 
@@ -444,7 +444,7 @@ func UploadImage(client *goss.Client, serviceName, version string, imageTar []by
 		}
 	}()
 
-	fmt.Printf("  → Uploading Docker image (%d bytes)...\n", len(imageTar))
+	fmt.Printf("  -> Uploading Docker image (%d bytes)...\n", len(imageTar))
 	loadCmd := fmt.Sprintf("sudo tee %s > /dev/null && sudo docker load < %s && echo 'image_loaded'", remotePath, remotePath)
 	session.Stdin = bytes.NewReader(imageTar)
 	out, err := session.CombinedOutput(loadCmd)

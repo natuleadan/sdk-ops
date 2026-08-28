@@ -283,13 +283,13 @@ s.Cluster().Scale("deploy/my-app", 5)
 
 ```
 Local (Mac ARM)                        VPS (x86_64)
-─────                                   ─────
+-----                                   -----
 1. go build (linux/amd64)               docker login (auto)
-2. docker buildx + push ──registry──→   docker pull
-3. tar files + SSH pipe ────────→      /opt/sdk-ops/services/<name>/v{N}/
-4.                                      symlink: current → v{N}
+2. docker buildx + push --registry--->   docker pull
+3. tar files + SSH pipe --------->      /opt/sdk-ops/services/<name>/v{N}/
+4.                                      symlink: current -> v{N}
 5.                                      docker compose up -d
-6.                                      Health check → OK or rollback (configurable via health_url)
+6.                                      Health check -> OK or rollback (configurable via health_url)
 ```
 
 Health check probes configurable endpoints via `health_url` in `service.yaml`. Falls back to ports 18081/8080/3000 at `/healthz` and `/health`. Custom timeout via `health_timeout`.
@@ -435,7 +435,7 @@ sdk-ops provider vps export <vps-id> --provider cubepath
 ```bash
 export CUBEPATH_API_KEY="your-key"
 sdk-ops config set-credentials
-# → Credentials saved to ~/.sdk-ops/credentials.yaml
+# -> Credentials saved to ~/.sdk-ops/credentials.yaml
 ```
 
 ### 8.12 Managed Kubernetes
@@ -459,80 +459,80 @@ sdk-ops provider k8s delete <cluster-uuid>
 ## 9. Project Structure
 
 ```
-├── cmd/sdk-ops/          # CLI entrypoint (Cobra)
-│   ├── main.go           # Root command, 15 subcommands, newSSHClient
-│   ├── infra.go          # infra init/join/adopt/status/remove/backup/restore/firewall/cert/logs/alerts
-│   ├── node.go           # node list/info/top/exec (--all, --servers, --agents)
-│   ├── deploy.go         # deploy init/push/encrypt/decrypt + service status/logs/restart/rollback/versions/rotate
-│   ├── cluster.go        # cluster (16 kubectl wrappers)
-│   ├── agent.go          # agent install/status/logs/uninstall/update/schedule
-│   ├── config.go         # config init/add-node/list-nodes/remove-node/set-credentials
-│   ├── provider.go       # provider vps/k8s/lb/dns/ssh-key
-│   ├── backup.go         # backup create/restore/schedule/unschedule/list-schedules
-│   ├── db.go             # db create/list/remove (postgres, mysql, redis, mongodb)
-│   ├── compose.go        # compose init/service/validate
-│   ├── key.go            # key generate/list/deploy
-│   ├── notify.go         # notify send/test
-│   ├── state.go          # state show/sync (resource inventory)
-│   ├── status.go         # status (unified multi-node dashboard)
-│   └── spinner.go        # CLI spinner animation
-├── ssh/                  # SSH client abstraction (public SDK)
-├── hardening/            # VPS hardening (public SDK)
-│   ├── apply.go          # Orchestrator (calls steps in order)
-│   ├── steps.go          # Individual hardening steps + node_exporter
-│   ├── firewall.go       # FirewallOpen/Close/List via nftables
-│   └── hconfig.go        # YAML config export/import
-├── cloudinit/            # Cloud-init user-data generation
-├── docker/               # Docker install + compose (public SDK)
-├── k3s/                  # k3s install + join (public SDK)
-├── deploy/               # Build + push + deploy engine (public SDK)
-│   ├── upload.go         # Tar/SSH upload, version management, rollback
-│   ├── run.go            # Service lifecycle (status, logs, restart, health check)
-│   ├── backup.go         # Backup/restore services + S3 upload
-│   ├── database.go       # DB provisioning (postgres, mysql, redis, mongodb)
-│   ├── rotate.go         # Secrets rotation (DB passwords, env vars)
-│   ├── tls.go            # Caddy TLS cert install
-│   ├── logging.go        # Promtail log shipper install
-│   ├── alerting.go       # Alertmanager install
-│   ├── builder.go        # Builder interface + DetectBuilder, BuildImage
-│   ├── builder_dockerfile.go, builder_nixpacks.go, builder_pack.go
-│   ├── proxy.go          # Proxy interface + DetectProxy
-│   ├── proxy_caddy.go, proxy_traefik.go, proxy_nginx.go
-│   ├── bluegreen.go      # Blue/green zero-downtime deploy
-│   ├── bare_runtime.go   # Bare metal systemd deploy
-│   ├── swarm_runtime.go  # Docker Swarm deploy
-│   └── k8s_runtime.go    # k3s Deployment + Service + Ingress
-├── compose/              # Docker Compose YAML manipulation
-├── monitor/              # Node dashboard + metrics (public SDK)
-├── notify/               # Notifications (Slack, Discord, Telegram, Email, Webhook)
-├── terraform/            # Terraform HCL generation (export)
-├── secrets/              # sops encryption/decryption helpers
-├── providers/            # Multi-provider interface + implementations
-│   ├── provider.go       # Provider interface (21 methods)
-│   ├── types.go          # VPS, K8s, LB, DNS, BareMetal, SSHKey structs
-│   ├── credentials.go    # Credential file loader
-│   ├── cubepath/         # CubePath (raw HTTP)
-│   ├── hetzner/          # Hetzner (hcloud-go + raw HTTP)
-│   ├── digitalocean/     # DigitalOcean (godo)
-│   ├── vultr/            # Vultr (govultr) + firewall, S3, CDN, block storage
-│   └── aws/              # AWS (aws-sdk-go-v2)
-├── bunny/                # Bunny.net SDK (standalone, not a provider)
-│   ├── client.go         # HTTP client (AccessKey auth)
-│   ├── types.go          # All shared types
-│   ├── dns.go            # DNS + geo-routing
-│   ├── pullzone.go       # CDN Pull Zones + edge rules
-│   ├── mc_*.go           # Magic Containers (apps, containers, deploy, regions)
-│   ├── storage.go        # Edge Storage zones + files
-│   ├── stream.go         # Stream video libraries + videos
-│   ├── shield.go         # Shield WAF zones + rate limits
-│   ├── edgescript.go     # Edge Scripting (23 endpoints)
-│   ├── logging.go        # CDN logging query
-│   ├── origin_errors.go  # Origin error logs
-│   └── spec/             # 8 OpenAPI JSON specs
-├── server.go             # High-level ops.Server API
-├── config.go             # YAML-driven config
-├── docs/                 # Documentation
-└── .github/              # CI/CD workflows
++-- cmd/sdk-ops/          # CLI entrypoint (Cobra)
+|   +-- main.go           # Root command, 15 subcommands, newSSHClient
+|   +-- infra.go          # infra init/join/adopt/status/remove/backup/restore/firewall/cert/logs/alerts
+|   +-- node.go           # node list/info/top/exec (--all, --servers, --agents)
+|   +-- deploy.go         # deploy init/push/encrypt/decrypt + service status/logs/restart/rollback/versions/rotate
+|   +-- cluster.go        # cluster (16 kubectl wrappers)
+|   +-- agent.go          # agent install/status/logs/uninstall/update/schedule
+|   +-- config.go         # config init/add-node/list-nodes/remove-node/set-credentials
+|   +-- provider.go       # provider vps/k8s/lb/dns/ssh-key
+|   +-- backup.go         # backup create/restore/schedule/unschedule/list-schedules
+|   +-- db.go             # db create/list/remove (postgres, mysql, redis, mongodb)
+|   +-- compose.go        # compose init/service/validate
+|   +-- key.go            # key generate/list/deploy
+|   +-- notify.go         # notify send/test
+|   +-- state.go          # state show/sync (resource inventory)
+|   +-- status.go         # status (unified multi-node dashboard)
+|   +-- spinner.go        # CLI spinner animation
++-- ssh/                  # SSH client abstraction (public SDK)
++-- hardening/            # VPS hardening (public SDK)
+|   +-- apply.go          # Orchestrator (calls steps in order)
+|   +-- steps.go          # Individual hardening steps + node_exporter
+|   +-- firewall.go       # FirewallOpen/Close/List via nftables
+|   +-- hconfig.go        # YAML config export/import
++-- cloudinit/            # Cloud-init user-data generation
++-- docker/               # Docker install + compose (public SDK)
++-- k3s/                  # k3s install + join (public SDK)
++-- deploy/               # Build + push + deploy engine (public SDK)
+|   +-- upload.go         # Tar/SSH upload, version management, rollback
+|   +-- run.go            # Service lifecycle (status, logs, restart, health check)
+|   +-- backup.go         # Backup/restore services + S3 upload
+|   +-- database.go       # DB provisioning (postgres, mysql, redis, mongodb)
+|   +-- rotate.go         # Secrets rotation (DB passwords, env vars)
+|   +-- tls.go            # Caddy TLS cert install
+|   +-- logging.go        # Promtail log shipper install
+|   +-- alerting.go       # Alertmanager install
+|   +-- builder.go        # Builder interface + DetectBuilder, BuildImage
+|   +-- builder_dockerfile.go, builder_nixpacks.go, builder_pack.go
+|   +-- proxy.go          # Proxy interface + DetectProxy
+|   +-- proxy_caddy.go, proxy_traefik.go, proxy_nginx.go
+|   +-- bluegreen.go      # Blue/green zero-downtime deploy
+|   +-- bare_runtime.go   # Bare metal systemd deploy
+|   +-- swarm_runtime.go  # Docker Swarm deploy
+|   +-- k8s_runtime.go    # k3s Deployment + Service + Ingress
++-- compose/              # Docker Compose YAML manipulation
++-- monitor/              # Node dashboard + metrics (public SDK)
++-- notify/               # Notifications (Slack, Discord, Telegram, Email, Webhook)
++-- terraform/            # Terraform HCL generation (export)
++-- secrets/              # sops encryption/decryption helpers
++-- providers/            # Multi-provider interface + implementations
+|   +-- provider.go       # Provider interface (21 methods)
+|   +-- types.go          # VPS, K8s, LB, DNS, BareMetal, SSHKey structs
+|   +-- credentials.go    # Credential file loader
+|   +-- cubepath/         # CubePath (raw HTTP)
+|   +-- hetzner/          # Hetzner (hcloud-go + raw HTTP)
+|   +-- digitalocean/     # DigitalOcean (godo)
+|   +-- vultr/            # Vultr (govultr) + firewall, S3, CDN, block storage
+|   +-- aws/              # AWS (aws-sdk-go-v2)
++-- bunny/                # Bunny.net SDK (standalone, not a provider)
+|   +-- client.go         # HTTP client (AccessKey auth)
+|   +-- types.go          # All shared types
+|   +-- dns.go            # DNS + geo-routing
+|   +-- pullzone.go       # CDN Pull Zones + edge rules
+|   +-- mc_*.go           # Magic Containers (apps, containers, deploy, regions)
+|   +-- storage.go        # Edge Storage zones + files
+|   +-- stream.go         # Stream video libraries + videos
+|   +-- shield.go         # Shield WAF zones + rate limits
+|   +-- edgescript.go     # Edge Scripting (23 endpoints)
+|   +-- logging.go        # CDN logging query
+|   +-- origin_errors.go  # Origin error logs
+|   +-- spec/             # 8 OpenAPI JSON specs
++-- server.go             # High-level ops.Server API
++-- config.go             # YAML-driven config
++-- docs/                 # Documentation
++-- .github/              # CI/CD workflows
 ```
 
 ## 9. Linting & Code Quality

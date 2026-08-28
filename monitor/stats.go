@@ -239,9 +239,9 @@ func bar(pct int, width int) string {
 
 func statusIcon(status string) string {
 	if status == "active" || status == "yes" || status == "OK" {
-		return "✅"
+		return "[OK]"
 	}
-	return "❌"
+	return "[X]"
 }
 
 func FormatStats(stats *NodeStats, runtime *RuntimeStatus, procs []Process) string {
@@ -255,27 +255,27 @@ func FormatStats(stats *NodeStats, runtime *RuntimeStatus, procs []Process) stri
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n  ┌─ Node: %s (%s)\n", stats.Hostname, stats.Kernel)
-	fmt.Fprintf(&b, "  ├─ Uptime: %s\n", stats.Uptime)
-	fmt.Fprintf(&b, "  ├─ CPU:    %s %3s  (%d cores, load: %s)\n", bar(memPct, 20), stats.Memory, stats.CPUCores, stats.CPULoad)
-	fmt.Fprintf(&b, "  ├─ RAM:    %s %3s  (%s / %s)\n", bar(memPct, 20), stats.Memory, stats.MemUsed, stats.MemTotal)
-	fmt.Fprintf(&b, "  ├─ DISK:   %s %3s  (%s / %s)\n", bar(diskPct, 20), stats.Disk, stats.DiskUsed, stats.DiskSize)
-	fmt.Fprintf(&b, "  ├─ NET:    ↑ %s  ↓ %s\n", stats.NetOut, stats.NetIn)
+	fmt.Fprintf(&b, "\n  +- Node: %s (%s)\n", stats.Hostname, stats.Kernel)
+	fmt.Fprintf(&b, "  |- Uptime: %s\n", stats.Uptime)
+	fmt.Fprintf(&b, "  |- CPU:    %s %3s  (%d cores, load: %s)\n", bar(memPct, 20), stats.Memory, stats.CPUCores, stats.CPULoad)
+	fmt.Fprintf(&b, "  |- RAM:    %s %3s  (%s / %s)\n", bar(memPct, 20), stats.Memory, stats.MemUsed, stats.MemTotal)
+	fmt.Fprintf(&b, "  |- DISK:   %s %3s  (%s / %s)\n", bar(diskPct, 20), stats.Disk, stats.DiskUsed, stats.DiskSize)
+	fmt.Fprintf(&b, "  |- NET:    ^ %s  v %s\n", stats.NetOut, stats.NetIn)
 
 	if runtime != nil {
 		if runtime.K3sVersion != "" {
-			fmt.Fprintf(&b, "  ├─ K3s:    %s v%s  (%s)\n", statusIcon(runtime.K3sRunning), runtime.K3sVersion, runtime.K3sRunning)
+			fmt.Fprintf(&b, "  |- K3s:    %s v%s  (%s)\n", statusIcon(runtime.K3sRunning), runtime.K3sVersion, runtime.K3sRunning)
 		}
 		if runtime.DockerVer != "" {
-			fmt.Fprintf(&b, "  ├─ Docker: %s v%s  (%s)\n", statusIcon(runtime.DockerOK), runtime.DockerVer, runtime.DockerOK)
+			fmt.Fprintf(&b, "  |- Docker: %s v%s  (%s)\n", statusIcon(runtime.DockerOK), runtime.DockerVer, runtime.DockerOK)
 		}
 		if runtime.K3sRunning == "active" {
-			fmt.Fprintf(&b, "  ├─ Pods:   %s running\n", runtime.PodCount)
+			fmt.Fprintf(&b, "  |- Pods:   %s running\n", runtime.PodCount)
 		}
 	}
 
 	if len(procs) > 0 {
-		b.WriteString("  └─ Top processes:\n")
+		b.WriteString("  +- Top processes:\n")
 		b.WriteString("       PID    CPU%   MEM%  USER       COMMAND\n")
 		for _, p := range procs {
 			fmt.Fprintf(&b, "       %-5d  %5.1f  %5.1f  %-10s %s\n", p.PID, p.CPU, p.MEM, p.User, p.Cmd)

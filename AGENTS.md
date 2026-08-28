@@ -50,10 +50,10 @@
 
 - `server.go` / `config.go` — High-level `ops.Server` API + YAML config
 - `ssh/` — SSH client abstraction (public SDK)
-- `hardening/` — VPS hardening (packages → user → kernel → fail2ban → SSH → nftables → node_exporter)
+- `hardening/` — VPS hardening (packages -> user -> kernel -> fail2ban -> SSH -> nftables -> node_exporter)
 - `docker/` — Docker install + compose generation
 - `k3s/` — k3s install + 16 kubectl wrappers
-- `deploy/` — Build → push → upload → compose → health check → auto-rollback + secrets rotation
+- `deploy/` — Build -> push -> upload -> compose -> health check -> auto-rollback + secrets rotation
 - `monitor/` — Real-time node dashboard (CPU, RAM, disk, k3s)
 - `notify/` — Notifications (Slack, Discord, Telegram, Email, Webhook)
 - `compose/` — Docker Compose YAML manipulation
@@ -63,18 +63,18 @@
 
 ```
 [Local Machine]          [VPS]
-CLI (Cobra) ───SSH──→   1. Hardening (nftables, fail2ban, kernel)
+CLI (Cobra) ---SSH--->   1. Hardening (nftables, fail2ban, kernel)
                          2. Docker + k3s install
                          3. /opt/sdk-ops/services/<name>/v{N}/
                          4. docker compose up
-                         5. Health check → rollback on failure
+                         5. Health check -> rollback on failure
 ```
 
 Alternatively, cloud-init can provision without SSH push:
 
 ```
 [Local Machine]          [Provider API]         [VPS]
-CLI ──API──→ Create VPS ──user-data──→          Boot → cloud-init runs
+CLI --API---> Create VPS --user-data--->          Boot -> cloud-init runs
                                                   (hardening + Docker + k3s)
 ```
 
@@ -143,8 +143,8 @@ Full reference: `docs/commands.md`. Categories:
 1. sdk-ops config add-node <ip> --user root --key ~/.ssh/id_ed25519
 2. sdk-ops infra init <ip>          # hardening + Docker + k3s (or --docker / --bare)
 3. Verify: sdk-ops infra status <ip>
-   → SSH port stays on 22, user stays root (unless --ssh-port / --lock-root)
-   → After hardening: root SSH is blocked — use --user sdkops
+   -> SSH port stays on 22, user stays root (unless --ssh-port / --lock-root)
+   -> After hardening: root SSH is blocked — use --user sdkops
 ```
 
 ### Provision with CIS hardening
@@ -155,29 +155,29 @@ Full reference: `docs/commands.md`. Categories:
      --cis-psa --cis-audit-log --cis-netpol --cis-svcacc --cis-tls-ciphers \
      --auditd --lynis
 3. Verify: sdk-ops infra status <ip>
-   → PermitRootLogin no, MaxAuthTries 3, auditd active, Lynis installed
+   -> PermitRootLogin no, MaxAuthTries 3, auditd active, Lynis installed
 ```
 
 ### Provision a new VPS via provider API + cloud-init
 ```
 1. sdk-ops infra init --provider aws --plan t3.micro --location us-east-1 --cloud-init
-   → Creates VPS via API, passes cloud-init user-data, waits for boot
-   → Hardening + Docker + k3s already applied via cloud-init
+   -> Creates VPS via API, passes cloud-init user-data, waits for boot
+   -> Hardening + Docker + k3s already applied via cloud-init
 ```
 
 ### Deploy a service
 ```
 1. Create a Go service with main.go + service.yaml
 2. sdk-ops deploy push ./my-service --node <ip>
-   → Auto-installs Docker if missing on node
-   → Builds binary for linux/amd64 → Docker buildx + push → tar + SSH pipe
-   → docker compose up -d → Health check → Auto-rollback on failure
+   -> Auto-installs Docker if missing on node
+   -> Builds binary for linux/amd64 -> Docker buildx + push -> tar + SSH pipe
+   -> docker compose up -d -> Health check -> Auto-rollback on failure
 ```
 
 ### Multi-node deploy
 ```
 sdk-ops deploy push ./my-service --all
-   → Deploys to all registered nodes in parallel (sync.WaitGroup)
+   -> Deploys to all registered nodes in parallel (sync.WaitGroup)
 ```
 
 ### Manage firewall rules
@@ -213,8 +213,8 @@ sdk-ops infra provision provision.yaml --insecure
 (`cf`|`all`), per-host/group `traefik` domains (with `container_port` for
 bridge mode and `wildcard: true` for `*.domain`), `peers` (per-port
 restricted access between VPSes), `bans` (fail2ban, applied to every host),
-`services` (YAML-driven service deploy: render template → upload → compose →
-expose → timers, sized by `profile`) and `ssl.dns01` (cloudflare|bunny API
+`services` (YAML-driven service deploy: render template -> upload -> compose ->
+expose -> timers, sized by `profile`) and `ssl.dns01` (cloudflare|bunny API
 token for wildcard certificates). Run `--check` for a dry-run (parses,
 resolves and renders the services plan without SSH). Secrets NEVER go in the
 YAML — the provision reads them from the environment/.env (e.g.
@@ -300,13 +300,13 @@ sdk-ops infra restore <ip> ./backup.tar.gz
 
 ```
 Local (Mac ARM)                        VPS (x86_64)
-─────                                   ─────
+-----                                   -----
 1. go build (linux/amd64)               docker login (auto)
-2. docker buildx + push ──registry──→   docker pull
-3. tar files + SSH pipe ────────→   /opt/sdk-ops/services/<name>/v{N}/
-4.                                      symlink: current → v{N}
+2. docker buildx + push --registry--->   docker pull
+3. tar files + SSH pipe --------->   /opt/sdk-ops/services/<name>/v{N}/
+4.                                      symlink: current -> v{N}
 5.                                      docker compose up -d
-6.                                      Health check → OK or rollback
+6.                                      Health check -> OK or rollback
 ```
 
 ## Testing
@@ -358,7 +358,7 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
   created by hand should use `--restart unless-stopped` (daemon restarts from
   `docker.EnsureNetworking` stop them otherwise).
 - **Traefik router targets depend on the network mode**: bridge containers
-  cannot reach `http://localhost:PORT` (it is the container itself → 502).
+  cannot reach `http://localhost:PORT` (it is the container itself -> 502).
   The provisioner targets `http://<service>:<container_port>` over the shared
   `sdk-ops-net` network; host-network nodes use `http://localhost:<port>`.
 - **Never install a catch-all router on :80** — it swallows the ACME
@@ -388,7 +388,7 @@ make build   # go build -o sdk-ops ./cmd/sdk-ops/
   `--provision-yaml` (admin IPs).
 - **`sdk-ops certs`** issues Let's Encrypt certificates via **Traefik's own
   ACME resolver**: `issue` writes a router with
-  `certResolver: letsencrypt` (websecure → the `notfound` 404 service), so
+  `certResolver: letsencrypt` (websecure -> the `notfound` 404 service), so
   Traefik obtains/renews the cert with HTTP-01 — no acme.sh, no shell scripts,
   no provider keys. A pure-Go worker (`certs sync`, cross-compiled + uploaded,
   daily systemd timer) reads `/opt/traefik/acme.json` and copies the domain's

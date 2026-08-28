@@ -57,7 +57,7 @@ func newBackupCreateCmd(user, key *string, port *int) *cobra.Command {
 				}
 			}
 
-			fmt.Printf("✅ Backup: %s\n", path)
+			fmt.Printf("[OK] Backup: %s\n", path)
 			return nil
 		},
 	}
@@ -116,7 +116,7 @@ Examples:
 				}
 			}
 
-			fmt.Printf("✅ Database backup: %s\n", path)
+			fmt.Printf("[OK] Database backup: %s\n", path)
 			return nil
 		},
 	}
@@ -192,7 +192,7 @@ Examples:
 					return ""
 				}(),
 			})
-			fmt.Printf("✅ Backup scheduled\n")
+			fmt.Printf("[OK] Backup scheduled\n")
 			return nil
 		},
 	}
@@ -312,7 +312,7 @@ func newBackupRestoreCmd(user, key *string, port *int) *cobra.Command {
 			if err := deploy.RestoreServices(conn, args[1]); err != nil {
 				return err
 			}
-			fmt.Println("✅ Restore complete")
+			fmt.Println("[OK] Restore complete")
 			return nil
 		},
 	}

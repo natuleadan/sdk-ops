@@ -71,7 +71,7 @@ sleep 1
 REPL_OK=$(SQL_REP '{"statements":["SELECT v FROM _validate_repl WHERE id=99"]}' 2>/dev/null | grep -q "repltest" && echo yes || echo no)
 SQL '{"statements":["DELETE FROM _validate_repl WHERE id=99"]}' > /dev/null 2>&1
 if [ "$REPL_OK" = "yes" ]; then
-  echo "OK (primary→replica)"
+  echo "OK (primary->replica)"
 else
   echo "WARN (replica lag or miss)"
 fi

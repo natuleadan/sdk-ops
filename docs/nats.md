@@ -92,7 +92,7 @@ Three validated topologies:
   `nats-rpc.>`, `nats-pull.>`, `demo.>`, `events.>`, `$JS.*`, `_INBOX.>`.
 - **Config reload**: the provision recreates the container when the rendered
   `nats.conf` changes (idempotent: a matching config leaves the container up).
-- **Replica count**: a 3-node cluster → R3 streams; a 2-node cluster → R2
+- **Replica count**: a 3-node cluster -> R3 streams; a 2-node cluster -> R2
   (write quorum = both nodes). Use `--replicas` matching the node count.
 - **Server cert SANs**: include the node IPs and `127.0.0.1` so intra-VPS
   loopback clients verify.
@@ -107,7 +107,7 @@ interest and replicates streams. How the URL is resolved:
 
 | Form | URL | Notes |
 |------|-----|-------|
-| **External** (operator/app outside) | `tls://nts.example.com:4222` | geo-DNS → nearest node (or a server list of public IPs) |
+| **External** (operator/app outside) | `tls://nts.example.com:4222` | geo-DNS -> nearest node (or a server list of public IPs) |
 | **Internal VLAN** (app on a consumer-only VPS) | `tls://198.51.100.2:4222,tls://198.51.100.3:4222` | server list of the private IPs |
 | **Intra-VPS** (app on the same VPS as NATS) | `tls://127.0.0.1:4222` | loopback, reuses the node certs |
 
