@@ -53,8 +53,12 @@ func DecryptFileInPlace(path string) error {
 }
 
 func CreateSOPSConfig(ageKey string) error {
-	configDir := filepath.Join(os.Getenv("HOME"), ".config", "sops")
-	if err := os.MkdirAll(filepath.Clean(configDir), 0700); err != nil {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home dir: %w", err)
+	}
+	configDir := filepath.Join(home, ".config", "sops")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		return err
 	}
 
@@ -63,5 +67,5 @@ func CreateSOPSConfig(ageKey string) error {
   - age: %s
 `, ageKey)
 
-	return os.WriteFile(filepath.Clean(configPath), []byte(config), 0600)
+	return os.WriteFile(configPath, []byte(config), 0o600)
 }

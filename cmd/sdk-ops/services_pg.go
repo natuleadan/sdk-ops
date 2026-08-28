@@ -538,18 +538,29 @@ func uploadPGCerts(conn *goss.Client, svcDir, nodeName string) error {
 	if certDir == "" {
 		return nil // no cert store configured — the compose mounts ../ssl if present
 	}
-	read := func(p string) string {
-		// The path is built from the operator's own PG_CERT_DIR + the node name
-		// (validated by safeName) — no user-controlled input reaches it.
-		b, err := os.ReadFile(filepath.Clean(p)) // #nosec G304 -- operator's cert store + node name validated by safeName
+	// os.Root pins every read inside the operator's own PG_CERT_DIR: fixed
+	// relative names below, nodeName validated by safeName (a-zA-Z0-9._-),
+	// so no path can escape the cert store.
+	root, err := os.OpenRoot(certDir)
+	if err != nil {
+		return fmt.Errorf("open cert store %s: %w", certDir, err)
+	}
+	defer func() { _ = root.Close() }()
+	read := func(rel string) string {
+		f, err := root.Open(rel)
+		if err != nil {
+			return ""
+		}
+		defer func() { _ = f.Close() }()
+		b, err := io.ReadAll(f)
 		if err != nil {
 			return ""
 		}
 		return string(b)
 	}
-	ca := read(filepath.Join(certDir, "ca.pem"))
-	crt := read(filepath.Join(certDir, "server", nodeName+".pem"))
-	key := read(filepath.Join(certDir, "server", nodeName+".key"))
+	ca := read("ca.pem")
+	crt := read("server/" + nodeName + ".pem")
+	key := read("server/" + nodeName + ".key")
 	if ca == "" || crt == "" || key == "" {
 		return fmt.Errorf("pg certs missing in %s (ca/server/%s.{pem,key})", certDir, nodeName)
 	}
@@ -567,7 +578,7 @@ CERTEOF
 sudo chmod 600 %[1]s/../ssl/server.key
 sudo chown -R 70:70 %[1]s/../ssl
 `, svcDir, ca, crt, key)
-	_, _, err := ssh.Run(conn, script)
+	_, _, err = ssh.Run(conn, script)
 	return err
 }
 

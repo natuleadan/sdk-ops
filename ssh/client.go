@@ -92,12 +92,13 @@ func tryAgentSigners() []ssh.Signer {
 	if authSock == "" || strings.Contains(authSock, "..") {
 		return nil
 	}
+	// ssh-agent(1) exports an absolute socket path; reject anything else.
+	// os.Root cannot be used here: it only opens regular files/dirs, and the
+	// agent endpoint is a unix socket dialed in place. No os.Stat pre-check —
+	// DialUnix itself fails for anything that is not a listening socket, so
+	// there is no filesystem sink to guard.
 	sockPath := filepath.Clean(authSock)
 	if sockPath == "." || !strings.HasPrefix(sockPath, "/") || strings.Contains(sockPath, "..") {
-		return nil
-	}
-	fi, err := os.Stat(sockPath)
-	if err != nil || fi.Mode()&os.ModeSocket == 0 {
 		return nil
 	}
 	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: sockPath, Net: "unix"})
