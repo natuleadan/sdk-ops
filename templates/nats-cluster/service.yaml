@@ -1,0 +1,25 @@
+name: nats-cluster
+description: NATS JetStream R3 in k3s via the official nats helm chart (StatefulSet + JetStream file PVC) plus the NACK JetStream controller for declarative Stream/Consumer CRDs. Internal service DNS, no host ports.
+services:
+  - nats/nats helm chart (StatefulSet R3, JetStream file store on local-path PVC)
+  - nats/nack (JetStream controller — Stream/Consumer/KV/ObjectStore CRDs)
+  - nats-box deployment (chart-side CLI for validate/test)
+env:
+  NATS_K8S_NAMESPACE: nats
+  NATS_K8S_RELEASE: nats
+  NATS_K8S_TAG: 2.14-alpine
+  NATS_K8S_REPLICAS: "3"
+  NATS_K8S_STORAGE_CLASS: local-path
+  NATS_K8S_HELM_VERSION: v3.15.4
+  NATS_K8S_NACK: "true"
+  NATS_K8S_NACK_TAG: 0.24.0
+  NATS_CLI_VERSION: 0.4.0
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  backup: bash backup-s3.sh
+  restore: bash restore-s3.sh [-y|--yes] [stream] [timestamp]
+  test: bash test/test.sh
+  validate: bash validate.sh

@@ -1,0 +1,21 @@
+# nats-cluster — resource profiles (k3s statefulset sizing).
+lite:            # 0.25c / 128Mi per pod
+  cpu: "250m"
+  mem: 128Mi
+  js_storage: 5Gi
+  max_payload: 1MB
+normal:          # 1c / 1Gi
+  cpu: "1"
+  mem: 1Gi
+  js_storage: 10Gi
+  max_payload: 1MB
+medium:          # 2c / 2Gi
+  cpu: "2"
+  mem: 2Gi
+  js_storage: 25Gi
+  max_payload: 2MB
+large:           # 4c / 4Gi
+  cpu: "4"
+  mem: 4Gi
+  js_storage: 50Gi
+  max_payload: 2MB

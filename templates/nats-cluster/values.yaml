@@ -1,0 +1,37 @@
+# nats-cluster values — rendered by sdk-ops (fleet YAML profile + env).
+# Official nats helm chart (https://github.com/nats-io/k8s/tree/main/helm/charts/nats).
+# The chart manages the StatefulSet (podManagementPolicy: Parallel — required,
+# the cluster forms in one pass), the headless service for routes and the
+# ClusterIP service for clients, plus the three /healthz probes.
+config:
+  cluster:
+    enabled: true
+    replicas: {{ .Replicas }}
+  jetstream:
+    enabled: true
+    fileStore:
+      pvc:
+        size: {{ .JSStorage }}
+        storageClass: {{ .StorageClass }}
+  merge:
+    max_payload: << {{ .MaxPayload }} >>
+container:
+  image:
+    tag: {{ .Tag }}
+  merge:
+    resources:
+      requests:
+        cpu: "{{ .Cpu }}"
+        memory: {{ .Mem }}
+      limits:
+        cpu: "{{ .Cpu }}"
+        memory: {{ .Mem }}
+# Soft spread across the k3s nodes (ScheduleAnyway keeps a 3-replica cluster
+# schedulable on a 1-node k3s while still spreading on a 3-node one).
+podTemplate:
+  topologySpreadConstraints:
+    kubernetes.io/hostname:
+      maxSkew: 1
+      whenUnsatisfiable: ScheduleAnyway
+natsBox:
+  enabled: {{ .NatsBox }}

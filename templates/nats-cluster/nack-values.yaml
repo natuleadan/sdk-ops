@@ -1,0 +1,11 @@
+# nack-values — the NACK JetStream controller (nats/nack helm chart).
+# The controller reconciles Stream/Consumer/KV/ObjectStore CRDs against the
+# NATS cluster and enforces its resources (they are exclusively NACK-owned:
+# manual edits to a NACK-managed stream are reverted by the controller).
+jetstream:
+  enabled: true
+  image:
+    tag: {{ .NackTag }}
+  nats:
+    url: nats://{{ .Release }}.{{ .Namespace }}.svc.cluster.local:4222
+  controlLoop: {{ .NackControlLoop }}
