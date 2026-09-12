@@ -18,7 +18,7 @@ import (
 
 // certSyncConfig is the per-domain sync config written by `certs issue` and
 // consumed by `certs sync` on the node. The certificate is issued by Traefik's
-// own ACME resolver (acme.json) — pure Go, no shell scripts, no provider keys.
+// own ACME resolver (acme.json) - pure Go, no shell scripts, no provider keys.
 type certSyncConfig struct {
 	Domain   string   `json:"domain"`
 	Store    string   `json:"store"`

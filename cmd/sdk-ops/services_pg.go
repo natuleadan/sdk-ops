@@ -14,7 +14,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Topology helpers — hosts declaring the postgres/etcd services.
+// Topology helpers - hosts declaring the postgres/etcd services.
 
 // pgNodes lists the hosts that declare the postgres service (the Patroni members).
 func pgNodes(pf ProvisionFile) []ProvisionHost {
@@ -52,7 +52,7 @@ func isServiceVariant(svcs ProvisionServices, base string) bool {
 }
 
 // poolerNode reports whether this host runs the PgDog entry. Default: EVERY
-// postgres node runs its own PgDog (the "local-read" pattern — each app reads
+// postgres node runs its own PgDog (the "local-read" pattern - each app reads
 // via its internal pooler). An explicit `pooler: true` restricts it to one.
 func poolerNode(pf ProvisionFile, h ProvisionHost, cfg ServiceConfig) bool {
 	if cfg.Pooler {
@@ -84,11 +84,11 @@ func pgPrimaryNode(pf ProvisionFile) ProvisionHost {
 	return nodes[0]
 }
 
-// ensurePGDogImage — the pgdog image must exist on the node. An IPv6-only
+// ensurePGDogImage - the pgdog image must exist on the node. An IPv6-only
 // provider cannot pull ghcr.io (the registry has no AAAA): the fallback
-// downloads the image from the OPERATOR's machine (pure-Go OCI client — NO
+// downloads the image from the OPERATOR's machine (pure-Go OCI client - NO
 // docker required) and ships the tarball over the SSH pipe (docker load).
-// The tarball is a TEMP staging artifact — removed after the load; the image
+// The tarball is a TEMP staging artifact - removed after the load; the image
 // lives in the node's docker store (the re-apply skips via image inspect).
 func ensurePGDogImage(conn *goss.Client, nodeName string) error {
 	image := "ghcr.io/pgdogdev/pgdog:v0.1.52"
@@ -145,7 +145,7 @@ func ensurePGDogImage(conn *goss.Client, nodeName string) error {
 
 // pgRecreateWanted is the CLUSTER-level recreate: ANY postgres node declaring
 // `recreate: true` wipes the whole service on every node (the wipe must be
-// cluster-wide — a per-node wipe leaves the other nodes' stale data and the
+// cluster-wide - a per-node wipe leaves the other nodes' stale data and the
 // rewind/basebackup gets confused).
 func pgRecreateWanted(pf ProvisionFile) bool {
 	for _, n := range pf.Hosts {
@@ -157,7 +157,7 @@ func pgRecreateWanted(pf ProvisionFile) bool {
 }
 
 // ---------------------------------------------------------------------------
-// helpers — IPv6-safe host formatting (URLs need [v6]:port).
+// helpers - IPv6-safe host formatting (URLs need [v6]:port).
 
 // urlHost wraps an IPv6 literal in brackets for URL embedding; v4 passes through.
 func urlHost(ip string) string {
@@ -168,7 +168,7 @@ func urlHost(ip string) string {
 }
 
 // ---------------------------------------------------------------------------
-// etcdRenderData — the per-member render context for templates/etcd.
+// etcdRenderData - the per-member render context for templates/etcd.
 func etcdRenderData(pf ProvisionFile, h ProvisionHost, prof map[string]any, _ ServiceConfig) (map[string]any, error) {
 	nodes := etcdNodes(pf)
 	if len(nodes) == 0 {
@@ -203,7 +203,7 @@ func etcdRenderData(pf ProvisionFile, h ProvisionHost, prof map[string]any, _ Se
 }
 
 // ---------------------------------------------------------------------------
-// pgRenderData — the per-node render context for templates/postgres.
+// pgRenderData - the per-node render context for templates/postgres.
 func pgRenderData(pf ProvisionFile, h ProvisionHost, prof map[string]any, cfg ServiceConfig) (map[string]any, error) {
 	env := os.Getenv
 	nodes := pgNodes(pf)
@@ -220,7 +220,7 @@ func pgRenderData(pf ProvisionFile, h ProvisionHost, prof map[string]any, cfg Se
 	}
 
 	// etcd endpoints for the DCS. The LOCAL node's endpoint uses the host's
-	// docker bridge (172.17.0.1 — the published port): a container reaching # go-check:ignore-ip (docker bridge RFC1918)
+	// docker bridge (172.17.0.1 - the published port): a container reaching # go-check:ignore-ip (docker bridge RFC1918)
 	// the node's OWN public IP is hairpinned and the firewall drops it (no
 	// self-peer rule). The remote members use their peer IPs. # go-check:ignore-ip (docker bridge RFC1918)
 	localDockerBridge := "172.17.0.1" // go-check:ignore-ip (docker bridge RFC1918)
@@ -240,7 +240,7 @@ func pgRenderData(pf ProvisionFile, h ProvisionHost, prof map[string]any, cfg Se
 		ip = h.Host
 	}
 	// The PgDog targets: all postgres node IPs (the LOCAL node via the host's
-	// docker bridge — the hairpin of the own public IP is firewall-blocked).
+	// docker bridge - the hairpin of the own public IP is firewall-blocked).
 	poolerIPs := make([]map[string]any, 0, len(nodes))
 	for _, n := range nodes {
 		nip := n.PeerIP
@@ -282,7 +282,7 @@ func pgRenderData(pf ProvisionFile, h ProvisionHost, prof map[string]any, cfg Se
 }
 
 // ---------------------------------------------------------------------------
-// wireEtcdOn — etcd node wiring (validate timer).
+// wireEtcdOn - etcd node wiring (validate timer).
 func wireEtcdOn(conn *goss.Client, svcDir, nodeName string) error {
 	if err := safeName(nodeName); err != nil {
 		return err
@@ -291,16 +291,16 @@ func wireEtcdOn(conn *goss.Client, svcDir, nodeName string) error {
 }
 
 // ---------------------------------------------------------------------------
-// wirePGOn — postgres node wiring: certs, .env, host setup (pgxbs + pgbackrest
+// wirePGOn - postgres node wiring: certs, .env, host setup (pgxbs + pgbackrest
 // + symlink), nft bridge fixes, the DR restore flag and the timers.
 func wirePGOn(conn *goss.Client, svcDir, nodeName string, cfg ServiceConfig, pf ProvisionFile, h ProvisionHost) error {
 	if err := safeName(nodeName); err != nil {
 		return err
 	}
 	// Recreate: wipe the service state (containers + data + DCS keys + networks)
-	// before deploying — a clean redeploy, YAML-driven. Runs ONCE on the PRIMARY
-	// node (the first postgres node — the wave 1): the wipe is cluster-wide
-	// (every node's stale containers/data are removed BEFORE any compose up —
+	// before deploying - a clean redeploy, YAML-driven. Runs ONCE on the PRIMARY
+	// node (the first postgres node - the wave 1): the wipe is cluster-wide
+	// (every node's stale containers/data are removed BEFORE any compose up -
 	// stale leaders keep their DCS registrations and race the fresh bootstrap).
 	// The replica wires never wipe: the deploy order guarantees the primary
 	// deploys first and the replicas clone from it.
@@ -325,9 +325,9 @@ func wirePGOn(conn *goss.Client, svcDir, nodeName string, cfg ServiceConfig, pf 
 		return err
 	}
 	// DR: restore from S3 only when the flag is set, this node is the PRIMARY
-	// candidate (the first postgres node — the replicas clone from the leader)
-	// AND the data is missing (idempotent — an operational cluster is never
-	// restored). With the per-node pooler, every node is a pooler — the
+	// candidate (the first postgres node - the replicas clone from the leader)
+	// AND the data is missing (idempotent - an operational cluster is never
+	// restored). With the per-node pooler, every node is a pooler - the
 	// restore must NOT trigger on the replicas.
 	if cfg.Restore && pgPrimaryNode(pf).Name == h.Name {
 		if err := pgRestoreIfEmpty(conn, svcDir); err != nil {
@@ -335,16 +335,16 @@ func wirePGOn(conn *goss.Client, svcDir, nodeName string, cfg ServiceConfig, pf 
 		}
 	}
 	// The pgdog image must exist before the compose up: an IPv6-only provider
-	// cannot pull ghcr.io (v4-only) — the fallback ships it from the operator.
+	// cannot pull ghcr.io (v4-only) - the fallback ships it from the operator.
 	if err := ensurePGDogImage(conn, nodeName); err != nil {
 		return err
 	}
 	return installPGTimers(conn, svcDir, cfg.Backup)
 }
 
-// waitServiceUp — post-service readiness: the postgres PRIMARY must fully
+// waitServiceUp - post-service readiness: the postgres PRIMARY must fully
 // recover before the replicas clone (a basebackup racing the PITR recovery
-// grabs the pre-fork timeline — "requested timeline N is not a child of this
+// grabs the pre-fork timeline - "requested timeline N is not a child of this
 // server's history"). Other services: no wait.
 func waitServiceUp(conn *goss.Client, name string, pf ProvisionFile, h ProvisionHost) error {
 	if name != "pgsql-cluster" {
@@ -359,14 +359,14 @@ func waitServiceUp(conn *goss.Client, name string, pf ProvisionFile, h Provision
 // waitPGPrimaryReady waits for the primary's PITR recovery to fully complete
 // (the Patroni /primary REST answers only when the postgres is read-write),
 // then forces a CHECKPOINT. The replicas' basebackup then clones the clean
-// new timeline — racing the recovery grabs the pre-fork state and the clone
+// new timeline - racing the recovery grabs the pre-fork state and the clone
 // fails with "requested timeline N is not a child of this server's history".
 func waitPGPrimaryReady(conn *goss.Client, nodeName string) error {
 	cont := "pg-pg-" + nodeName + "-patroni-1"
 	script := fmt.Sprintf(`set -e
 # The Patroni needs the etcd QUORUM: a single etcd member blocks the
 # linearizable reads and the patroni waits forever. The next waves' etcds
-# complete the 2/3 — wait for it (up to 10 min).
+# complete the 2/3 - wait for it (up to 10 min).
 for i in $(seq 1 120); do
   if curl -fsS --max-time 3 "http://127.0.0.1:2379/v2/machines" >/dev/null 2>&1 \
      && [ "$(curl -s --max-time 3 'http://127.0.0.1:2379/v2/machines' 2>/dev/null | grep -oE 'http://[^,]+' | wc -l | tr -d ' ')" -ge 2 ]; then
@@ -393,12 +393,12 @@ exit 1
 	return err
 }
 
-// cleanPGState — the recreate wipe (YAML `recreate: true`): the postgres +
+// cleanPGState - the recreate wipe (YAML `recreate: true`): the postgres +
 // pgdog containers, the data dirs, the networks and the DCS (etcd v2) keys.
 // CLUSTER-WIDE: wipes this node AND every peer postgres node BEFORE any
-// compose up — otherwise the stale containers/leaders of the other nodes keep
+// compose up - otherwise the stale containers/leaders of the other nodes keep
 // their DCS registrations during the bootstrap and the fresh primary races
-// them ("bootstrap from leader 'pg-mia-XX'" — the OLD leader).
+// them ("bootstrap from leader 'pg-mia-XX'" - the OLD leader).
 func cleanPGState(conn *goss.Client, pf ProvisionFile, h ProvisionHost) error {
 	if err := safeName(h.Name); err != nil {
 		return err
@@ -414,8 +414,8 @@ sudo rm -rf /opt/sdk-ops/services/postgres/data /opt/sdk-ops/services/postgres/r
 sudo mkdir -p /opt/sdk-ops/services/postgres/run /opt/sdk-ops/services/postgres/data/patroni/data
 sudo chown -R 70:70 /opt/sdk-ops/services/postgres/run /opt/sdk-ops/services/postgres/data/patroni
 sudo chmod 0700 /opt/sdk-ops/services/postgres/data/patroni/data
-# DCS keys (etcd v2 keyspace) — Patroni leadership/state. --max-time: the
-# wave-1 etcd has NO quorum yet (single member) — a write would hang forever.
+# DCS keys (etcd v2 keyspace) - Patroni leadership/state. --max-time: the
+# wave-1 etcd has NO quorum yet (single member) - a write would hang forever.
 curl -s --max-time 5 -X DELETE 'http://127.0.0.1:2379/v2/keys/service/pg?recursive=true' >/dev/null 2>&1 || true
 `
 		_, _, err := ssh.Run(c, script)
@@ -426,7 +426,7 @@ curl -s --max-time 5 -X DELETE 'http://127.0.0.1:2379/v2/keys/service/pg?recursi
 	}
 	// The wipe covers EVERY fleet host (not just the ones declaring the
 	// postgres): a smaller topology (e.g. 2 nodes) must leave the hosts that
-	// LEFT the cluster empty — their stale pg containers/data would otherwise
+	// LEFT the cluster empty - their stale pg containers/data would otherwise
 	// survive. Idempotent: a host without pg state is a no-op.
 	for _, n := range pf.Hosts {
 		if n.Name == h.Name {
@@ -454,7 +454,7 @@ curl -s --max-time 5 -X DELETE 'http://127.0.0.1:2379/v2/keys/service/pg?recursi
 	return nil
 }
 
-// makePGConfigsReadable — the Patroni container runs as uid 70; the uploaded
+// makePGConfigsReadable - the Patroni container runs as uid 70; the uploaded
 // configs (0600 sdkops by the render) must be readable by the container.
 func makePGConfigsReadable(conn *goss.Client, svcDir string) error {
 	script := fmt.Sprintf(`set -e
@@ -483,7 +483,7 @@ func writePGLocalConf(conn *goss.Client) error {
 	env := os.Getenv
 	// The BACKUP conf (pgbackrest.conf) uses the /var/lib symlink so the
 	// queried data_directory MATCHES (the pgbackrest backup rejects a
-	// different pg1-path). The RESTORE conf (.local.conf) uses the REAL path —
+	// different pg1-path). The RESTORE conf (.local.conf) uses the REAL path -
 	// the restore's chown fails on the symlink ("Operation not permitted").
 	backupPath := "/var/lib/postgresql/data"
 	restorePath := "/opt/sdk-ops/services/postgres/data/patroni/data"
@@ -528,28 +528,28 @@ sudo chown pgxbs:pgxbs /etc/pgbackrest/pgbackrest.local.conf /etc/pgbackrest/pgb
 	return err
 }
 
-// pgRestoreIfEmpty — the idempotent DR: restore from S3 ONLY when the postgres
+// pgRestoreIfEmpty - the idempotent DR: restore from S3 ONLY when the postgres
 // data dir has no PG_VERSION (fresh/wiped) AND a backup exists in the repo.
 func pgRestoreIfEmpty(conn *goss.Client, svcDir string) error {
 	out, _, _ := ssh.Run(conn, "test -f /opt/sdk-ops/services/postgres/data/patroni/data/PG_VERSION && echo present || echo missing")
 	if strings.Contains(out, "present") {
-		return nil // data exists — never restore over it (idempotent)
+		return nil // data exists - never restore over it (idempotent)
 	}
 	out, _, _ = ssh.Run(conn, "sudo -u pgxbs pgbackrest --config=/etc/pgbackrest/pgbackrest.local.conf --stanza=main info 2>/dev/null | grep -q 'full backup' && echo repo-ok || echo repo-empty")
 	if !strings.Contains(out, "repo-ok") {
-		return nil // no backup in the repo — nothing to restore (fresh cluster)
+		return nil // no backup in the repo - nothing to restore (fresh cluster)
 	}
 	_, _, err := ssh.Run(conn, "cd "+svcDir+" && bash restore.sh --type=immediate")
 	return err
 }
 
 // uploadPGCerts uploads the CA + the node server cert/key + the client cert
-// from the operator's cert store (PG_CERT_DIR) — the PEM content is written on
+// from the operator's cert store (PG_CERT_DIR) - the PEM content is written on
 // the node (the files live on the Mac).
 func uploadPGCerts(conn *goss.Client, svcDir, nodeName string) error {
 	certDir := os.Getenv("PG_CERT_DIR")
 	if certDir == "" {
-		return nil // no cert store configured — the compose mounts ../ssl if present
+		return nil // no cert store configured - the compose mounts ../ssl if present
 	}
 	// os.Root pins every read inside the operator's own PG_CERT_DIR: fixed
 	// relative names below, nodeName validated by safeName (a-zA-Z0-9._-),
@@ -621,19 +621,19 @@ sudo chmod 600 %s/.env
 	return err
 }
 
-// setupPGHost — host-level requirements for the pgbackrest backup/restore:
-// the pgxbs user (uid 70 — same uid as the container postgres), pgbackrest
-// 2.59 (PGDG — the apt 2.50 does not support postgres 18), the data symlink
+// setupPGHost - host-level requirements for the pgbackrest backup/restore:
+// the pgxbs user (uid 70 - same uid as the container postgres), pgbackrest
+// 2.59 (PGDG - the apt 2.50 does not support postgres 18), the data symlink
 // and the nft bridge fixes (the peer drop blocks the containers' outbound).
 func setupPGHost(conn *goss.Client) error {
 	// The docker IPv6 ULA the bridge containers use (the egress rules). # go-check:ignore-ip (docker ULA v6)
 	fd00ULA := "fd00::/8" // go-check:ignore-ip (docker ULA v6)
 	script := fmt.Sprintf(`set -e
 logger -t sdk-ops-pg "wire: host setup (pgxbs + pgbackrest 2.59 + symlinks + nft bridge fixes)"
-# The provider mirror (mirror.<provider>) can hang on any addressing —
+# The provider mirror (mirror.<provider>) can hang on any addressing -
 # always switch to the official Ubuntu/Debian archives (provider-agnostic:
 # any provider) and force the apt over IPv6 ONLY on v4-less hosts (a v4-only
-# host has no v6 route — the ForceIPv6 would break the apt entirely).
+# host has no v6 route - the ForceIPv6 would break the apt entirely).
 sudo sed -i -E 's|https?://mirror[^/ ]*/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true
 sudo sed -i -E 's|mirror\+file://[^ ]*debian-security[^ ]*|http://deb.debian.org/debian-security|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
 sudo sed -i -E 's|mirror\+file://[^ ]*debian[^ ]*|http://deb.debian.org/debian|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
@@ -644,13 +644,13 @@ if ! ip -4 addr show | grep -q 'inet '; then
   echo 'Acquire::ForceIPv6 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv6 >/dev/null 2>&1 || true
 fi
 sudo apt-get update >/dev/null 2>&1 || true
-# pgxbs user (uid 70 = the container postgres uid — can read the data files);
-# the useradd warns/errors when the uid is outside the system range — tolerate it.
+# pgxbs user (uid 70 = the container postgres uid - can read the data files);
+# the useradd warns/errors when the uid is outside the system range - tolerate it.
 id pgxbs >/dev/null 2>&1 || (sudo useradd -u 70 -o -m -d /home/pgxbs -s /bin/bash pgxbs 2>/dev/null || true)
 # psql client for the host-side validation/suite (the wrapper alone errors).
 sudo apt-get install -y postgresql-client >/dev/null 2>&1 || true
-# pgbackrest 2.59 (PGDG — the apt 2.50 does not support postgres 18; the
-# host-side restore requires 2.59 — pinned to the exact stable).
+# pgbackrest 2.59 (PGDG - the apt 2.50 does not support postgres 18; the
+# host-side restore requires 2.59 - pinned to the exact stable).
 if ! pgbackrest version 2>/dev/null | grep -q '^pgBackRest 2\.59'; then
   sudo apt-get install -y postgresql-common >/dev/null 2>&1 || true
   sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null 2>&1 || true
@@ -670,7 +670,7 @@ sudo mkdir -p /opt/sdk-ops/services/postgres/run /opt/sdk-ops/services/postgres/
 sudo chown -R 70:70 /opt/sdk-ops/services/postgres/run /opt/sdk-ops/services/postgres/data/patroni
 sudo chmod 0700 /opt/sdk-ops/services/postgres/data/patroni/data
 # nft bridge fixes: the peer drop in the forward chain blocks the containers'
-# outbound to the PG/etcd/PgDog ports — the containers must reach the peers.
+# outbound to the PG/etcd/PgDog ports - the containers must reach the peers.
 # IPv4 (docker bridge 172.16.0.0/12) + IPv6 (the docker ULA fd00::/8). # go-check:ignore-ip
 # The 443 egress lets the containers reach the S3 (pgbackrest archive + backup).
 for port in 5432 6432 2379 2380 8008 443; do
@@ -688,8 +688,8 @@ done
 	return err
 }
 
-// installPGTimers — the validate (5 min) + the YAML-driven backup cadence
-// (`backup: { full, diff, incr }` — defaults: full daily at 00:15 + incr hourly).
+// installPGTimers - the validate (5 min) + the YAML-driven backup cadence
+// (`backup: { full, diff, incr }` - defaults: full daily at 00:15 + incr hourly).
 func installPGTimers(conn *goss.Client, svcDir string, b *BackupSchedule) error {
 	full, diff, incr := "daily", "", "hourly"
 	if b != nil {
@@ -764,7 +764,7 @@ func cadenceTimer(cadence string) string {
 	}
 }
 
-// yugabyteRenderData — the per-node render context for templates/yuga-docker.
+// yugabyteRenderData - the per-node render context for templates/yuga-docker.
 // The template uses env-var defaults (${YB_*}) for most knobs, so the render
 // data is intentionally light: the profile sizing + the placement zone. The
 // fleet provisioner may override cloud/region/zone per host for multi-region.
