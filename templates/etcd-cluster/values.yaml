@@ -1,0 +1,25 @@
+# etcd-cluster - bitnami/etcd helm values (rendered by sdk-ops).
+# External DCS for in-cluster services (k3s keeps its own embedded etcd).
+# Image tag: the bitnami chart pins its own tag — overriding with a bare
+# version like "3.5.15" fails (bitnami uses "3.5.15-debian-12-rX" format).
+# The chart version guarantees a pinned image.
+replicaCount: {{ .Replicas }}
+auth:
+  rbac:
+    create: false
+autoCompactionMode: periodic
+autoCompactionRetention: 2h
+containerPorts:
+  client: 2379
+  peer: 2380
+persistence:
+  enabled: true
+  storageClass: local-path
+  size: {{ .Storage }}
+resources:
+  requests:
+    cpu: {{ .CPU }}
+    memory: {{ .Mem }}
+  limits:
+    cpu: {{ .CPU }}
+    memory: {{ .Mem }}

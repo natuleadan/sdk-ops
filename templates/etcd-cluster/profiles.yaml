@@ -1,0 +1,19 @@
+# etcd-cluster - resource profiles (k3s helm sizing). Selected via
+# provision.yaml: services: { etcd-cluster: { profile: <name> } }
+# Note: k3s uses the local-path storageClass for the PVCs.
+lite:        # 1c / 2GB per node
+  cpu: 0.5
+  mem: 256Mi
+  storage: 1Gi
+normal:      # 2c / 4GB
+  cpu: 1
+  mem: 512Mi
+  storage: 2Gi
+medium:      # 4c / 8GB
+  cpu: 2
+  mem: 1Gi
+  storage: 5Gi
+large:       # 8c / 16GB
+  cpu: 4
+  mem: 2Gi
+  storage: 10Gi
