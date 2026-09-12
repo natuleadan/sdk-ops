@@ -89,6 +89,11 @@ var serviceUninstalls = map[string]serviceUninstall{
 	"valkey-cluster": {script: []string{
 		"sudo k3s kubectl delete ns valkey --force --grace-period=0 2>/dev/null || true",
 	}},
+	"pgsql-cnpg": {script: []string{
+		// The CNPG operator stays (shared); the cluster + namespace go.
+		"sudo k3s kubectl delete cluster pg -n pg --ignore-not-found 2>/dev/null || true",
+		"sudo k3s kubectl delete ns pg --force --grace-period=0 2>/dev/null || true",
+	}},
 	// native process families without clean units (yuga bare processes)
 	"yuga-docker": {script: []string{
 		"sudo pkill -f yugabyted 2>/dev/null || true; sudo pkill -f yb-master 2>/dev/null || true; sudo pkill -f yb-tserver 2>/dev/null || true",
@@ -157,7 +162,7 @@ func applyServicesOn(pf ProvisionFile, h ProvisionHost) error {
 func orderedServiceNames(services ProvisionServices) []string {
 	order := []string{
 		"etcd", "etcd-bare", "etcd-cluster",
-		"pgsql-cluster",
+		"pgsql-cluster", "pgsql-cnpg",
 		"nats", "nats-bare", "nats-cluster",
 		"df", "df-bare", "df-cluster",
 		"valkey-cluster",
@@ -191,6 +196,8 @@ func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg Ser
 		return wireEtcdOn(conn, svcDir, nodeName)
 	case "pgsql-cluster":
 		return wirePGOn(conn, svcDir, nodeName, cfg, pf, h)
+	case "pgsql-cnpg":
+		return wireCNPGOn(conn, svcDir)
 	case "valkey-cluster":
 		return wireValkeyOn(conn, svcDir)
 	case "df-cluster":
@@ -201,6 +208,30 @@ func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg Ser
 		verbosef("service %s: no extra wiring (dockerized template)", name)
 		return nil
 	}
+}
+
+// wireCNPGOn writes the service .env with the S3 credentials the CloudNativePG
+// Cluster CR references (init.sh turns them into the k8s secret). Secrets never
+// live in the fleet YAML.
+func wireCNPGOn(conn *golang_ssh.Client, svcDir string) error {
+	var lines []string
+	for _, k := range []string{"S3_BUCKET", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_PREFIX"} {
+		v := os.Getenv(k)
+		if v == "" {
+			continue
+		}
+		v = strings.ReplaceAll(v, "'", `'\''`)
+		lines = append(lines, fmt.Sprintf("%s='%s'", k, v))
+	}
+	if len(lines) == 0 {
+		verbosef("service pgsql-cnpg: no S3_* env — backups disabled")
+		return nil
+	}
+	cmd := fmt.Sprintf("umask 077; cat > %s/.env <<'SDKOPS_CNPG_ENV'\n%s\nSDKOPS_CNPG_ENV", svcDir, strings.Join(lines, "\n"))
+	if _, _, err := ssh.Run(conn, cmd); err != nil {
+		return fmt.Errorf("write pgsql-cnpg .env: %w", err)
+	}
+	return nil
 }
 
 // wireValkeyOn writes the service .env with the cluster password (the scripts
@@ -445,6 +476,8 @@ func buildRenderData(pf ProvisionFile, h ProvisionHost, dirName, profile string,
 		return dfRenderData(prof)
 	case dirName == "valkey-cluster":
 		return valkeyClusterRenderData(prof)
+	case dirName == "pgsql-cnpg":
+		return pgsqlCNPGRenderData(prof)
 	case dirName == "etcd-cluster":
 		return etcdClusterRenderData(prof)
 	case dirName == "etcd-bare":
@@ -626,6 +659,39 @@ func valkeyClusterRenderData(prof map[string]any) (map[string]any, error) {
 		"Mem":                prof["Mem"],
 		"MaxMemory":          maxMem,
 		"Password":           envOr("VK_PASSWORD", "valkey"),
+	}, nil
+}
+
+// pgsqlCNPGRenderData builds the render context for templates/pgsql-cnpg
+// (k3s via the CloudNativePG operator). The operator manages bootstrap,
+// replicas and failover; backups go to S3 via the barman object store when the
+// S3 env is present at render time (never in the YAML).
+func pgsqlCNPGRenderData(prof map[string]any) (map[string]any, error) {
+	envOr := func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
+	backup := os.Getenv("S3_BUCKET") != "" && os.Getenv("S3_ENDPOINT") != ""
+	return map[string]any{
+		"Namespace":        envOr("PG_K8S_NAMESPACE", "pg"),
+		"Name":             envOr("PG_K8S_NAME", "pg"),
+		"Instances":        envOr("PG_K8S_INSTANCES", "3"),
+		"StorageClass":     envOr("PG_K8S_STORAGE_CLASS", "local-path"),
+		"StorageSize":      prof["StorageSize"],
+		"CPU":              prof["CPU"],
+		"Cpus":             prof["Cpus"],
+		"Mem":              prof["Mem"],
+		"MemLimit":         prof["MemLimit"],
+		"MaxConnections":   prof["MaxConnections"],
+		"BackupEnabled":    backup,
+		"S3Bucket":         envOr("S3_BUCKET", ""),
+		"S3Prefix":         envOr("S3_PREFIX", "pg"),
+		"S3Endpoint":       envOr("S3_ENDPOINT", ""),
+		"RetentionPolicy":  envOr("PG_K8S_RETENTION", "7d"),
+		"OperatorManifest": envOr("PG_K8S_OPERATOR_MANIFEST",
+			"https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.0/cnpg-1.30.0.yaml"),
 	}, nil
 }
 

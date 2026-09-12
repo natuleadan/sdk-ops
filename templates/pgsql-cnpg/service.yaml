@@ -1,0 +1,19 @@
+name: pgsql-cnpg
+description: PostgreSQL HA on k3s via CloudNativePG — operator-managed primary + replicas with automatic failover, -rw/-ro services, native S3 backups (barman object store) and point-in-time recovery.
+services:
+  - cloudnative-pg operator (pinned release manifest)
+  - Cluster CR (instances 3, pinned operator, S3 barman backups)
+env:
+  PG_K8S_NAMESPACE: pg
+  PG_K8S_NAME: pg
+  PG_K8S_INSTANCES: "3"
+  PG_K8S_STORAGE_CLASS: local-path
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  validate: bash validate.sh
+  test: bash test/test.sh
+  backup: bash backup-s3.sh
+  restore: bash restore-s3.sh [-y|--yes] [recovery-target-time]

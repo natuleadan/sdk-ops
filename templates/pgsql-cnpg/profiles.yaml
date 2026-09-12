@@ -1,0 +1,21 @@
+lite:
+  CPU: "200m"
+  Cpus: "500m"
+  Mem: "128Mi"
+  MemLimit: "512Mi"
+  StorageSize: "1Gi"
+  MaxConnections: "50"
+normal:
+  CPU: "500m"
+  Cpus: "1"
+  Mem: "256Mi"
+  MemLimit: "1Gi"
+  StorageSize: "2Gi"
+  MaxConnections: "100"
+medium:
+  CPU: "1"
+  Cpus: "2"
+  Mem: "1Gi"
+  MemLimit: "2Gi"
+  StorageSize: "5Gi"
+  MaxConnections: "200"

@@ -1,0 +1,42 @@
+# pgsql-cnpg — CloudNativePG Cluster ({{ .Instances }} instances, automatic
+# failover). The operator manages the primary/replica set; the <name>-rw service
+# always points at the current primary. Backups go straight to S3 (barman
+# object store) when the S3 env is present at render time.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+spec:
+  instances: {{ .Instances }}
+  storage:
+    size: {{ .StorageSize }}
+    storageClass: {{ .StorageClass }}
+  resources:
+    requests:
+      memory: {{ .Mem }}
+      cpu: {{ .CPU }}
+    limits:
+      memory: {{ .MemLimit }}
+      cpu: {{ .Cpus }}
+  postgresql:
+    parameters:
+      max_connections: "{{ .MaxConnections }}"
+{{- if .BackupEnabled }}
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://{{ .S3Bucket }}/{{ .S3Prefix }}"
+      endpointURL: "https://{{ .S3Endpoint }}"
+      s3Credentials:
+        accessKeyId:
+          name: {{ .Name }}-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: {{ .Name }}-s3
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+    retentionPolicy: "{{ .RetentionPolicy }}"
+{{- end }}
