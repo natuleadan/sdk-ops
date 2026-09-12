@@ -463,33 +463,47 @@ func buildRenderData(pf ProvisionFile, h ProvisionHost, dirName, profile string,
 		}
 		return nil, fmt.Errorf("unknown profile %q (available: %s)", profile, strings.Join(names, ", "))
 	}
-	switch {
-	case strings.HasPrefix(dirName, "nats-cluster"):
-		return natsClusterRenderData(prof)
-	case strings.HasPrefix(dirName, "nats-bare"):
-		// Native nats-server on the host reuses the docker topology context:
-		// the same routes/advertise/certs logic, different systemd install.
-		return natsRenderData(pf, h, prof, cfg)
-	case dirName == "df-cluster":
-		return dfClusterRenderData(prof)
-	case dirName == "df-bare":
-		return dfRenderData(prof)
-	case dirName == "valkey-cluster":
-		return valkeyClusterRenderData(prof)
-	case dirName == "pgsql-cnpg":
-		return pgsqlCNPGRenderData(prof)
-	case dirName == "etcd-cluster":
-		return etcdClusterRenderData(prof)
-	case dirName == "etcd-bare":
-		// Native etcd on the host: same static bootstrap topology as the DCS.
-		return etcdRenderData(pf, h, prof, cfg)
-	case strings.HasPrefix(dirName, "nats"):
-		return natsRenderData(pf, h, prof, cfg)
-	case dirName == "etcd":
-		return etcdRenderData(pf, h, prof, cfg)
-	case dirName == "pgsql-cluster":
-		return pgRenderData(pf, h, prof, cfg)
-	case strings.HasPrefix(dirName, "pgsql"):
+	for _, r := range renderRules {
+		if (r.exact != "" && dirName == r.exact) || (r.prefix != "" && strings.HasPrefix(dirName, r.prefix)) {
+			return r.build(pf, h, prof, cfg)
+		}
+	}
+	return nil, fmt.Errorf("no render builder for template %q", dirName)
+}
+
+// renderBuilder builds the template variables for one service directory.
+type renderBuilder func(pf ProvisionFile, h ProvisionHost, prof map[string]any, cfg ServiceConfig) (map[string]any, error)
+
+// renderRule matches a template directory (exact name or family prefix) to
+// its render builder. Order matters: specific entries precede family prefixes.
+type renderRule struct {
+	exact  string
+	prefix string
+	build  renderBuilder
+}
+
+// profOnly adapts a profile-only render builder to the generic signature.
+func profOnly(fn func(map[string]any) (map[string]any, error)) renderBuilder {
+	return func(_ ProvisionFile, _ ProvisionHost, prof map[string]any, _ ServiceConfig) (map[string]any, error) {
+		return fn(prof)
+	}
+}
+
+// renderRules is the dispatch table for buildRenderData (declarative so the
+// builder stays under the cyclomatic threshold as families grow).
+var renderRules = []renderRule{
+	{prefix: "nats-cluster", build: profOnly(natsClusterRenderData)},
+	{prefix: "nats-bare", build: natsRenderData},
+	{exact: "df-cluster", build: profOnly(dfClusterRenderData)},
+	{exact: "df-bare", build: profOnly(dfRenderData)},
+	{exact: "valkey-cluster", build: profOnly(valkeyClusterRenderData)},
+	{exact: "pgsql-cnpg", build: profOnly(pgsqlCNPGRenderData)},
+	{exact: "etcd-cluster", build: profOnly(etcdClusterRenderData)},
+	{exact: "etcd-bare", build: etcdRenderData},
+	{prefix: "nats", build: natsRenderData},
+	{exact: "etcd", build: etcdRenderData},
+	{exact: "pgsql-cluster", build: pgRenderData},
+	{prefix: "pgsql", build: func(_ ProvisionFile, _ ProvisionHost, prof map[string]any, _ ServiceConfig) (map[string]any, error) {
 		// pgsql-docker / pgsql-bare are self-contained (compose stack or
 		// native scripts driven by env-var defaults) — render data is light.
 		return map[string]any{
@@ -497,15 +511,10 @@ func buildRenderData(pf ProvisionFile, h ProvisionHost, dirName, profile string,
 			"Cpus":      prof["cpus"],
 			"Provision": true,
 		}, nil
-	case strings.HasPrefix(dirName, "yuga"):
-		return yugabyteRenderData(pf, h, prof, cfg)
-	case strings.HasPrefix(dirName, "libsql"):
-		return libsqlRenderData(prof)
-	case strings.HasPrefix(dirName, "df"):
-		return dfRenderData(prof)
-	default:
-		return nil, fmt.Errorf("no render builder for template %q", dirName)
-	}
+	}},
+	{prefix: "yuga", build: yugabyteRenderData},
+	{prefix: "libsql", build: profOnly(libsqlRenderData)},
+	{prefix: "df", build: profOnly(dfRenderData)},
 }
 
 // libsqlRenderData builds the render context for templates/libsql-dockerized.
@@ -675,21 +684,21 @@ func pgsqlCNPGRenderData(prof map[string]any) (map[string]any, error) {
 	}
 	backup := os.Getenv("S3_BUCKET") != "" && os.Getenv("S3_ENDPOINT") != ""
 	return map[string]any{
-		"Namespace":        envOr("PG_K8S_NAMESPACE", "pg"),
-		"Name":             envOr("PG_K8S_NAME", "pg"),
-		"Instances":        envOr("PG_K8S_INSTANCES", "3"),
-		"StorageClass":     envOr("PG_K8S_STORAGE_CLASS", "local-path"),
-		"StorageSize":      prof["StorageSize"],
-		"CPU":              prof["CPU"],
-		"Cpus":             prof["Cpus"],
-		"Mem":              prof["Mem"],
-		"MemLimit":         prof["MemLimit"],
-		"MaxConnections":   prof["MaxConnections"],
-		"BackupEnabled":    backup,
-		"S3Bucket":         envOr("S3_BUCKET", ""),
-		"S3Prefix":         envOr("S3_PREFIX", "pg"),
-		"S3Endpoint":       envOr("S3_ENDPOINT", ""),
-		"RetentionPolicy":  envOr("PG_K8S_RETENTION", "7d"),
+		"Namespace":       envOr("PG_K8S_NAMESPACE", "pg"),
+		"Name":            envOr("PG_K8S_NAME", "pg"),
+		"Instances":       envOr("PG_K8S_INSTANCES", "3"),
+		"StorageClass":    envOr("PG_K8S_STORAGE_CLASS", "local-path"),
+		"StorageSize":     prof["StorageSize"],
+		"CPU":             prof["CPU"],
+		"Cpus":            prof["Cpus"],
+		"Mem":             prof["Mem"],
+		"MemLimit":        prof["MemLimit"],
+		"MaxConnections":  prof["MaxConnections"],
+		"BackupEnabled":   backup,
+		"S3Bucket":        envOr("S3_BUCKET", ""),
+		"S3Prefix":        envOr("S3_PREFIX", "pg"),
+		"S3Endpoint":      envOr("S3_ENDPOINT", ""),
+		"RetentionPolicy": envOr("PG_K8S_RETENTION", "7d"),
 		"OperatorManifest": envOr("PG_K8S_OPERATOR_MANIFEST",
 			"https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.0/cnpg-1.30.0.yaml"),
 	}, nil
@@ -949,10 +958,6 @@ func isPrivateIP(ip string) bool {
 		}
 	}
 	return false
-}
-
-func isIPv6(ip string) bool {
-	return strings.Contains(ip, ":")
 }
 
 // uploadDir streams a local directory to a remote one as a tar over stdin.
