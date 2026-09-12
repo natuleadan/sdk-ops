@@ -26,14 +26,14 @@ over Docker network.
 
 | Environment | CPU | RAM | Type |
 |-------------|:---:|:---:|------|
-| **Mac baremetal** | 10c ARM (Apple Silicon) | 32GB | Docker sqld + 2 replicas |
+| **Local workstation** | 10c ARM | 32GB | Docker sqld + 2 replicas |
 | **4c x86_64 VPS** | 4c high-frequency x86_64 | 8GB | Dedicated VPS, sqld + 2 replicas |
 
 ## Results
 
 ### SELECT 1 (read)
 
-| Round | Mac | VPS |
+| Round | Local | VPS |
 |:----:|:---:|:---:|
 | 1 | 2,180 | 2,983 |
 | 2 | 1,825 | 3,176 |
@@ -44,7 +44,7 @@ over Docker network.
 
 ### INSERT (write)
 
-| Round | Mac | VPS |
+| Round | Local | VPS |
 |:----:|:---:|:---:|
 | 1 | 4,621 | 31,453 |
 | 2 | 4,676 | — |
@@ -55,17 +55,17 @@ over Docker network.
 
 ## Comparison
 
-| Operation | Mac | VPS | Ratio |
+| Operation | Local | VPS | Ratio |
 |-----------|:---:|:---:|:-----:|
 | SELECT | 1,898 | 2,983 | **0.64×** |
 | INSERT | 4,690 | 31,453 | **6.7×** |
 
 ## Notes
 
-- **INSERT is not comparable across environments**: Mac Docker Desktop uses
-  `virtiofs` storage driver (writes go through VM -> macOS APFS), while Linux
-  uses native `overlay2`. SQLite WAL fsync is significantly slower on Mac
-  Docker. The VPS number represents true sqld write throughput.
+- **INSERT is not comparable across environments**: Docker Desktop uses
+  `virtiofs` storage driver (writes go through a VM -> host filesystem), while Linux
+  uses native `overlay2`. SQLite WAL fsync is significantly slower on
+  Docker Desktop. The VPS number represents true sqld write throughput.
 - **SELECT is CPU-bound** and comparable (~2-3k rps on both). The raw CPU
   throughput is similar for this HTTP+SQL workload.
 - **Bare metal VPS test** used `ab` (wrk lacks TLS support) and achieved

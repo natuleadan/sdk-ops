@@ -282,22 +282,31 @@ sdk-ops provides directory-based infrastructure templates under `templates/`:
 
 ```
 templates/
-+-- pgsql-docker/         # PostgreSQL 18 + PgDog + pgbackrest + replica
-|   +-- Dockerfile       # Custom image with pgbackrest pre-installed
++-- pgsql-docker/          # PostgreSQL 18 + PgDog + pgbackrest + replica (docker)
+|   +-- Dockerfile         # Custom image with pgbackrest pre-installed
 |   +-- docker-compose.yml
-|   +-- init.sh          # SSL + primary + replica + PgDog
-|   +-- backup.sh        # pgbackrest full backup
-|   +-- restore.sh       # Full/PITR restore (--delta, --set, --yes)
-|   +-- validate.sh      # Health checks (inside Docker)
-|   +-- gen-certs.sh     # SSL certificate generation
-|   +-- test/test.sh     # PITR integration test
-+-- kv-dockerized/         # Dragonfly KV + HAProxy TLS + replica
-|   +-- docker-compose.yml
-|   +-- haproxy.cfg      # TLS termination (workaround for tini bug)
-|   +-- init.sh          # SSL + cluster + REPLICAOF
-|   +-- backup.sh        # BGSAVE -> local + S3
-|   +-- restore.sh       # .dfs snapshot restore
-|   +-- test/test.sh     # PITR integration test
+|   +-- init.sh            # SSL + primary + replica + PgDog
+|   +-- backup.sh          # pgbackrest full backup
+|   +-- restore.sh         # Full/PITR restore (--delta, --set, --yes)
+|   +-- validate.sh        # Health checks (inside Docker)
+|   +-- gen-certs.sh       # SSL certificate generation
+|   +-- test/test.sh       # PITR integration test
++-- pgsql-bare/            # PostgreSQL native binary + systemd (bare)
++-- pgsql-cluster/         # PostgreSQL HA via Patroni + etcd (fleet-driven)
++-- pgsql-cnpg/            # PostgreSQL HA on k3s (CloudNativePG operator, S3 PITR)
++-- yuga-docker/           # YugabyteDB (docker)
++-- yuga-bare/             # YugabyteDB native binaries (bare)
++-- yuga-cluster/          # YugabyteDB k3s (yugabyte-k8s-operator)
++-- df-dockerized/         # Dragonfly KV + HAProxy TLS + replica (docker)
++-- df-bare/               # Dragonfly native binary + systemd + HAProxy TLS
++-- df-cluster/            # Dragonfly k3s (operator CR, automatic failover)
++-- valkey-cluster/        # Native Valkey Cluster on k3s (3 primaries + 3 replicas)
++-- nats-dockerized/       # NATS JetStream cluster (docker compose, R3)
++-- nats-bare/             # NATS native binary + systemd
++-- nats-cluster/          # NATS k3s (helm chart + NACK CRDs)
++-- etcd/                  # etcd docker (Patroni DCS)
++-- etcd-bare/             # etcd native binary + systemd
++-- etcd-cluster/          # etcd k3s (bitnami helm chart, DCS)
 +-- libsql-dockerized/     # libSQL + HAProxy TLS + WAL snapshots
 ```
 

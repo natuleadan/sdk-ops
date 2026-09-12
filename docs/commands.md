@@ -679,12 +679,12 @@ sdk-ops deploy init ./my-app --template nextjs           # Next.js (standalone)
 sdk-ops deploy init ./my-app --template python-fastapi   # FastAPI + uvicorn
 sdk-ops deploy init ./my-app --template django           # Django + gunicorn
 sdk-ops deploy init ./pg --template pgsql-docker           # PostgreSQL + PgDog + pgbackrest
-sdk-ops deploy init ./kv --template kv-dockerized           # Dragonfly KV + HAProxy TLS
+sdk-ops deploy init ./df --template df-dockerized           # Dragonfly KV + HAProxy TLS
 sdk-ops deploy init ./ls --template libsql-dockerized        # libSQL + HAProxy TLS
 
 # Infrastructure templates deploy via docker compose (not deploy push)
 sdk-ops deploy init ./pg --template pgsql-docker
-sdk-ops deploy init ./kv --template kv-dockerized
+sdk-ops deploy init ./df --template df-dockerized
 sdk-ops deploy init ./ls --template libsql-dockerized
 cp -r ./pg /root/pg
 ssh root@<ip> "cd /root/pg && bash init.sh"

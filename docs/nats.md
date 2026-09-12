@@ -1,7 +1,7 @@
 # Deploying a NATS JetStream cluster with sdk-ops
 
-YAML-driven NATS cluster deployment via `sdk-ops infra provision`. Validated on
-a 3-node geo cluster (R3) and a 2-node cluster (R2) with a consumer-only node.
+YAML-driven NATS cluster deployment via `sdk-ops infra provision`. Supports
+3-node (R3) and 2-node (R2) clusters with a consumer-only node.
 
 ## 1. Declare the fleet
 
@@ -78,7 +78,7 @@ stream:
     key_file: "${NATS_KEY}"
 ```
 
-Three validated topologies:
+Three supported topologies:
 - **Remote**: app/tests from the operator to the public URLs.
 - **Intra-VPS**: app on the same VPS as NATS, `tls://127.0.0.1:4222` (loopback).
 - **Intra-VLAN**: app on a consumer-only VPS, connecting to the private IPs
@@ -136,3 +136,36 @@ A microservice subscribes to its stream over its single connection. The cluster
 propagates the subscription interest across the mesh and replicates the
 streams, so it receives messages published on any node. The server list is only
 the failover pool — the client does not bounce between servers per message.
+
+## The three NATS modes
+
+| mode | template | transport | auth/TLS |
+|---|---|---|---|
+| docker | `nats-dockerized` | compose, 1..N containers | operator JWT + bcrypt + TLS/mTLS + at-rest |
+| bare | `nats-bare` | native nats-server + systemd (pinned tarball + SHA256SUMS) | same nats.conf render ({{ . }}), TLS certs self-serve |
+| k3s | `nats-cluster` | official `nats/nats` helm chart (StatefulSet R3, JetStream file PVC local-path) + **NACK** (`nats/nack`) for declarative Stream/Consumer/KV CRDs | none in-cluster (k8s network trust + NetworkPolicy) — documented gap |
+
+### NACK (JetStream controller) — lessons from nats-io/k8s
+
+- The chart already sets `podManagementPolicy: Parallel` on the StatefulSet —
+  ordered start would deadlock a NATS cluster (no node is ready until it sees
+  its peers).
+- `config.merge` takes plain NATS config keys (accounts, system_account);
+  `config.cluster.enabled/replicas` + `config.jetstream.fileStore.pvc` are the
+  v1.x schema values. `max_payload` needs the `<< 1MB >>` unit wrapping.
+- NACK-managed streams are exclusively NACK-owned: never mix CLI and CRD
+  ownership of the same stream. `controlLoop: true` additionally reverts
+  manual edits continuously.
+- The nats CLI on the node (pinned 0.4.0) reaches the ClusterIP service via
+  `k3s kubectl port-forward svc/nats 14222:4222` — that is how the DR seal/
+  unseal runs from the node without exposing ports.
+- `peerRouteIP` prefers the declared `peer_ip` whenever both peers share
+  the same family (private v4 VLAN or global v6) — the v6/mixed variants mesh
+  over the declared network instead of falling back to the public v4 host.
+
+### restore.sh CLI 0.4.0 forms
+
+`auth nkey unseal <blob.nkey> <recipient_nk> <sender_pub> --output` (3 args)
+and `stream restore <dir> --flag=value` — space-separated global flags
+mis-parse in 0.4.0. The sender public key derives on-node via
+`nats auth nkey show <NATS_SEAL_SENDER_NK>`.

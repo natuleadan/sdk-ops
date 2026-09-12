@@ -80,7 +80,7 @@ Key points (from the YBA restore docs):
   `parallelism` (default 8) sets the concurrent SSH commands.
 - The restore is **one-time**: the resource does not track remote state —
   remove it after `terraform apply`.
-- `storage_config_uuid` points at the storage config (e.g. the S3/B2 bucket
+- `storage_config_uuid` points at the storage config (e.g. the S3 bucket
   where the backup lives) — never MinIO internally for the DR copy.
 
 ## Failover
@@ -89,11 +89,11 @@ RF=3 tolerates one node loss — killing any single `yugabyte-*` keeps reads and
 writes flowing while the remaining masters hold quorum (2/3). `test/test.sh`
 verifies it. A lost node re-joins and re-syncs on restart.
 
-## Validated
+## Supported
 
 - 3-node cluster: masters quorum (3), YSQL + YCQL read/write, follower reads.
 - Failover: kill one node -> cluster stays healthy -> node re-joins.
-- Backup to real S3 (B2): `ysql_dump` shipped and confirmed in the bucket.
+- Backup to S3: `ysql_dump` shipped and confirmed in the bucket.
 - Resource profiles in `profiles.yaml` (`lite`/`normal`/`medium`/`large`).
 
 ## Gotchas

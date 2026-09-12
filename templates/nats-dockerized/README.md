@@ -37,7 +37,7 @@ services:
 - Auth: bcrypt users (app/sys/svc) with scoped publish/subscribe.
 - Cluster mesh (6222) TLS + routes over private VLAN or public IPs.
 
-## Validated gotchas (3-node geo cluster, 2026-08)
+## Gotchas (3-node cluster deployment)
 
 - **App user permissions**: the `app` user must be able to publish/subscribe the
   microservice's subjects. Current allow list includes `$KV.>`, `links.>`,

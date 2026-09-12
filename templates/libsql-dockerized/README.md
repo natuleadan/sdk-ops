@@ -1,6 +1,6 @@
 # libsql-dockerized — libSQL 3-Node Cluster
 
-libSQL (sqld) cluster: 1 primary + 2 replicas, etcd-based controller (automatic failover), write-aware router (TLS), and S3 backup (Backblaze B2).
+libSQL (sqld) cluster: 1 primary + 2 replicas, etcd-based controller (automatic failover), write-aware router (TLS), and S3 backup.
 
 ## Services
 
@@ -129,8 +129,8 @@ bash test/test.sh       # PITR cycle + failover test
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `S3_ACCESS_KEY` | — | S3/B2 access key |
-| `S3_SECRET_KEY` | — | S3/B2 secret key |
+| `S3_ACCESS_KEY` | — | S3 access key |
+| `S3_SECRET_KEY` | — | S3 secret key |
 | `S3_BUCKET` | `libsql-backups` | S3 bucket name |
 | `S3_PREFIX` | `libsql` | S3 key prefix |
 | `S3_ENDPOINT` | `s3.us-east-005.backblazeb2.com` | S3 endpoint |

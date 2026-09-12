@@ -44,6 +44,43 @@ The token lives at `/var/lib/rancher/k3s/server/node-token` on the server. The
 join is idempotent (the installer rewrites the agent unit); a previous
 standalone server on the agent must be cleaned first (the units + the state).
 
+## High-availability (HA) mode
+
+`k3s_ha: true` in the provision YAML turns the fleet into an HA cluster: the
+first host boots with `--cluster-init` (embedded etcd) on its `peer_ip`, every
+following host joins as an **HA server** (not agent) via
+`https://<first-peer-ip>:6443`. 3 servers = etcd quorum 2/3.
+
+```yaml
+k3s_ha: true
+k3s_iface: ens19           # flannel binds to the VLAN NIC
+hosts:
+  - name: mia-01
+    host: 192.0.2.10
+    peer_ip: 192.0.2.20    # the private/VLAN address — flannel + etcd peer
+  - name: mia-02
+    host: 192.0.2.11
+    peer_ip: 192.0.2.21
+  - name: mia-03
+    host: 192.0.2.12
+    peer_ip: 192.0.2.22
+```
+
+**Critical flags must be written BEFORE the install.** The provision writes
+`/etc/rancher/k3s/config.yaml` with `cluster-init: true`, `flannel-iface`,
+and `node-ip` before running the k3s install script. Without this, the
+installer starts a single-node cluster and the join creates 3 independent
+servers instead of one HA cluster.
+
+**Join form** (manual, if needed):
+```bash
+# On each subsequent server node:
+sh -s - server --server https://<first-peer-ip>:6443
+```
+
+The provision handles this automatically; the join form is documented for
+manual recovery.
+
 ## The registry images (private/public)
 
 The Deployment references the image from a registry (GHCR, VCR, ...) with an
@@ -111,6 +148,35 @@ The k3s mode is the declarative path: the scaling is `kubectl scale` /
   the fleet nodes.
 - **No double traefik**: the k3s mode does not install the host traefik — the
   cluster uses its own ingress controller (`no_traefik` for clarity).
+
+## Datastore services inside k3s (per-template, granular)
+
+The datastore services run inside the cluster as their own templates — deploy
+each one **granularly** with its fleet YAML, or declare the ones that must
+coexist together in a single YAML (the provision uninstalls the services a
+YAML does not declare):
+
+| Service | Template | What it runs |
+|---|---|---|
+| PostgreSQL HA | `pgsql-cnpg` | CloudNativePG operator + Cluster CR: primary + replicas, `-rw`/`-ro` services, barman S3 backups + PITR |
+| Valkey Cluster | `valkey-cluster` | 6 cluster-enabled nodes: 3 primaries + 3 replicas, 16384 shards slots, cluster-native failover |
+| Dragonfly | `df-cluster` | dragonflydb operator (master + replicas), native S3 snapshots |
+| NATS JetStream | `nats-cluster` | official helm chart (R3) + NACK CRDs (Stream/Consumer/KV) |
+| etcd (DCS) | `etcd-cluster` | bitnami helm chart, 3 replicas |
+
+```bash
+set -a; . env/.env; set +a            # VK_PASSWORD / DF_PASSWORD / S3_* (never in the YAML)
+sdk-ops provision svc.yaml --check    # dry-run: parse + render, no changes
+sdk-ops provision svc.yaml            # deploy / update (idempotent init)
+```
+
+Size them with the template **profiles** (`profile: lite|normal|medium|large`)
+and remember the nodes are shared: several services asking full cores will not
+schedule on the small plans.
+
+DR: every template ships `backup-s3.sh` / `restore-s3.sh` (per-shard RDB for
+valkey, barman PITR for cnpg, native snapshots for df, nkey-sealed streams for
+nats) — see each `templates/<name>/README.md`.
 
 ## YugabyteDB inside k3s (operator)
 

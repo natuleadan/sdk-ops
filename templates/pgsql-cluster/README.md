@@ -22,7 +22,7 @@ via `provision.yaml`: `services: { pgsql-cluster: { profile: <name> } }`.
 `PG_SUPERUSER`, `PG_APP_PASSWORD`, `PG_REPLICATOR_PASSWORD`, `PG_REWIND_PASSWORD`,
 `S3_*`, `PG_CIPHER_PASS`.
 
-## Gotchas (validated on a 3-node cluster)
+## Gotchas (3-node cluster deployment)
 
 - pgbackrest **2.59 PGDG** (the apt 2.50 does not support postgres 18); the SAME
   version on every host (the protocol requires it).

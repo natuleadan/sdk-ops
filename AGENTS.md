@@ -223,7 +223,7 @@ YAML — the provision reads them from the environment/.env (e.g.
 rendering; `nats-dockerized` deploys a JetStream cluster node (R3) with
 TLS/mTLS, at-rest and per-service authz.
 
-**nats-dockerized gotchas (validated on a 3-node geo cluster):**
+**nats-dockerized gotchas (3-node cluster deployment):**
 - The app user (`app`) must be able to publish/subscribe the subjects the
   microservice uses (`$KV.>` for KV, plus e.g. `links.>`, `nats-rpc.>`,
   `nats-pull.>`) — otherwise the sdk-api KV/RPC/events fail with permissions

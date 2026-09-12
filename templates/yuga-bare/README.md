@@ -41,7 +41,7 @@ tar xzf ... && ./bin/post_install.sh
 
 ## DR (external S3, never MinIO)
 
-`backup.sh` dumps via `ysql_dump` and ships to **Backblaze B2** (`S3_*` env, the
+`backup.sh` dumps via `ysql_dump` and ships to **S3** (`S3_*` env, the
 `minio/mc` client only as a transport — the storage is the external bucket).
 `restore.sh` pulls the latest dump and reloads it.
 

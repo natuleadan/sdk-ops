@@ -1,4 +1,4 @@
-# kv-dockerized — redis-benchmark RPS
+# df-dockerized — redis-benchmark RPS
 
 ## What is RPS
 
@@ -22,14 +22,14 @@ per second the server can process.
 
 | Environment | CPU | RAM | Type |
 |-------------|:---:|:---:|------|
-| **Mac baremetal** | 10c ARM (Apple Silicon) | 32GB | Local Docker (Dragonfly primary direct) |
+| **Local workstation** | 10c ARM | 32GB | Local Docker (Dragonfly primary direct) |
 | **4c x86_64 VPS** | 4c high-frequency x86_64 | 8GB | Dedicated VPS (Dragonfly primary direct) |
 
 ## Results
 
 ### SET (write)
 
-| Round | Mac | VPS |
+| Round | Local | VPS |
 |:----:|:---:|:---:|
 | 1 | 121,892 | 46,569 |
 | 2 | 124,875 | 46,041 |
@@ -40,7 +40,7 @@ per second the server can process.
 
 ### GET (read)
 
-| Round | Mac | VPS |
+| Round | Local | VPS |
 |:----:|:---:|:---:|
 | 1 | 125,376 | 46,076 |
 | 2 | 120,861 | 46,555 |
@@ -51,7 +51,7 @@ per second the server can process.
 
 ### INCR (atomic counter)
 
-| Round | Mac | VPS |
+| Round | Local | VPS |
 |:----:|:---:|:---:|
 | 1 | 125,376 | 45,194 |
 | 2 | 125,755 | 44,709 |
@@ -62,7 +62,7 @@ per second the server can process.
 
 ## Comparison
 
-| Command | Mac | VPS | Ratio |
+| Command | Local | VPS | Ratio |
 |---------|:---:|:---:|:-----:|
 | SET | 124,285 | 45,332 | **2.7×** |
 | GET | 124,495 | 45,660 | **2.7×** |

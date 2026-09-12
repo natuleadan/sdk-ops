@@ -23,7 +23,7 @@ All benchmarks run **inside** the Docker container (same network, no network lat
 
 | Environment | CPU | RAM | Type |
 |-------------|:---:|:---:|------|
-| **Mac baremetal** | 10c ARM (Apple Silicon) | 32GB | Local Docker (Postgres directo) |
+| **Local workstation** | 10c ARM | 32GB | Local Docker (Postgres directo) |
 | **4c x86_64 VPS** | 4c high-frequency x86_64 | 8GB | Dedicated VPS (Postgres directo) |
 | **4c x86_64 VPS via PgDog** | Same VPS + PgDog proxy | 8GB | VPS Docker (PgDog -> Postgres) |
 
@@ -31,7 +31,7 @@ All benchmarks run **inside** the Docker container (same network, no network lat
 
 ### Read-only (SELECT)
 
-| Round | Mac directo | VPS directo | VPS via PgDog |
+| Round | Local directo | VPS directo | VPS via PgDog |
 |:----:|:-----------:|:-----------:|:-------------:|
 | 1 | 114,233 | 23,257 | 16,079 |
 | 2 | 114,253 | 22,584 | 15,797 |
@@ -42,7 +42,7 @@ All benchmarks run **inside** the Docker container (same network, no network lat
 
 ### Write (SELECT + UPDATE + INSERT)
 
-| Round | Mac directo | VPS directo | VPS via PgDog |
+| Round | Local directo | VPS directo | VPS via PgDog |
 |:----:|:-----------:|:-----------:|:-------------:|
 | 1 | 7,231 | 2,859 | 2,197 |
 | 2 | 9,173 | 2,868 | 2,175 |
@@ -53,9 +53,9 @@ All benchmarks run **inside** the Docker container (same network, no network lat
 
 ### Comparison
 
-| Path | Read-only | Write | Ratio vs Mac (read) |
+| Path | Read-only | Write | Ratio vs Local (read) |
 |------|:---------:|:-----:|:-------------------:|
-| Mac baremetal directo | 107,149 | 9,483 | 1× |
+| Local directo | 107,149 | 9,483 | 1× |
 | 4c x86_64 VPS directo | 23,169 | 2,842 | ~4.6× slower |
 | 4c x86_64 VPS via PgDog | 15,888 | 2,185 | ~6.7× slower |
 

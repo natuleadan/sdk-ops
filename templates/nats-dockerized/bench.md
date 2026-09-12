@@ -9,9 +9,9 @@ Measure the JetStream throughput of a deployed node/cluster.
 ./rps.sh --js               # JetStream sync pub, 20 / 100k / 128B
 ```
 
-## Methodology (validated on a 3-node geo cluster)
+## Methodology (3-node cluster)
 
-- Run INSIDE the node (or the operator Mac) with the app credentials.
+- Run INSIDE the node (or the operator workstation) with the app credentials.
 - Core pub: `nats bench` (100 clients, 500k messages, 128B) -> messages/s.
 - JetStream sync: `nats bench --js` (20 clients, 100k, 128B) -> the ack'd rate.
 - **Cluster mode** (R2/R3): JetStream sync writes wait for the raft quorum, so

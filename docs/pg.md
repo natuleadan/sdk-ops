@@ -35,7 +35,7 @@ services:
   drills or pre-hardened nodes; connect as root. When `hardening: true` the
   provision runs the full hardening first (sdkops user + nft allowlist) and the
   peers/exposes are enforced.
-- **OS matrix (validated)**: Ubuntu 22.04 / 24.04 / 26.04 + Debian 13 (trixie) —
+- **OS matrix**: Ubuntu 22.04 / 24.04 / 26.04 + Debian 13 (trixie) —
   the provider mirror (`mirror.<provider>`, e.g. the provider's mirror) is replaced
   with the official archives (`archive.ubuntu.com` / `deb.debian.org`) on every
   wire — provider-agnostic (any provider).
@@ -74,7 +74,7 @@ services:
 - **IPv6-only hosts work**: the postgres listens dual (`*`), the mesh runs over
   the peers' IPv6, and the VPS does not need IPv4 at all.
 
-### IPv6 resolutions (validated on IPv6-only VPSes)
+### IPv6 resolutions (works on IPv6-only VPSes)
 
 - **Docker IPv6**: `daemon.json` (`ipv6` + `fixed-cidr-v6` + `ip6tables`) +
   `enable_ipv6` on the compose networks (the postgres + etcd).
@@ -130,7 +130,7 @@ services:
 When the docker model (≤3 nodes) is not enough — production HA, many nodes,
 declarative scaling — move to **k3s + a postgres operator** (CloudNativePG).
 The k3s cluster + the TLS + the registry images: see `docs/k3s.md`.
-## Validated
+## Supported
 
 - Failover AUTO + re-join + switchover + sync RPO=0.
 - DR drill: `recreate: true` + `restore: true` -> the data comes back from S3
@@ -144,8 +144,8 @@ The k3s cluster + the TLS + the registry images: see `docs/k3s.md`.
   - IPv6-only (no v4, no VLAN — the whole stack over the peers' v6).
   - Mixed (VLAN + IPv6 per host — the `peer_ip` decides per node).
 - **OS matrix**: Ubuntu 22.04 / 24.04 / 26.04 + Debian 13 (trixie).
-- **No-hardening matrix** (`hardening: false`, 2026-08-14): the suite **27/27
-  ALL PASS** + the failover real (kill primary -> promote) + the DR
+- **No-hardening matrix** (`hardening: false`): the full suite runs end to end
+  + real failover (kill primary -> promote) + the DR
   (marker -> S3 -> restore) on every connectivity variant:
   - VLAN mesh (`10.0.0.x`) — the v4/v6 only for egress.
   - IPv6 mesh (`::/64`, the internet) — no VLAN.
@@ -183,5 +183,52 @@ The k3s cluster + the TLS + the registry images: see `docs/k3s.md`.
   (`/opt/sdk-ops/pgx/`) with `/etc/sdk-ops/pgx.env` — `PG_NODES_IPS` must list
   the cluster's peer IPs (v4 or v6) for the role resolution; the app user needs
   `pg_monitor` (the sync visibility) + `CREATEDB` (the clone test); the TLS
-  certs live at `/etc/sdk-ops/certs/`. Run from the Mac:
+  certs live at `/etc/sdk-ops/certs/`. Run from the workstation:
   `the validation suite on the primary (the workspace wrapper)`.
+
+## CloudNativePG on k3s (pgsql-cnpg)
+
+The cloud-native postgres for the k3s mode: the **CloudNativePG** operator
+(pinned release manifest, installed by the template's `init.sh`) reconciles a
+`Cluster` CR — no Patroni/etcd involved. The operator is shared infrastructure
+and stays installed across redeploys.
+
+```yaml
+mode: k3s
+hardening: false
+no_traefik: true
+hosts:
+  - { name: mia-01, host: <ip>, peer_ip: <ip> }
+services:
+  pgsql-cnpg:
+    profile: lite          # CPU/Cpus/Mem/MemLimit/StorageSize/MaxConnections
+```
+
+```bash
+set -a; . env/.env; set +a     # S3_BUCKET/S3_ENDPOINT/S3_ACCESS_KEY/S3_SECRET_KEY (+S3_PREFIX)
+sdk-ops provision svc.yaml     # operator + Cluster CR + wait ready (idempotent)
+```
+
+- **Topology**: `instances: 3` (1 primary + 2 replicas by default, spread by
+  the scheduler), `PG_K8S_INSTANCES` to change. The services `<name>-rw`
+  (always the primary), `<name>-ro` (replicas) and `<name>-r` (any) are the
+  app entry points: `postgresql://app:<pass>@<name>-rw.<ns>.svc:5432/app`
+  (password in the operator-generated `<name>-app` secret).
+- **Failover**: operator-managed — deleting the primary pod promotes a replica
+  and the `-rw` service follows it (the integration test deletes the primary
+  twice and verifies data survivorship).
+- **Backups (barman object store)**: with the S3 env present the Cluster CR
+  carries `backup.barmanObjectStore` (WAL archiving + base backups, retention
+  `PG_K8S_RETENTION`, default `7d`). `backup-s3.sh` triggers an on-demand
+  `Backup` CR and verifies the artifact; `restore-s3.sh` bootstraps a
+  `<name>-restore` cluster from S3, optionally with an exact
+  `recovery-target-time` (PITR verified to the second in the DR drill).
+- **Store layout**: barman keys the path by `serverName` (the cluster name),
+  so the real objects live under `<prefix>/<name>/base|wals/` — the restore CR
+  must pin `serverName` to the source cluster (the script does).
+- **Pinned operator**: `v1.30.0` (client-side oversized CRDs need
+  `kubectl apply --server-side`; `PG_K8S_OPERATOR_MANIFEST` to override). The
+  built-in barman support is removed in CNPG 1.31 — migrating to the barman
+  cloud plugin (needs cert-manager) is the future path.
+- **Docker/Patroni parity**: same goal (HA postgres) — use `pgsql-cluster`
+  (Patroni+etcd, docker) when there is no k3s; use `pgsql-cnpg` when there is.

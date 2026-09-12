@@ -212,7 +212,7 @@ Templates expose only the **entrypoint** port to the internet. Internal ports
 | Template | Entrypoint | Internal ports closed |
 |----------|:----------:|:-------------------:|
 | `pgsql-docker` | 6432 (PgDog) | 5432, 5433, 5434 |
-| `kv-dockerized` | 6379 (HAProxy TLS) | 6380, 6381, 10001-10003 |
+| `df-dockerized` | 6379 (HAProxy TLS) | 6380, 6381, 10001-10003 |
 | `libsql-dockerized` | 8443 (HAProxy TLS) | 8080, 8081, 8082, 5001 |
 
 All internal communication happens within the Docker network. Only the load
@@ -220,7 +220,7 @@ balancer port is reachable from outside. This minimizes attack surface.
 
 ## Templates: Infrastructure Templates Are Docker Compose (Not deploy push)
 
-Templates like `pg-full-bm` and `kv-full-bm` are Docker Compose stacks, not
+Templates like `pg-full-bm` and `df-full-bm` are Docker Compose stacks, not
 single-service apps. They use `bash init.sh` to set up everything. Do NOT use
 `deploy push` for these templates — copy the directory to the VPS and run
 `bash init.sh` directly.
@@ -240,7 +240,7 @@ works around this by using HAProxy for TLS termination instead of Dragonfly's
 built-in TLS.
 
 ```yaml
-# kv-full-bm uses HAProxy for TLS:
+# df-full-bm uses HAProxy for TLS:
 # Dragonfly runs without TLS internally
 # HAProxy terminates TLS on ports 6379/6380
 ```
@@ -251,3 +251,31 @@ Dragonfly's SSD data tiering feature (`--tiered_prefix`) requires Linux kernel
 5.19+ with `io_uring` support. On older kernels, Dragonfly crashes with
 `Check failure stack trace`. This flag is removed from the template by default.
 If your kernel supports it, add it back to `docker-compose.yml`.
+
+## Dragonfly Operator: NetworkPolicy Blocks Port 6379
+
+The Dragonfly Operator v1.6.0+ creates a Kubernetes NetworkPolicy by default
+that restricts port 6379 to operator-managed pods only. This blocks:
+
+- `validate.sh` ephemeral pods (redis-cli PING)
+- `test.sh` data lifecycle and failover tests
+- Any external client connecting via the service DNS
+
+**Symptom**: `Connection refused` on `df.df.svc:6379` even though pods are
+Running and replication is healthy.
+
+**Fix** (YAML-driven): set `networkPolicyEnabled: false` in the Dragonfly CR:
+
+```yaml
+apiVersion: dragonflydb.io/v1alpha1
+kind: Dragonfly
+spec:
+  networkPolicyEnabled: false
+```
+
+This is already set in the `df-cluster` template. No manual `kubectl patch`
+needed — the CR is declarative.
+
+**Alternative**: create an explicit NetworkPolicy that allows ingress from
+other namespaces (more secure, more work). The `df-cluster` template uses
+the simpler `networkPolicyEnabled: false` approach.

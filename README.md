@@ -98,12 +98,20 @@ sdk-ops db create redis --port 6379 --node 192.0.2.100
 
 ```bash
 sdk-ops deploy init ./pg --template pgsql-docker     # PostgreSQL + PgDog + pgbackrest
-sdk-ops deploy init ./kv --template kv-dockerized     # Dragonfly KV + HAProxy TLS
+sdk-ops deploy init ./df --template df-dockerized     # Dragonfly KV + HAProxy TLS
 sdk-ops deploy init ./ls --template libsql-dockerized  # libSQL + HAProxy TLS
+sdk-ops deploy init ./nt --template nats-dockerized   # NATS JetStream node (R3, TLS/mTLS)
+sdk-ops deploy init ./dc --template etcd              # etcd DCS (3-member quorum)
 
-# Copy to VPS and run init (these are Docker Compose stacks)
-scp -r ./pg root@<ip>:/root/pg
-ssh root@<ip> "cd /root/pg && bash init.sh"
+# Datastore modes: every datastore ships docker / bare / cluster (k3s) variants
+#   pgsql-docker | pgsql-bare | pgsql-cluster (Patroni+etcd) | pgsql-cnpg (CloudNativePG operator)
+#   yuga-docker  | yuga-bare  | yuga-cluster  (yugabyte-k8s-operator)
+#   df-dockerized | df-bare | df-cluster     (dragonflydb operator)
+#   valkey-cluster                           (native Valkey Cluster: 3 primaries + 3 replicas)
+#   nats-dockerized | nats-bare | nats-cluster (nats helm chart + NACK CRDs)
+#   etcd (docker DCS) | etcd-bare | etcd-cluster (bitnami helm)
+#   libsql-dockerized (docker; no k8s operator upstream)
+# Deploy them fleet-YAML-driven: services: { df-cluster: { profile: lite } }
 ```
 
 ### 2.10 Track resources
