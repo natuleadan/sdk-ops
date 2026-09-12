@@ -1,0 +1,21 @@
+name: nats-bare
+description: NATS JetStream cluster node bare-metal - native nats-server binary + systemd on the host (no Docker), R3 mesh via peer_ip, TLS/mTLS, at-rest
+services:
+  - nats-server (native, no Docker, systemd unit nats-server.service)
+  - JetStream file store on /var/lib/nats
+ports:
+  - "4222:4222"  # NATS clients (TLS + mTLS)
+  - "6222:6222"  # cluster mesh routes
+  - "8222:8222"  # monitoring (config binds 127.0.0.1)
+env:
+  NATS_SERVER_VERSION: v2.10.24
+  NATS_CLI_VERSION: "0.4.0"
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  backup: bash backup.sh
+  restore: bash restore.sh <stream> [timestamp]
+  validate: bash validate.sh
+  test: bash test/test.sh
