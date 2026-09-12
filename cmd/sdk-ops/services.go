@@ -44,26 +44,78 @@ func cleanupStaleServices(conn *golang_ssh.Client, desired ProvisionServices) {
 			continue
 		}
 		verbosef("cleanup: stale service %s not in desired YAML — uninstall", name)
-		svcDir := "/opt/sdk-ops/services/" + name
-		isYuga := strings.HasPrefix(name, "yuga")
-		isPgBare := name == "pgsql-bare"
-		isYugaCluster := name == "yuga-cluster"
-		// compose stacks (pgsql-docker, yuga-docker, pgsql-cluster, etcd ...)
-		if _, _, err := ssh.Run(conn, fmt.Sprintf("test -f %s/docker-compose.yml", svcDir)); err == nil {
-			_, _, _ = ssh.Run(conn, fmt.Sprintf("cd %s && sudo docker compose down -v 2>/dev/null || true", svcDir))
-		}
-		if isYuga {
-			_, _, _ = ssh.Run(conn, "sudo pkill -f yugabyted 2>/dev/null || true; sudo pkill -f yb-master 2>/dev/null || true; sudo pkill -f yb-tserver 2>/dev/null || true")
-		}
-		if isPgBare {
-			_, _, _ = ssh.Run(conn, "sudo pg_ctlcluster 18 main stop 2>/dev/null || sudo systemctl stop postgresql 2>/dev/null || true")
-		}
-		if isYugaCluster {
-			_, _, _ = ssh.Run(conn, "helm uninstall yb-demo -n yb-demo 2>/dev/null || true; sudo k3s kubectl delete ns yb-demo --force --grace-period=0 2>/dev/null || true")
-		}
-		_, _, _ = ssh.Run(conn, "sudo rm -rf "+svcDir+" 2>/dev/null || true")
+		uninstallService(conn, name)
 		verbosef("cleanup: removed %s", name)
 	}
+}
+
+// serviceUninstallers maps a service name to the remote uninstall commands
+// specific to it, BEFORE the generic service-dir removal. Compose stacks are
+// covered by the generic compose-down step; bare services declare their
+// systemd units; cluster services uninstall their release/CR + namespace.
+// Add a row when a template grows a non-compose runtime (native/k3s).
+type serviceUninstall struct {
+	units  []string // systemd units to disable --now (bare-native services)
+	script []string // extra ad-hoc remote commands (native process kills, helm/kubectl)
+}
+
+var serviceUninstalls = map[string]serviceUninstall{
+	// native (bare) services
+	"pgsql-bare": {units: []string{"postgresql"}, script: []string{
+		"sudo pg_ctlcluster 18 main stop 2>/dev/null || sudo systemctl stop postgresql 2>/dev/null || true",
+	}},
+	"nats-bare": {units: []string{"nats-server"}},
+	"df-bare":   {units: []string{"dragonfly-primary", "dragonfly-replica-1", "dragonfly-replica-2", "haproxy"}},
+	"etcd-bare": {units: []string{"etcd"}},
+	// k3s cluster services (release/CR + namespace; the dragonfly operator
+	// itself stays — it is shared infrastructure)
+	"yuga-cluster": {script: []string{
+		"helm uninstall yb-demo -n yb-demo 2>/dev/null || true",
+		"sudo k3s kubectl delete ns yb-demo --force --grace-period=0 2>/dev/null || true",
+	}},
+	"nats-cluster": {script: []string{
+		"sudo /usr/local/bin/helm uninstall nats -n nats 2>/dev/null || true",
+		"sudo k3s kubectl delete ns nats --force --grace-period=0 2>/dev/null || true",
+	}},
+	"etcd-cluster": {script: []string{
+		"sudo /usr/local/bin/helm uninstall etcd -n etcd 2>/dev/null || true",
+		"sudo k3s kubectl delete ns etcd --force --grace-period=0 2>/dev/null || true",
+	}},
+	"df-cluster": {script: []string{
+		// The dragonfly operator stays (shared); the CR + namespace go.
+		"sudo k3s kubectl delete dragonfly df -n df --force --grace-period=0 2>/dev/null || true",
+		"sudo k3s kubectl delete ns df --force --grace-period=0 2>/dev/null || true",
+	}},
+	"valkey-cluster": {script: []string{
+		"sudo k3s kubectl delete ns valkey --force --grace-period=0 2>/dev/null || true",
+	}},
+	// native process families without clean units (yuga bare processes)
+	"yuga-docker": {script: []string{
+		"sudo pkill -f yugabyted 2>/dev/null || true; sudo pkill -f yb-master 2>/dev/null || true; sudo pkill -f yb-tserver 2>/dev/null || true",
+	}},
+	"yuga-bare": {script: []string{
+		"sudo pkill -f yugabyted 2>/dev/null || true; sudo pkill -f yb-master 2>/dev/null || true; sudo pkill -f yb-tserver 2>/dev/null || true",
+	}},
+}
+
+// uninstallService removes one stale service: its family-specific bits first
+// (systemd units, helm releases, native processes), then the compose stack if
+// any, then the service directory.
+func uninstallService(conn *golang_ssh.Client, name string) {
+	svcDir := "/opt/sdk-ops/services/" + name
+	// Compose stacks (pgsql-docker, yuga-docker, pgsql-cluster, etcd, df...).
+	if _, _, err := ssh.Run(conn, fmt.Sprintf("test -f %s/docker-compose.yml", svcDir)); err == nil {
+		_, _, _ = ssh.Run(conn, fmt.Sprintf("cd %s && sudo docker compose down -v 2>/dev/null || true", svcDir))
+	}
+	if u, ok := serviceUninstalls[name]; ok {
+		for _, unit := range u.units {
+			_, _, _ = ssh.Run(conn, fmt.Sprintf("sudo systemctl disable --now %s 2>/dev/null || true", unit))
+		}
+		for _, cmd := range u.script {
+			_, _, _ = ssh.Run(conn, cmd)
+		}
+	}
+	_, _, _ = ssh.Run(conn, "sudo rm -rf "+svcDir+" 2>/dev/null || true")
 }
 
 // applyServicesOn deploys the services declared for one host (YAML-driven).
@@ -103,7 +155,14 @@ func applyServicesOn(pf ProvisionFile, h ProvisionHost) error {
 // orderedServiceNames sorts the declared services deterministically: the
 // dependency order first (etcd before postgres), the rest alphabetically.
 func orderedServiceNames(services ProvisionServices) []string {
-	order := []string{"etcd", "pgsql-cluster", "nats", "kv", "libsql"}
+	order := []string{
+		"etcd", "etcd-bare", "etcd-cluster",
+		"pgsql-cluster",
+		"nats", "nats-bare", "nats-cluster",
+		"df", "df-bare", "df-cluster",
+		"valkey-cluster",
+		"libsql",
+	}
 	var out []string
 	seen := map[string]bool{}
 	for _, name := range order {
@@ -126,14 +185,14 @@ func orderedServiceNames(services ProvisionServices) []string {
 // wireService dispatches the per-service wiring (certs, secrets, CLI, timers).
 func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg ServiceConfig, pf ProvisionFile, h ProvisionHost) error {
 	switch name {
-	case "nats":
+	case "nats", "nats-bare":
 		return wireNATSOn(conn, svcDir, nodeName)
 	case "etcd":
 		return wireEtcdOn(conn, svcDir, nodeName)
 	case "pgsql-cluster":
 		return wirePGOn(conn, svcDir, nodeName, cfg, pf, h)
 	default:
-		// Dockerized templates (yugabyte, libsql, kv, ...) need no special
+		// Dockerized templates (yugabyte, libsql, df, ...) need no special
 		// wiring — they are self-contained compose stacks driven by init.sh.
 		verbosef("service %s: no extra wiring (dockerized template)", name)
 		return nil
@@ -154,7 +213,7 @@ func deployServiceOn(conn *golang_ssh.Client, pf ProvisionFile, h ProvisionHost,
 	verbosef("service %s on %s: render", name, h.Name)
 	tmpl, ok := resolveServiceTemplate(name)
 	if !ok {
-		return fmt.Errorf("no template for service %q (available: nats, kv, libsql, pg, etcd, postgres)", name)
+		return fmt.Errorf("no template for service %q (available: nats, df, libsql, pg, etcd, postgres)", name)
 	}
 
 	data, err := buildRenderData(pf, h, tmpl.DirName, cfg.Profile, cfg)
@@ -261,6 +320,11 @@ func serviceConfigChanged(conn *golang_ssh.Client, renderDir, svcDir, name strin
 		"nats":          {"nats.conf", "nats-0.conf"},
 		"etcd":          {"docker-compose.yml"},
 		"pgsql-cluster": {"patroni.yml", "pgdog.toml", "docker-compose.yml", "pgbackrest.conf"},
+		"nats-bare":     {"nats.conf"},
+		"etcd-bare":     {"etcd.conf.yml"},
+		"nats-cluster":  {"values.yaml"},
+		"etcd-cluster":  {"values.yaml"},
+		"df-cluster":    {"dragonfly.yaml"},
 	}
 	files, ok := cfgFiles[name]
 	if !ok {
@@ -322,6 +386,23 @@ func buildRenderData(pf ProvisionFile, h ProvisionHost, dirName, profile string,
 		return nil, fmt.Errorf("unknown profile %q (available: %s)", profile, strings.Join(names, ", "))
 	}
 	switch {
+	case strings.HasPrefix(dirName, "nats-cluster"):
+		return natsClusterRenderData(prof)
+	case strings.HasPrefix(dirName, "nats-bare"):
+		// Native nats-server on the host reuses the docker topology context:
+		// the same routes/advertise/certs logic, different systemd install.
+		return natsRenderData(pf, h, prof, cfg)
+	case dirName == "df-cluster":
+		return dfClusterRenderData(prof)
+	case dirName == "df-bare":
+		return dfRenderData(prof)
+	case dirName == "valkey-cluster":
+		return valkeyClusterRenderData(prof)
+	case dirName == "etcd-cluster":
+		return etcdClusterRenderData(prof)
+	case dirName == "etcd-bare":
+		// Native etcd on the host: same static bootstrap topology as the DCS.
+		return etcdRenderData(pf, h, prof, cfg)
 	case strings.HasPrefix(dirName, "nats"):
 		return natsRenderData(pf, h, prof, cfg)
 	case dirName == "etcd":
@@ -340,6 +421,8 @@ func buildRenderData(pf ProvisionFile, h ProvisionHost, dirName, profile string,
 		return yugabyteRenderData(pf, h, prof, cfg)
 	case strings.HasPrefix(dirName, "libsql"):
 		return libsqlRenderData(prof)
+	case strings.HasPrefix(dirName, "df"):
+		return dfRenderData(prof)
 	default:
 		return nil, fmt.Errorf("no render builder for template %q", dirName)
 	}
@@ -372,6 +455,141 @@ func libsqlRenderData(prof map[string]any) (map[string]any, error) {
 		"LIBSQL_HTTP_TLS":      envOr("LIBSQL_HTTP_TLS", "8443"),
 		"CONTROLLER_PORT":      envOr("CONTROLLER_PORT", "9090"),
 		"Provision":            true,
+	}
+	return data, nil
+}
+
+// dfRenderData builds the render context for templates/df-dockerized.
+// Same pattern as libsqlRenderData: the profile variables (DF_MEM,
+// HAPROXY_MEM, ...) become the Go-template vars the compose file consumes
+// ({{ .DF_MEM }}), so a fleet YAML profile sizes the KV stack deterministically.
+func dfRenderData(prof map[string]any) (map[string]any, error) {
+	envOr := func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
+	data := map[string]any{
+		"DF_MEM":          prof["DF_MEM"],
+		"DF_CPUS":         prof["DF_CPUS"],
+		"HAPROXY_MEM":     prof["HAPROXY_MEM"],
+		"HAPROXY_CPUS":    prof["HAPROXY_CPUS"],
+		"DF_PASSWORD":     envOr("DF_PASSWORD", "dragonfly"),
+		"DF_PORT":         envOr("DF_PORT", "6379"),
+		"DF_REPLICA_PORT": envOr("DF_REPLICA_PORT", "6380"),
+		"Provision":       true,
+	}
+	return data, nil
+}
+
+// natsClusterRenderData builds the render context for templates/nats-cluster
+// (k3s via the official nats helm chart). The fleet YAML profile sizes the
+// statefulset; namespace/release/tag come from the environment (never YAML).
+func natsClusterRenderData(prof map[string]any) (map[string]any, error) {
+	envOr := func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
+	data := map[string]any{
+		"Namespace":       envOr("NATS_K8S_NAMESPACE", "nats"),
+		"Release":         envOr("NATS_K8S_RELEASE", "nats"),
+		"Tag":             envOr("NATS_K8S_TAG", "2.14-alpine"),
+		"Replicas":        envOr("NATS_K8S_REPLICAS", "3"),
+		"Cpu":             prof["cpu"],
+		"Mem":             prof["mem"],
+		"JSStorage":       prof["js_storage"],
+		"StorageClass":    envOr("NATS_K8S_STORAGE_CLASS", "local-path"),
+		"MaxPayload":      prof["max_payload"],
+		"NatsBox":         envOr("NATS_K8S_NATS_BOX", "true"),
+		"HelmVersion":     envOr("NATS_K8S_HELM_VERSION", "v3.15.4"),
+		"Nack":            envOr("NATS_K8S_NACK", "true"),
+		"NackTag":         envOr("NATS_K8S_NACK_TAG", "0.24.0"),
+		"NackControlLoop": envOr("NATS_K8S_NACK_CONTROL_LOOP", "false"),
+		"CliVersion":      envOr("NATS_CLI_VERSION", "0.4.0"),
+		"Provision":       true,
+	}
+	return data, nil
+}
+
+// dfClusterRenderData builds the render context for templates/df-cluster
+// (k3s via the official dragonflydb operator). The operator manages the
+// primary/replica set declaratively; the service points at the master.
+func dfClusterRenderData(prof map[string]any) (map[string]any, error) {
+	envOr := func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
+	data := map[string]any{
+		"Namespace":  envOr("DF_K8S_NAMESPACE", "df"),
+		"Name":       envOr("DF_K8S_NAME", "df"),
+		"Tag":        envOr("DF_K8S_TAG", "v1.30.1"),
+		"Replicas":   envOr("DF_K8S_REPLICAS", "3"),
+		"CPU":        prof["cpu"],
+		"Mem":        prof["mem"],
+		"DFPassword": envOr("DF_PASSWORD", "dragonfly"),
+		// Native S3 snapshots (operator feature, dragonfly >= v1.12): only when
+		// the operator env carries the S3 settings — otherwise DR is the
+		// explicit backup-s3.sh/restore-s3.sh cycle.
+		"S3Snapshot":   os.Getenv("S3_BUCKET") != "" && os.Getenv("S3_ENDPOINT") != "",
+		"S3Bucket":     envOr("S3_BUCKET", ""),
+		"S3Prefix":     envOr("DF_K8S_S3_PREFIX", "df"),
+		"SnapshotCron": envOr("DF_K8S_SNAPSHOT_CRON", "0 */6 * * *"),
+		"OperatorTag":  envOr("DF_K8S_OPERATOR_TAG", "v1.1.4"),
+		"OperatorManifest": envOr("DF_K8S_OPERATOR_MANIFEST",
+			"https://raw.githubusercontent.com/dragonflydb/dragonfly-operator/v1.1.4/manifests/dragonfly-operator.yaml"),
+		"Provision": true,
+	}
+	return data, nil
+}
+
+// valkeyClusterRenderData builds the render context for templates/valkey-cluster
+// (k3s via StatefulSet + Sentinel). Valkey is Redis-compatible, no operator needed.
+func valkeyClusterRenderData(prof map[string]any) (map[string]any, error) {
+	envOr := func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
+	data := map[string]any{
+		"Namespace":     envOr("VK_K8S_NAMESPACE", "valkey"),
+		"Name":          envOr("VK_K8S_NAME", "valkey"),
+		"Tag":           envOr("VK_K8S_TAG", "8.1.3"),
+		"Replicas":      envOr("VK_K8S_REPLICAS", "3"),
+		"CPU":           prof["CPU"],
+		"Mem":           prof["Mem"],
+		"MaxMemory":     envOr("VK_K8S_MAX_MEMORY", "256mb"),
+		"Password":      envOr("VK_PASSWORD", "valkey"),
+		"SentinelQuorum": envOr("VK_K8S_SENTINEL_QUORUM", "2"),
+	}
+	return data, nil
+}
+
+// etcdClusterRenderData builds the render context for templates/etcd-cluster
+// (k3s via the bitnami etcd helm chart) — an external DCS for services inside
+// the cluster that need etcd (k3s itself ships its own embedded one).
+func etcdClusterRenderData(prof map[string]any) (map[string]any, error) {
+	envOr := func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
+	data := map[string]any{
+		"Namespace":   envOr("ETCD_K8S_NAMESPACE", "etcd"),
+		"Release":     envOr("ETCD_K8S_RELEASE", "etcd"),
+		"Tag":         envOr("ETCD_K8S_TAG", "3.5.15"),
+		"Replicas":    envOr("ETCD_K8S_REPLICAS", "3"),
+		"CPU":         prof["cpu"],
+		"Mem":         prof["mem"],
+		"Storage":     prof["storage"],
+		"HelmVersion": envOr("ETCD_K8S_HELM_VERSION", "v3.15.4"),
+		"Provision":   true,
 	}
 	return data, nil
 }
@@ -468,7 +686,7 @@ func meshAdvertise(pf ProvisionFile, h ProvisionHost) string {
 		if other.Name == h.Name {
 			continue
 		}
-		if _, ok := resolveHostConfig(&pf, other).services["nats"]; !ok {
+		if !isServiceVariant(resolveHostConfig(&pf, other).services, "nats") {
 			continue
 		}
 		if other.PeerIP == "" || !isPrivateIP(other.PeerIP) {
@@ -487,7 +705,7 @@ func meshAdvertise(pf ProvisionFile, h ProvisionHost) string {
 func natsTopology(pf ProvisionFile, h ProvisionHost, cfg ServiceConfig) (int, int, bool, []string, []int) {
 	nodeCount := 0
 	for _, other := range pf.Hosts {
-		if _, ok := resolveHostConfig(&pf, other).services["nats"]; ok {
+		if isServiceVariant(resolveHostConfig(&pf, other).services, "nats") {
 			nodeCount++
 		}
 	}
@@ -522,7 +740,7 @@ func natsSeedRoutes(pf ProvisionFile, h ProvisionHost, seeds int) []string {
 		if other.Name == h.Name {
 			continue
 		}
-		if _, ok := resolveHostConfig(&pf, other).services["nats"]; !ok {
+		if !isServiceVariant(resolveHostConfig(&pf, other).services, "nats") {
 			continue
 		}
 		peers = append(peers, other)
@@ -580,7 +798,15 @@ func bcryptHash(pass string) (string, error) {
 // address is used (same-DC VLAN); otherwise B's public host is used (a peer
 // outside the private network cannot reach 10.0.0.x).
 func peerRouteIP(a, b ProvisionHost) string {
-	if isPrivateIP(a.PeerIP) && isPrivateIP(b.PeerIP) {
+	if a.PeerIP == "" || b.PeerIP == "" {
+		return b.Host
+	}
+	// Same-family peers reach each other directly via peer_ip: both on the
+	// private VLAN, or both with global addresses (v6 keeps v4 free for
+	// 80/443). Mixed families (private v4 <-> global v6) fall back to the
+	// reachable public host.
+	aPriv, bPriv := isPrivateIP(a.PeerIP), isPrivateIP(b.PeerIP)
+	if aPriv == bPriv {
 		return b.PeerIP
 	}
 	return b.Host
@@ -598,6 +824,10 @@ func isPrivateIP(ip string) bool {
 		}
 	}
 	return false
+}
+
+func isIPv6(ip string) bool {
+	return strings.Contains(ip, ":")
 }
 
 // uploadDir streams a local directory to a remote one as a tar over stdin.
@@ -735,7 +965,7 @@ func exposeServicePorts(conn *golang_ssh.Client, renderDir string, pf ProvisionF
 		return fmt.Errorf("no operator or peer IPs to expose %s service ports", h.Name)
 	}
 	for _, p := range svc.Ports {
-		hostPort := strings.SplitN(p, ":", 2)[0]
+		hostPort, _, _ := strings.Cut(p, ":")
 		n, err := strconv.Atoi(strings.TrimSpace(hostPort))
 		if err != nil {
 			return fmt.Errorf("bad port %q: %w", p, err)

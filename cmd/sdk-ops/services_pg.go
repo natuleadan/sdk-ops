@@ -31,11 +31,24 @@ func pgNodes(pf ProvisionFile) []ProvisionHost {
 func etcdNodes(pf ProvisionFile) []ProvisionHost {
 	var out []ProvisionHost
 	for _, h := range pf.Hosts {
-		if _, ok := resolveHostConfig(&pf, h).services["etcd"]; ok {
+		svcs := resolveHostConfig(&pf, h).services
+		if _, ok := svcs["etcd"]; ok || isServiceVariant(svcs, "etcd") {
 			out = append(out, h)
 		}
 	}
 	return out
+}
+
+// isServiceVariant reports whether the host runs any variant of a base
+// service family (etcd-bare/etcd-cluster under "etcd", nats-bare under
+// "nats", ...) so the topology helpers cover every deployment mode.
+func isServiceVariant(svcs ProvisionServices, base string) bool {
+	for name := range svcs {
+		if name == base || strings.HasPrefix(name, base+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 // poolerNode reports whether this host runs the PgDog entry. Default: EVERY

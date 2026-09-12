@@ -39,7 +39,7 @@ func baseTraefikScript(client *goss.Client, cfg ProxyConfig) string {
 	var envCheck strings.Builder
 	envCheck.WriteString("ENVS_OK=1")
 	for _, e := range cfg.Env {
-		name := strings.SplitN(e, "=", 2)[0]
+		name, _, _ := strings.Cut(e, "=")
 		_, _ = fmt.Fprintf(&envCheck, `
 if ! docker inspect traefik --format '{{range .Config.Env}}{{.}}{{"\n"}}{{end}}' | grep -q '^%s='; then ENVS_OK=0; fi`, name)
 	}

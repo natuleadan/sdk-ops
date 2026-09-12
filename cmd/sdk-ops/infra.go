@@ -62,6 +62,7 @@ type infraFlags struct {
 	cisSvcAcc             bool
 	cisTLSCiphers         bool
 	kubeconfig            string
+	k3sExtraArgs          string // fleet k3s_ha: --cluster-init/--node-ip on the HA server
 	mergeConfig           bool
 	contextName           string
 	// provider-specific
@@ -686,6 +687,11 @@ func parseAllowlistFlag(raw string) (hardening.AllowlistProfile, string, error) 
 func createSDKOpsStructure(conn *golang_ssh.Client) {
 	if _, _, err := ssh.Run(conn, `sudo mkdir -p /opt/sdk-ops/services /opt/sdk-ops/backups /opt/sdk-ops/logs && echo "sdk-ops-init" | sudo tee /opt/sdk-ops/.version > /dev/null`); err != nil {
 		log.Printf("infra: ssh run error: %v", err)
+	}
+	// The service ownership user (files land 0600 sdkops:sdkops even on
+	// no-hardening fleets, where the hardening phase never created it).
+	if _, _, err := ssh.Run(conn, `id sdkops >/dev/null 2>&1 || sudo useradd -r -m -d /home/sdkops -s /usr/sbin/nologin sdkops`); err != nil {
+		log.Printf("infra: sdkops user: %v", err)
 	}
 }
 
@@ -2051,6 +2057,7 @@ func runInfraInitK3s(conn *golang_ssh.Client, ip string, f infraFlags, hardCfg h
 	installCfg.CISSvcAcc = f.cisSvcAcc
 	installCfg.CISTLSCiphers = f.cisTLSCiphers
 	installCfg.SkipDownload = f.airgap
+	installCfg.ExtraArgs = strings.TrimSpace(installCfg.ExtraArgs + " " + f.k3sExtraArgs)
 
 	if err := k3s.Install(conn, installCfg); err != nil {
 		return err

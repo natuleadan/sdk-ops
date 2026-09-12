@@ -34,6 +34,18 @@ var renderVerbatim = map[string]bool{
 	"Dockerfile":  true,
 }
 
+var templateFuncs = template.FuncMap{
+	// hostport wraps IPv6 addresses in brackets for use in URLs.
+	// IPv4 and hostnames pass through unchanged.
+	// Example: "2001:db8::1" → "[2001:db8::1]", "10.0.0.2" → "10.0.0.2"
+	"hostport": func(host string) string {
+		if strings.Contains(host, ":") {
+			return "[" + host + "]"
+		}
+		return host
+	},
+}
+
 // LoadProfiles parses a directory template's profiles.yaml
 // (map of profile name -> variables). Profiles let one scalable template
 // serve nodes of different sizes (e.g. lite vs rs) without copying configs.
@@ -85,7 +97,7 @@ func renderWalk(src, dst string, data any) error {
 		}
 		var rendered []byte
 		if !renderVerbatim[e.Name()] && strings.Contains(string(content), "{{") {
-			t, err := template.New(e.Name()).Option("missingkey=zero").Parse(string(content))
+			t, err := template.New(e.Name()).Option("missingkey=zero").Funcs(templateFuncs).Parse(string(content))
 			if err != nil {
 				return fmt.Errorf("parse template %s: %w", e.Name(), err)
 			}

@@ -98,11 +98,11 @@ var Templates = map[string]Template{
 		IsDir:       true,
 		DirName:     "pgsql-docker",
 	},
-	"kv-dockerized": {
-		Name:        "kv-dockerized",
+	"df-dockerized": {
+		Name:        "df-dockerized",
 		Description: "Dragonfly KV cluster + 2 replicas + HAProxy TLS",
 		IsDir:       true,
-		DirName:     "kv-dockerized",
+		DirName:     "df-dockerized",
 	},
 	"libsql-dockerized": {
 		Name:        "libsql-dockerized",
@@ -151,6 +151,54 @@ var Templates = map[string]Template{
 		Description: "YugabyteDB in k3s via the yugabyte-k8s-operator (helm) — RF=3, no host ports, internal service DNS",
 		IsDir:       true,
 		DirName:     "yuga-cluster",
+	},
+	"nats-cluster": {
+		Name:        "nats-cluster",
+		Description: "NATS JetStream R3 in k3s via the official nats helm chart — JetStream file storage on PVC, internal service DNS",
+		IsDir:       true,
+		DirName:     "nats-cluster",
+	},
+	"nats-bare": {
+		Name:        "nats-bare",
+		Description: "NATS bare-metal — native nats-server binary + systemd on the host (no Docker), R3 mesh via peer_ip, TLS + JetStream",
+		IsDir:       true,
+		DirName:     "nats-bare",
+	},
+	"df-cluster": {
+		Name:        "df-cluster",
+		Description: "Dragonfly in k3s via the official dragonflydb operator — primary + replicas with automatic failover, internal service DNS",
+		IsDir:       true,
+		DirName:     "df-cluster",
+	},
+	"df-bare": {
+		Name:        "df-bare",
+		Description: "Dragonfly bare-metal — native dragonfly binary + systemd (primary + 2 replicas) + native HAProxy TLS",
+		IsDir:       true,
+		DirName:     "df-bare",
+	},
+	"valkey-cluster": {
+		Name:        "valkey-cluster",
+		Description: "Native Valkey Cluster on k3s — 3 primaries + 3 replicas (6 pods), 16384 hash slots sharded, cluster-native failover (no Sentinel), per-shard S3 backups",
+		IsDir:       true,
+		DirName:     "valkey-cluster",
+	},
+	"pgsql-cnpg": {
+		Name:        "pgsql-cnpg",
+		Description: "PostgreSQL HA on k3s via CloudNativePG — operator-managed primary + replicas, automatic failover, -rw/-ro services, native S3 backups (barman object store)",
+		IsDir:       true,
+		DirName:     "pgsql-cnpg",
+	},
+	"etcd-cluster": {
+		Name:        "etcd-cluster",
+		Description: "etcd in k3s via the bitnami helm chart — external DCS for in-cluster services needing etcd",
+		IsDir:       true,
+		DirName:     "etcd-cluster",
+	},
+	"etcd-bare": {
+		Name:        "etcd-bare",
+		Description: "etcd bare-metal — native etcd binary + systemd on the host (no Docker), 3-member quorum via peer_ip",
+		IsDir:       true,
+		DirName:     "etcd-bare",
 	},
 }
 

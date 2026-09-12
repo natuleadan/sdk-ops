@@ -52,7 +52,7 @@ func TestRenderDirNATS(t *testing.T) {
 		"server_name: node-a",
 		"advertise: 203.0.113.10:6222",
 		"nats://203.0.113.11:6222",
-		"nats://2001:db8::2:6222",
+		"nats://[2001:db8::2]:6222",
 		"max_connections: 100",
 		"max_file_store: 2GB",
 		"max_memory_store: 128MB",
