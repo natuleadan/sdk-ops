@@ -1,6 +1,6 @@
 #!/bin/bash
 # valkey-cluster test — sharding across the 3 primaries, real failover (delete
-# a primary → its replica is promoted), data survivorship, cleanup.
+# a primary -> its replica is promoted), data survivorship, cleanup.
 set -u
 
 NS="${VK_K8S_NAMESPACE:-valkey}"
