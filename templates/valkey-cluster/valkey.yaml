@@ -1,0 +1,131 @@
+# valkey-cluster — native Valkey Cluster on k3s.
+# {{ .Nodes }} nodes, {{ .ReplicasPerPrimary }} replica(s) per shard:
+# 3 primaries (16384 slots split) + 3 replicas by default. Automatic failover
+# is built into the cluster protocol — no Sentinel, no operator.
+#
+# The cluster is created ONCE by init.sh (valkey-cli --cluster create). Nodes
+# persist their identity in /data/nodes.conf (PVC), so restarts rejoin.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Namespace }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: valkey
+  namespace: {{ .Namespace }}
+spec:
+  serviceName: valkey-headless
+  replicas: {{ .Nodes }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: valkey
+  template:
+    metadata:
+      labels:
+        app: valkey
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: valkey
+        image: valkey/valkey:{{ .Tag }}
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: VK_PASSWORD
+          value: "{{ .Password }}"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          exec valkey-server \
+            --port 6379 \
+            --cluster-enabled yes \
+            --cluster-config-file /data/nodes.conf \
+            --cluster-node-timeout 5000 \
+            --cluster-announce-ip "$POD_IP" \
+            --cluster-announce-hostname "$HOSTNAME.valkey-headless.{{ .Namespace }}.svc.cluster.local" \
+            --cluster-preferred-endpoint-type hostname \
+            --cluster-announce-port 6379 \
+            --cluster-announce-bus-port 16379 \
+            --requirepass "$VK_PASSWORD" \
+            --masterauth "$VK_PASSWORD" \
+            --maxmemory {{ .MaxMemory }} \
+            --maxmemory-policy allkeys-lru \
+            --save "900 1" --save "300 10" --save "60 10000" \
+            --dir /data \
+            --loglevel notice
+        ports:
+        - containerPort: 6379
+          name: valkey
+        - containerPort: 16379
+          name: cluster-bus
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        resources:
+          requests:
+            memory: {{ .Mem }}
+            cpu: {{ .CPU }}
+          limits:
+            memory: {{ .Mem }}
+            cpu: {{ .CPU }}
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "valkey-cli -a \"$VK_PASSWORD\" --no-auth-warning PING | grep -q PONG"
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "valkey-cli -a \"$VK_PASSWORD\" --no-auth-warning PING | grep -q PONG"
+          initialDelaySeconds: 15
+          periodSeconds: 20
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: local-path
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey-headless
+  namespace: {{ .Namespace }}
+spec:
+  clusterIP: None
+  selector:
+    app: valkey
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: valkey
+---
+# Seed service for cluster-aware clients (`-c`): any node answers with MOVED/
+# ASK redirects, so a single address bootstraps full discovery.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: valkey
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: valkey

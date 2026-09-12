@@ -1,0 +1,24 @@
+lite:
+  MemLimit: "256m"
+  Cpus: "0.5"
+  Mem: "128Mi"
+  CPU: "250m"
+  MaxMemory: "96mb"
+normal:
+  MemLimit: "512m"
+  Cpus: "1"
+  Mem: "256Mi"
+  CPU: "500m"
+  MaxMemory: "192mb"
+medium:
+  MemLimit: "1g"
+  Cpus: "2"
+  Mem: "512Mi"
+  CPU: "1"
+  MaxMemory: "384mb"
+large:
+  MemLimit: "2g"
+  Cpus: "2"
+  Mem: "1Gi"
+  CPU: "2"
+  MaxMemory: "768mb"

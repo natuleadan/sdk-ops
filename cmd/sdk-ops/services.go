@@ -191,6 +191,8 @@ func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg Ser
 		return wireEtcdOn(conn, svcDir, nodeName)
 	case "pgsql-cluster":
 		return wirePGOn(conn, svcDir, nodeName, cfg, pf, h)
+	case "valkey-cluster":
+		return wireValkeyOn(conn, svcDir)
 	case "df-cluster":
 		return wireDFOn(conn, svcDir)
 	default:
@@ -199,6 +201,28 @@ func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg Ser
 		verbosef("service %s: no extra wiring (dockerized template)", name)
 		return nil
 	}
+}
+
+// wireValkeyOn writes the service .env with the cluster password (the scripts
+// auth as the same app credential the server renders) and the S3 credentials
+// the per-shard backup/restore use. Secrets never live in the fleet YAML.
+func wireValkeyOn(conn *golang_ssh.Client, svcDir string) error {
+	pw := os.Getenv("VK_PASSWORD")
+	if pw == "" {
+		pw = "valkey"
+	}
+	lines := []string{fmt.Sprintf("VK_PASSWORD='%s'", strings.ReplaceAll(pw, "'", `'\''`))}
+	for _, k := range []string{"S3_BUCKET", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_PREFIX"} {
+		if v := os.Getenv(k); v != "" {
+			v = strings.ReplaceAll(v, "'", `'\''`)
+			lines = append(lines, fmt.Sprintf("%s='%s'", k, v))
+		}
+	}
+	cmd := fmt.Sprintf("umask 077; cat > %s/.env <<'SDKOPS_VK_ENV'\n%s\nSDKOPS_VK_ENV", svcDir, strings.Join(lines, "\n"))
+	if _, _, err := ssh.Run(conn, cmd); err != nil {
+		return fmt.Errorf("write valkey-cluster .env: %w", err)
+	}
+	return nil
 }
 
 // wireDFOn writes the service .env with the CR password and the S3 credentials
@@ -575,7 +599,7 @@ func dfClusterRenderData(prof map[string]any) (map[string]any, error) {
 }
 
 // valkeyClusterRenderData builds the render context for templates/valkey-cluster
-// (k3s via StatefulSet + Sentinel). Valkey is Redis-compatible, no operator needed.
+// (native Valkey Cluster on k3s: N nodes, R replicas per shard, no Sentinel).
 func valkeyClusterRenderData(prof map[string]any) (map[string]any, error) {
 	envOr := func(key, def string) string {
 		if v := os.Getenv(key); v != "" {
@@ -583,18 +607,26 @@ func valkeyClusterRenderData(prof map[string]any) (map[string]any, error) {
 		}
 		return def
 	}
-	data := map[string]any{
-		"Namespace":     envOr("VK_K8S_NAMESPACE", "valkey"),
-		"Name":          envOr("VK_K8S_NAME", "valkey"),
-		"Tag":           envOr("VK_K8S_TAG", "8.1.3"),
-		"Replicas":      envOr("VK_K8S_REPLICAS", "3"),
-		"CPU":           prof["CPU"],
-		"Mem":           prof["Mem"],
-		"MaxMemory":     envOr("VK_K8S_MAX_MEMORY", "256mb"),
-		"Password":      envOr("VK_PASSWORD", "valkey"),
-		"SentinelQuorum": envOr("VK_K8S_SENTINEL_QUORUM", "2"),
+	maxMem := envOr("VK_K8S_MAX_MEMORY", "")
+	if maxMem == "" {
+		if v, ok := prof["MaxMemory"].(string); ok {
+			maxMem = v
+		}
 	}
-	return data, nil
+	if maxMem == "" {
+		maxMem = "256mb"
+	}
+	return map[string]any{
+		"Namespace":          envOr("VK_K8S_NAMESPACE", "valkey"),
+		"Name":               envOr("VK_K8S_NAME", "valkey"),
+		"Tag":                envOr("VK_K8S_TAG", "8.1.3"),
+		"Nodes":              envOr("VK_K8S_NODES", "6"),
+		"ReplicasPerPrimary": envOr("VK_K8S_CLUSTER_REPLICAS", "1"),
+		"CPU":                prof["CPU"],
+		"Mem":                prof["Mem"],
+		"MaxMemory":          maxMem,
+		"Password":           envOr("VK_PASSWORD", "valkey"),
+	}, nil
 }
 
 // etcdClusterRenderData builds the render context for templates/etcd-cluster
