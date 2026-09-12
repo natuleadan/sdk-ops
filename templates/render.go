@@ -37,7 +37,7 @@ var renderVerbatim = map[string]bool{
 var templateFuncs = template.FuncMap{
 	// hostport wraps IPv6 addresses in brackets for use in URLs.
 	// IPv4 and hostnames pass through unchanged.
-	// Example: "2001:db8::1" → "[2001:db8::1]", "10.0.0.2" → "10.0.0.2"
+	// Example: "2001:db8::1" → "[2001:db8::1]", "192.0.2.10" → "192.0.2.10"
 	"hostport": func(host string) string {
 		if strings.Contains(host, ":") {
 			return "[" + host + "]"
