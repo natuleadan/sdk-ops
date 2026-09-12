@@ -1,0 +1,39 @@
+# df-cluster CR — the Dragonfly instance the dragonflydb operator reconciles.
+# The operator manages the primary/replica set (automatic failover) and the
+# service <name>.<ns>.svc.cluster.local always points at the master.
+# Snapshots: when the S3 env is set the native Dragonfly S3 snapshot
+# (spec.snapshot.dir, dragonfly >= v1.12) applies; DR is otherwise handled by
+# the explicit backup-s3.sh / restore-s3.sh scripts.
+apiVersion: dragonflydb.io/v1alpha1
+kind: Dragonfly
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+spec:
+  replicas: {{ .Replicas }}
+  image: docker.dragonflydb.io/dragonflydb/dragonfly:{{ .Tag }}
+  args:
+    - "--requirepass={{ .DFPassword }}"
+    - "--cluster_mode=emulated"
+{{- if .S3Snapshot }}
+    - "--s3_endpoint={{ .S3Endpoint }}"
+{{- end }}
+{{- if .S3Snapshot }}
+  env:
+    - name: AWS_ACCESS_KEY_ID
+      value: "{{ .S3AccessKey }}"
+    - name: AWS_SECRET_ACCESS_KEY
+      value: "{{ .S3SecretKey }}"
+    - name: AWS_REGION
+      value: "{{ .S3Region }}"
+  snapshot:
+    dir: "s3://{{ .S3Bucket }}/{{ .S3Prefix }}/"
+    cron: "{{ .SnapshotCron }}"
+{{- end }}
+  resources:
+    requests:
+      cpu: {{ .CPU }}
+      memory: {{ .Mem }}
+    limits:
+      cpu: {{ .CPU }}
+      memory: {{ .Mem }}

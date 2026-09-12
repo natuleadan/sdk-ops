@@ -191,12 +191,35 @@ func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg Ser
 		return wireEtcdOn(conn, svcDir, nodeName)
 	case "pgsql-cluster":
 		return wirePGOn(conn, svcDir, nodeName, cfg, pf, h)
+	case "df-cluster":
+		return wireDFOn(conn, svcDir)
 	default:
 		// Dockerized templates (yugabyte, libsql, df, ...) need no special
 		// wiring — they are self-contained compose stacks driven by init.sh.
 		verbosef("service %s: no extra wiring (dockerized template)", name)
 		return nil
 	}
+}
+
+// wireDFOn writes the service .env with the CR password and the S3 credentials
+// the per-service scripts use. Secrets never live in the fleet YAML.
+func wireDFOn(conn *golang_ssh.Client, svcDir string) error {
+	pw := os.Getenv("DF_PASSWORD")
+	if pw == "" {
+		pw = "dragonfly"
+	}
+	lines := []string{fmt.Sprintf("DF_PASSWORD='%s'", strings.ReplaceAll(pw, "'", `'\''`))}
+	for _, k := range []string{"S3_BUCKET", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_PREFIX"} {
+		if v := os.Getenv(k); v != "" {
+			v = strings.ReplaceAll(v, "'", `'\''`)
+			lines = append(lines, fmt.Sprintf("%s='%s'", k, v))
+		}
+	}
+	cmd := fmt.Sprintf("umask 077; cat > %s/.env <<'SDKOPS_DF_ENV'\n%s\nSDKOPS_DF_ENV", svcDir, strings.Join(lines, "\n"))
+	if _, _, err := ssh.Run(conn, cmd); err != nil {
+		return fmt.Errorf("write df-cluster .env: %w", err)
+	}
+	return nil
 }
 
 // resolveServiceTemplate resolves the template for a service: the exact name
@@ -537,7 +560,11 @@ func dfClusterRenderData(prof map[string]any) (map[string]any, error) {
 		// explicit backup-s3.sh/restore-s3.sh cycle.
 		"S3Snapshot":   os.Getenv("S3_BUCKET") != "" && os.Getenv("S3_ENDPOINT") != "",
 		"S3Bucket":     envOr("S3_BUCKET", ""),
-		"S3Prefix":     envOr("DF_K8S_S3_PREFIX", "df"),
+		"S3Prefix":     envOr("S3_PREFIX", "df"),
+		"S3Endpoint":   envOr("S3_ENDPOINT", ""),
+		"S3Region":     envOr("S3_REGION", "us-east-005"),
+		"S3AccessKey":  envOr("S3_ACCESS_KEY", ""),
+		"S3SecretKey":  envOr("S3_SECRET_KEY", ""),
 		"SnapshotCron": envOr("DF_K8S_SNAPSHOT_CRON", "0 */6 * * *"),
 		"OperatorTag":  envOr("DF_K8S_OPERATOR_TAG", "v1.1.4"),
 		"OperatorManifest": envOr("DF_K8S_OPERATOR_MANIFEST",

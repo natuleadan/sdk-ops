@@ -1,0 +1,21 @@
+name: df-cluster
+description: DragonflyDB in k3s via the official dragonflydb operator — primary + replicas with automatic failover, native S3 snapshots, internal service DNS. The k3s variant of df (redis-compatible).
+services:
+  - dragonflydb/dragonfly-operator (CRD dragonflydb.io/v1alpha1)
+  - Dragonfly CR (replicas: 3, pinned image, native S3 snapshot cron)
+env:
+  DF_K8S_NAMESPACE: df
+  DF_K8S_NAME: df
+  DF_K8S_TAG: v1.30.1
+  DF_K8S_REPLICAS: "3"
+  DF_K8S_OPERATOR_TAG: v1.1.4
+  DF_K8S_SNAPSHOT_PVC: "1Gi"
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  backup: bash backup-s3.sh
+  restore: bash restore-s3.sh [-y|--yes] [backup-name]
+  test: bash test/test.sh
+  validate: bash validate.sh

@@ -1,0 +1,17 @@
+# df-cluster — resource profiles (k3s Dragonfly CR sizing).
+lite:        # 0.25c / 128Mi per pod
+  cpu: "250m"
+  mem: 128Mi
+  storage: 1Gi
+normal:      # 1c / 1Gi
+  cpu: "1"
+  mem: 1Gi
+  storage: 2Gi
+medium:      # 2c / 2Gi
+  cpu: "2"
+  mem: 2Gi
+  storage: 5Gi
+large:       # 4c / 4Gi
+  cpu: "4"
+  mem: 4Gi
+  storage: 10Gi
