@@ -1,0 +1,19 @@
+name: etcd-bare
+description: etcd DCS shared bare-metal - native etcd binary + systemd (no Docker), one member per fleet host, 3-member static bootstrap over peer_ip (quorum 2/3), v2 API enabled for Patroni. S3 snapshot backup/restore for DR.
+services:
+  - etcd (native binary, systemd unit etcd.service, config via etcd.conf.yml)
+ports:
+  - "2379:2379"  # client (Patroni + health)
+  - "2380:2380"  # peer (RAFT between members)
+env:
+  ETCD_VERSION: v3.5.15
+health:
+  path: /health
+  interval: 15
+commands:
+  init: bash init.sh
+  validate: bash validate.sh
+  snapshot: bash snapshot.sh
+  backup: bash backup-s3.sh
+  restore: bash restore-s3.sh [-y|--yes] [snapshot]
+  test: bash test/test.sh

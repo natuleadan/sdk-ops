@@ -1,0 +1,15 @@
+# etcd-bare native config (etcd --config-file) - rendered per member by
+# sdk-ops (etcdRenderData). Same topology as templates/etcd (docker):
+# static bootstrap over peer_ip:2380, v2 API on (Patroni needs it),
+# 2h auto-compaction. Data dir outside the service dir (survives re-provision).
+name: {{ .EtcdName }}
+data-dir: /var/lib/etcd
+listen-client-urls: http://0.0.0.0:2379
+advertise-client-urls: http://{{ .EtcdIP }}:2379
+listen-peer-urls: http://0.0.0.0:2380
+initial-advertise-peer-urls: http://{{ .EtcdIP }}:2380
+initial-cluster: "{{ .InitialCluster }}"
+initial-cluster-state: new
+initial-cluster-token: etcd-shared
+auto-compaction-retention: "2"
+enable-v2: true

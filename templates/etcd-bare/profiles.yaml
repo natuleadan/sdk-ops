@@ -1,0 +1,18 @@
+# etcd-bare profiles - one native DCS member per host, sized per node.
+# Selected via provision.yaml: services: { etcd-bare: { profile: <name> } }
+# mem_limit -> systemd MemoryMax, cpus -> CPUQuota (rendered by etcd.service).
+lite:
+  mem_limit: 256m
+  cpus: 0.5
+normal:
+  mem_limit: 512m
+  cpus: 1
+small:
+  mem_limit: 1g
+  cpus: 2
+medium:
+  mem_limit: 2g
+  cpus: 2
+large:
+  mem_limit: 4g
+  cpus: 4
