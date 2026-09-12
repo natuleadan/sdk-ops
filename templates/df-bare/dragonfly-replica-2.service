@@ -1,0 +1,22 @@
+# Dragonfly replica-2 (df-bare) - native binary + systemd, no Docker.
+# The replica follows the local primary via --replicaof in its flagfile;
+# the resource limits mirror the docker mem_limit/cpus 1:1.
+[Unit]
+Description=Dragonfly KV replica-2 (df-bare)
+After=network-online.target dragonfly-primary.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dragonfly
+Group=dragonfly
+ExecStart=/usr/local/bin/dragonfly --flagfile=/etc/dragonfly/replica-2.conf
+WorkingDirectory=/var/lib/dragonfly/replica-2
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+MemoryMax={{ .DF_MEM }}
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+name: df-bare
+description: Dragonfly KV bare-metal (primary + 2 replicas as native systemd units, no Docker) + native HAProxy TLS entrypoint + S3 backup/restore (DR). Declarative YAML-driven via sdk-ops with profiles.
+services:
+  - dragonfly-primary (systemd unit, native binary, loopback, snapshots)
+  - dragonfly-replica-1 (systemd unit, read-only replica)
+  - dragonfly-replica-2 (systemd unit, read-only replica)
+  - haproxy (native unit - TLS entrypoints :6443 writes / :6444 reads)
+ports:
+  - "6443:6443"    # HAProxy TLS writes -> primary
+  - "6444:6444"    # HAProxy TLS reads -> replicas round-robin
+env:
+  S3_BUCKET: natuleadan-pg-backup
+  S3_PREFIX: df
+  DF_PASSWORD: dragonfly
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  backup: bash backup.sh
+  backup-s3: bash backup-s3.sh
+  restore: bash restore.sh [--yes] <snapshot-dir-or-file>
+  restore-s3: bash restore-s3.sh [-y|--yes] [backup-name]
+  validate: bash validate.sh
+  test: bash test/test.sh

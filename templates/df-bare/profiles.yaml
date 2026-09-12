@@ -1,0 +1,22 @@
+# Dragonfly needs >= 256MiB per proactor thread plus headroom — the floor
+# is 512m (anything below exits with "256.00MiB are required").
+lite:
+  DF_MEM: 512m
+  DF_CPUS: "0.5"
+  HAPROXY_MEM: 128m
+  HAPROXY_CPUS: "0.25"
+normal:
+  DF_MEM: 1g
+  DF_CPUS: "1"
+  HAPROXY_MEM: 128m
+  HAPROXY_CPUS: "0.25"
+medium:
+  DF_MEM: 2g
+  DF_CPUS: "2"
+  HAPROXY_MEM: 256m
+  HAPROXY_CPUS: "0.5"
+large:
+  DF_MEM: 4g
+  DF_CPUS: "4"
+  HAPROXY_MEM: 512m
+  HAPROXY_CPUS: "1"

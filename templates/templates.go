@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-//go:embed pgsql-docker pgsql-cluster pgsql-bare kv-dockerized libsql-dockerized nats-dockerized etcd yuga-docker yuga-bare yuga-cluster nats-bare
+//go:embed pgsql-docker pgsql-cluster pgsql-bare kv-dockerized libsql-dockerized nats-dockerized etcd yuga-docker yuga-bare yuga-cluster nats-bare df-bare
 var infraTemplates embed.FS
 
 type Template struct {
