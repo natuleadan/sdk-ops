@@ -1,0 +1,23 @@
+name: df-dockerized
+description: Dragonfly KV cluster (primary + 2 replicas) + HAProxy TLS read/write split + S3 backup/restore (DR). Declarative YAML-driven via sdk-ops with profiles.
+services:
+  - dragonfly-primary (KV store, cluster mode, snapshots)
+  - dragonfly-replica (read-only replica)
+  - dragonfly-replica-2 (read-only replica)
+  - haproxy (TLS entrypoint — writes to primary, reads to replicas)
+ports:
+  - "6379:6379"    # HAProxy -> primary (TLS)
+  - "6380:6380"    # HAProxy -> replica (TLS, read-only)
+env:
+  S3_BUCKET: natuleadan-pg-backup
+  S3_PREFIX: df
+  DF_PASSWORD: dragonfly
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  backup: bash backup-s3.sh
+  restore: bash restore-s3.sh [-y|--yes] [backup-name]
+  validate: bash validate.sh
+  test: bash test/test.sh

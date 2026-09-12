@@ -1,10 +1,10 @@
 #!/bin/sh
-# kv-dockerized restore — restore Dragonfly from .dfs snapshot
+# df-dockerized restore — restore Dragonfly from .dfs snapshot
 # Verification runs inside Docker container
 set -e
 
 DF_PASSWORD="${DF_PASSWORD:-dragonfly}"
-PRIMARY_CONTAINER="kv-dockerized-dragonfly-primary-1"
+PRIMARY_CONTAINER="df-dockerized-dragonfly-primary-1"
 COMPOSE_DIR="$(cd "$(dirname "$0")" && pwd)"
 YES=false
 SNAPSHOT=""
@@ -20,7 +20,7 @@ usage() {
   echo "  --help   Show this help"
   echo ""
   echo "Examples:"
-  echo "  restore.sh backups/kv-2026-07-12-030000.dfs"
+  echo "  restore.sh backups/df-2026-07-12-030000.dfs"
   exit 0
 }
 
@@ -40,7 +40,7 @@ if [ -z "$SNAPSHOT" ] || [ ! -f "$SNAPSHOT" ]; then
   exit 1
 fi
 
-echo "=== kv-dockerized restore ==="
+echo "=== df-dockerized restore ==="
 echo "  Snapshot: $SNAPSHOT"
 
 # Confirm
@@ -59,15 +59,15 @@ docker compose -f "$COMPOSE_DIR/docker-compose.yml" down 2>&1 | tail -1
 echo "Copying snapshot to primary volume..."
 if [ -d "$SNAPSHOT" ]; then
   SRC_DIR="$(cd "$SNAPSHOT" && pwd)"
-  docker run --rm -v "kv-dockerized_primary_data:/data" -v "$SRC_DIR:/backup:ro" \
+  docker run --rm -v "df-dockerized_primary_data:/data" -v "$SRC_DIR:/backup:ro" \
     alpine sh -c "cp /backup/*.dfs /data/ && chmod 644 /data/*.dfs" 2>/dev/null
-  docker run --rm -v "kv-dockerized_replica_data:/data" -v "$SRC_DIR:/backup:ro" \
+  docker run --rm -v "df-dockerized_replica_data:/data" -v "$SRC_DIR:/backup:ro" \
     alpine sh -c "cp /backup/*.dfs /data/ && chmod 644 /data/*.dfs" 2>/dev/null
 else
   SNAPSHOT_NAME=$(basename "$SNAPSHOT")
-  docker run --rm -v "kv-dockerized_primary_data:/data" -v "$(dirname "$(realpath "$SNAPSHOT")"):/backup:ro" \
+  docker run --rm -v "df-dockerized_primary_data:/data" -v "$(dirname "$(realpath "$SNAPSHOT")"):/backup:ro" \
     alpine sh -c "cp /backup/$SNAPSHOT_NAME /data/dump.dfs && chmod 644 /data/dump.dfs" 2>/dev/null
-  docker run --rm -v "kv-dockerized_replica_data:/data" -v "$(dirname "$(realpath "$SNAPSHOT")"):/backup:ro" \
+  docker run --rm -v "df-dockerized_replica_data:/data" -v "$(dirname "$(realpath "$SNAPSHOT")"):/backup:ro" \
     alpine sh -c "cp /backup/$SNAPSHOT_NAME /data/dump.dfs && chmod 644 /data/dump.dfs" 2>/dev/null
 fi
 echo "  Volumes ready"

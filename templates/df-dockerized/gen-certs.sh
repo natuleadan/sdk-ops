@@ -1,11 +1,11 @@
 #!/bin/sh
-# kv-dockerized gen-certs — generate TLS certificates for HAProxy + Dragonfly
+# df-dockerized gen-certs — generate TLS certificates for HAProxy + Dragonfly
 set -e
 
 TLS_DIR="${TLS_DIR:-./ssl}"
 mkdir -p "$TLS_DIR"
 
-echo "=== kv-dockerized gen-certs ==="
+echo "=== df-dockerized gen-certs ==="
 
 if [ -f "$TLS_DIR/server.key" ]; then
   echo "  Certs already exist in $TLS_DIR"

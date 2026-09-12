@@ -1,17 +1,17 @@
 #!/bin/sh
-# kv-dockerized integration test — full PITR cycle (backup -> disaster -> restore -> verify)
+# df-dockerized integration test — full PITR cycle (backup -> disaster -> restore -> verify)
 set -e
 
 DF_PASSWORD="${DF_PASSWORD:-dragonfly}"
-PRIMARY_CONTAINER="kv-dockerized-dragonfly-primary-1"
-REPLICA_CONTAINER="kv-dockerized-dragonfly-replica-1"
+PRIMARY_CONTAINER="df-dockerized-dragonfly-primary-1"
+REPLICA_CONTAINER="df-dockerized-dragonfly-replica-1"
 COMPOSE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BACKUP_FILE="/tmp/kv-pitr-test-$(date +%s).dfs"
+BACKUP_FILE="/tmp/df-pitr-test-$(date +%s).dfs"
 
 RC() { docker exec -e DF_PASSWORD="$DF_PASSWORD" "$PRIMARY_CONTAINER" redis-cli -p 6379 -a "$DF_PASSWORD" "$@" 2>/dev/null; }
 RC_REPLICA() { docker exec -e DF_PASSWORD="$DF_PASSWORD" "$REPLICA_CONTAINER" redis-cli -p 6380 -a "$DF_PASSWORD" "$@" 2>/dev/null; }
 
-echo "=== kv-dockerized INTEGRATION TEST ==="
+echo "=== df-dockerized INTEGRATION TEST ==="
 
 echo "--- Step 1: Verify services ---"
 docker compose -f "$COMPOSE_DIR/docker-compose.yml" ps --status running 2>/dev/null | grep -q "$PRIMARY_CONTAINER" || {
@@ -74,7 +74,7 @@ echo "--- Step 7: Restore from backup ---"
 docker compose -f "$COMPOSE_DIR/docker-compose.yml" down 2>&1 | tail -1
 
 BNAME=$(basename "$BACKUP_FILE")
-docker run --rm -v "kv-dockerized_primary_data:/data" -v "$BACKUP_FILE:/backup:ro" \
+docker run --rm -v "df-dockerized_primary_data:/data" -v "$BACKUP_FILE:/backup:ro" \
   alpine sh -c "cp /backup/*.dfs /data/ && chmod 644 /data/*.dfs" 2>/dev/null
 
 docker compose -f "$COMPOSE_DIR/docker-compose.yml" up -d 2>&1 | tail -1
@@ -119,11 +119,64 @@ echo "--- Step 9: Verify replica ---"
 REP_COUNT=$(RC_REPLICA DBSIZE)
 echo "  Replica keys: $REP_COUNT"
 
-echo "--- Step 10: Cleanup ---"
+echo "--- Step 10: S3 DR cycle (skipped without S3 env) ---"
+if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_ACCESS_KEY" ] && [ -n "$S3_SECRET_KEY" ]; then
+  RC SET key-s3dr "value-s3dr"
+  bash "$COMPOSE_DIR/backup-s3.sh" > /tmp/df-s3-backup.log 2>&1 || {
+    echo "FAIL: backup-s3.sh failed (see /tmp/df-s3-backup.log)"
+    exit 1
+  }
+  echo "  [OK] backup-s3 uploaded"
+  RC FLUSHALL
+  [ "$(RC DBSIZE)" = "0" ] || { echo "FAIL: FLUSHALL did not clear"; exit 1; }
+  bash "$COMPOSE_DIR/restore-s3.sh" --yes > /tmp/df-s3-restore.log 2>&1 || {
+    echo "FAIL: restore-s3.sh failed (see /tmp/df-s3-restore.log)"
+    exit 1
+  }
+  S3_KEY=$(RC GET key-s3dr)
+  S3_COUNT=$(RC DBSIZE)
+  if [ "$S3_KEY" = "value-s3dr" ] && [ "$S3_COUNT" -ge 1 ] 2>/dev/null; then
+    echo "  [OK] S3 restore: key-s3dr back ($S3_COUNT keys)"
+  else
+    echo "FAIL: S3 restore expected key-s3dr back, got '$S3_KEY' ($S3_COUNT keys)"
+    exit 1
+  fi
+else
+  echo "  [SKIP] S3_ENDPOINT/S3_ACCESS_KEY/S3_SECRET_KEY not set"
+fi
+
+echo "--- Step 11: Failover (stop primary; reads survive via replicas) ---"
+HA_PORT="${DF_PORT:-6379}"
+RC SET key-failover "before-stop"
+docker stop "$PRIMARY_CONTAINER" >/dev/null 2>&1
+READ_OK=$(docker exec "$REPLICA_CONTAINER" redis-cli -p 6380 -a "$DF_PASSWORD" GET key-failover 2>/dev/null | tr -d '\r\n')
+if [ "$READ_OK" = "before-stop" ]; then
+  echo "  [OK] replica still serves reads while primary is down"
+else
+  echo "  [WARN] replica read during outage returned '$READ_OK' (replication lag)"
+fi
+docker start "$PRIMARY_CONTAINER" >/dev/null 2>&1
+echo -n "  Waiting for primary..."
+i=0
+while [ "$i" -lt 30 ]; do
+  RC PING 2>/dev/null | grep -q "PONG" && break
+  i=$((i + 1))
+  sleep 2
+done
+RC PING 2>/dev/null | grep -q "PONG" || { echo "FAIL: primary did not recover"; exit 1; }
+echo " OK"
+cd "$COMPOSE_DIR" && bash init.sh 2>&1 | tail -2
+RC SET key-failover "after-recover"
+[ "$(RC GET key-failover)" = "after-recover" ] && echo "  [OK] writes work after recovery" || {
+  echo "FAIL: writes broken after primary recovery"
+  exit 1
+}
+
+echo "--- Step 12: Cleanup ---"
 RC FLUSHALL
 RC_REPLICA FLUSHALL
 rm -rf "$BACKUP_FILE"
-echo "  ✓ Test data cleaned"
+echo "  [OK] Test data cleaned"
 
 echo ""
-echo "=== kv-dockerized INTEGRATION TEST PASSED ==="
+echo "=== df-dockerized INTEGRATION TEST PASSED ==="

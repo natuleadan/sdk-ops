@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# rps-kv.sh — redis-benchmark for kv-dockerized
+# rps-df.sh — redis-benchmark for df-dockerized
 # Usage (from VPS host):
-#   docker exec kv-dockerized-dragonfly-primary-1 bash /app/rps.sh
+#   docker exec df-dockerized-dragonfly-primary-1 bash /app/rps.sh
 #   bash rps.sh              # if run inside Dragonfly container
 
 HOST="${1:-localhost}"
@@ -13,7 +13,7 @@ NREQ="${4:-300000}"
 LOGFILE="/tmp/redis-bench-$(date +%Y%m%d-%H%M%S).log"
 
 echo "============================================"
-echo " redis-benchmark RPS — kv-dockerized"
+echo " redis-benchmark RPS — df-dockerized"
 echo " Host: $HOST:$PORT  |  Requests: $NREQ  |  Clients: 50"
 echo " Date:  $(date)"
 echo "============================================"
@@ -68,7 +68,7 @@ done
 # --- Summary ---
 echo ""
 echo "============================================"
-echo " RPS Summary — kv-dockerized"
+echo " RPS Summary — df-dockerized"
 echo "============================================"
 
 avg_set=$(printf '%s\n' "${SET_TPS[@]}" | awk '{s+=$1} END {printf "%.0f", s/NR}')
