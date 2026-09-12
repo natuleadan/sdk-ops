@@ -4,7 +4,7 @@
 # leave a stale dev password behind).
 set -u
 
-PATRONI_CONT="$(docker ps --format '{{.Names}}' | grep -E 'patroni' | head -1)"
+PATRONI_CONT="$(docker ps --format '{{"{{"}}.Names{{"}}"}}' | grep -E 'patroni' | head -1)"
 [ -n "$PATRONI_CONT" ] || { echo "FAIL: no patroni container"; exit 1; }
 
 # 0. Ensure the app role + schema (source .env for the password). Restores can
@@ -38,7 +38,7 @@ if [ -n "$PEER" ]; then
 fi
 
 # 4. Pooler (if present).
-PGDOG=$(docker ps --format '{{.Names}}' | grep -E 'pgdog' | head -1)
+PGDOG=$(docker ps --format '{{"{{"}}.Names{{"}}"}}' | grep -E 'pgdog' | head -1)
 if [ -n "$PGDOG" ]; then
   docker exec "$PGDOG" psql -h 127.0.0.1 -p 6432 -U dev -d postgres -tA -w -c 'SELECT 1' >/dev/null 2>&1 \
     || { echo "FAIL: pgdog down"; exit 1; }

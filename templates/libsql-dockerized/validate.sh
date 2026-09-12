@@ -6,7 +6,7 @@ set -e
 # recreates sqld containers via `docker run` with instance-suffixed names
 # (sqld-replica-2 vs sqld-replica-2-1). Never hardcode the suffix.
 find_container() {
-  docker ps --format '{{.Names}}' 2>/dev/null | grep -E "^libsql-dockerized-$1(-[0-9]+)?$" | head -1
+  docker ps --format '{{"{{"}}.Names{{"}}"}}' 2>/dev/null | grep -E "^libsql-dockerized-$1(-[0-9]+)?$" | head -1
 }
 PRIMARY_CONTAINER="${PRIMARY_CONTAINER:-$(find_container sqld-primary)}"
 REPLICA_CONTAINER="${REPLICA_CONTAINER:-$(find_container sqld-replica-1)}"
