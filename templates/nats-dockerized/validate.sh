@@ -1,8 +1,8 @@
 #!/bin/bash
-# nats-dockerized validate — assert this cluster node is healthy.
+# nats-dockerized validate - assert this cluster node is healthy.
 set -u
 
-DIR="/opt/sdk-ops/services/nats"
+DIR="${NATS_DIR:-/opt/sdk-ops/services/nats}"
 BIN="$DIR/nats"
 ENV="$DIR/.env"
 [ -f "$ENV" ] && . "$ENV"
@@ -16,11 +16,54 @@ check() { if "$BIN" "$@" "${APP[@]}" --format=nagios >/dev/null 2>&1; then echo 
 echo "[nats-validate] $NATS_URL"
 check server check connection
 check server check jetstream
+# App streams (e.g. events) belong to the microservices, not the server —
+# their absence is informational, never a server failure.
 if "$BIN" stream info events "${APP[@]}" >/dev/null 2>&1; then
   echo "  [PASS] stream info events"
 else
-  echo "  [FAIL] stream info events"
-  FAILED=1
+  echo "  [INFO] no app stream 'events' yet (created by the microservices)"
+fi
+
+# Cluster awareness: report the peer count from the rendered nats.conf
+# `routes:` list (each route is one peer). NATS_ROUTES/NATS_PEERS env
+# overrides when present (comma-separated). The app account cannot query
+# server info (SYS-only), so the config is the source of truth here.
+CONF="$DIR/nats.conf"
+PEERS=""
+if [ -n "${NATS_ROUTES:-}" ]; then
+  PEERS="$NATS_ROUTES"
+elif [ -n "${NATS_PEERS:-}" ]; then
+  PEERS="$NATS_PEERS"
+elif [ -f "$CONF" ]; then
+  PEERS="$(grep -oE 'nats://(\[[0-9a-fA-F:]+\]|[0-9A-Za-z.-]+)' "$CONF" 2>/dev/null | sed 's#nats://##; s/^\[//; s/\]$//' | tr '\n' ',' | sed 's/,$//')"
+fi
+if [ -n "$PEERS" ]; then
+  n=$(echo "$PEERS" | tr ',' '\n' | grep -c .)
+  echo "  [PASS] peers: $n ($(echo "$PEERS" | tr ',' ' '))"
+else
+  echo "  [SKIP] peers (single node)"
+fi
+
+# `nats server check cluster` does not exist in the pinned CLI 0.4.0
+# (subcommands: connection stream consumer message meta request jetstream
+# server kv credential) - SKIP it defensively instead of failing.
+if "$BIN" server check cluster "${APP[@]}" --format=nagios >/dev/null 2>&1; then
+  echo "  [PASS] server check cluster"
+else
+  if "$BIN" server check --help 2>&1 | grep -q "check cluster"; then
+    echo "  [FAIL] server check cluster"
+    FAILED=1
+  else
+    echo "  [SKIP] server check cluster (not in this CLI version)"
+  fi
+fi
+
+# JetStream cluster signal visible to the app account: `server check jetstream`
+# reports replicas_ok=N from the account's streams.
+js="$("$BIN" server check jetstream "${APP[@]}" 2>&1)"
+reps="$(echo "$js" | grep -oE 'replicas_ok=[0-9]+' | head -1)"
+if [ -n "$reps" ]; then
+  echo "  [PASS] $reps"
 fi
 
 # Cert expiry: fail when < 30 days left (the renewal timer refreshes it).
@@ -29,11 +72,11 @@ if [ -f "$CERT" ]; then
   if openssl x509 -in "$CERT" -noout -checkend 2592000 >/dev/null 2>&1; then
     echo "  [PASS] server cert > 30d"
   else
-    echo "  [FAIL] server cert expira en <30 dias"
+    echo "  [FAIL] server cert expires in <30 days"
     FAILED=1
   fi
 else
-  echo "  [FAIL] server cert ausente"
+  echo "  [FAIL] server cert missing"
   FAILED=1
 fi
 
@@ -43,7 +86,7 @@ if [ -n "$avail" ]; then
   if [ "$avail" -gt 200 ]; then
     echo "  [PASS] host free ${avail}MB"
   else
-    echo "  [FAIL] memoria baja (${avail}MB)"
+    echo "  [FAIL] low host memory (${avail}MB)"
     FAILED=1
   fi
 fi

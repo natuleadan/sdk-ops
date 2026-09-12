@@ -10,4 +10,5 @@ health:
 commands:
   backup: bash backup.sh
   restore: bash restore.sh
+  test: bash test/test.sh
   validate: bash validate.sh
