@@ -46,6 +46,10 @@ func DefaultInstallConfig(publicIP string) InstallConfig {
 func Install(client *goss.Client, cfg InstallConfig) error {
 	fmt.Println("  -> Installing k3s...")
 
+	if err := EnsureStorageDiscardOff(client); err != nil {
+		return err
+	}
+
 	installCmd := buildInstallCmd(cfg)
 
 	out, _, err := ssh.Run(client, installCmd)
@@ -68,6 +72,61 @@ func Install(client *goss.Client, cfg InstallConfig) error {
 	postInstallCIS(client, cfg)
 
 	fmt.Println("  -> k3s installed successfully!")
+	return nil
+}
+
+// EnsureStorageDiscardOff turns OFF the continuous-TRIM `discard` mount option
+// on the root filesystem before k3s writes its embedded etcd data. Some cloud
+// disks handle TRIM pathologically slowly: a bulk delete (or any steady delete
+// churn) saturates the discard queue, which stalls etcd fdatasync for seconds
+// and wedges the control plane (observed: fdatasync 4-8s -> apiserver
+// healthz timeout -> k3s panic-restart loop). Periodic fstrim.timer is enabled
+// instead, the standard practice when the discard mount option is off.
+func EnsureStorageDiscardOff(client *goss.Client) error {
+	script := `if findmnt -no OPTIONS / | grep -q discard; then
+  mount -o remount,nodiscard / 2>/dev/null || true
+  sed -i -E '/[[:space:]]\/[[:space:]]/ s/discard,?//' /etc/fstab 2>/dev/null || true
+  systemctl enable --now fstrim.timer >/dev/null 2>&1 || true
+  echo "storage: root remounted without discard (periodic fstrim enabled)"
+else
+  echo "storage: no discard option, nothing to do"
+fi`
+	out, _, err := ssh.Run(client, script)
+	if err != nil {
+		return fmt.Errorf("storage discard fix: %w", err)
+	}
+	fmt.Print("  " + strings.TrimSpace(out) + "\n")
+	return nil
+}
+
+// EnsureNetOffloadsOff disables TX checksum offloads on the flannel vxlan
+// device and the underlay NIC. virtio-net advertises vxlan checksum offload
+// support but fails to complete the INNER checksum, so cross-node pod traffic
+// leaves with an invalid TCP checksum and the receiver silently drops it
+// (symptom: pod-to-pod times out while same-node traffic works; tcpdump shows
+// "cksum ... incorrect" on the destination veth). A udev rule re-applies the
+// setting every time the flannel device is (re)created (k3s restarts included).
+func EnsureNetOffloadsOff(client *goss.Client, iface string) error {
+	if iface == "" {
+		iface = "ens19" // platform default; the fleet YAML sets k3s_iface explicitly
+	}
+	script := fmt.Sprintf(`cat > /etc/udev/rules.d/99-sdk-ops-offloads.rules <<'EOF'
+# Disable TX checksum offload on the vxlan (flannel.1) and the underlay NIC:
+# virtio-net does not complete the inner vxlan checksum, corrupting cross-node
+# pod-to-pod traffic (receivers drop it silently). Managed by sdk-ops.
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="flannel.1", RUN+="/usr/sbin/ethtool -K flannel.1 tx off"
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="%[1]s", RUN+="/usr/sbin/ethtool -K %[1]s tx off"
+EOF
+udevadm control --reload-rules 2>/dev/null || true
+for i in $(seq 1 10); do ip link show flannel.1 >/dev/null 2>&1 && break; sleep 3; done
+ethtool -K flannel.1 tx off >/dev/null 2>&1 || true
+ethtool -K %[1]s tx off >/dev/null 2>&1 || true
+echo "net: tx offloads off (flannel.1 + %[1]s, udev-persistent)"`, iface)
+	out, _, err := ssh.Run(client, script)
+	if err != nil {
+		return fmt.Errorf("net offload fix: %w", err)
+	}
+	fmt.Print("  " + strings.TrimSpace(out) + "\n")
 	return nil
 }
 

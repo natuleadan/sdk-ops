@@ -18,6 +18,7 @@ import (
 
 	"github.com/natuleadan/sdk-ops/deploy"
 	"github.com/natuleadan/sdk-ops/hardening"
+	"github.com/natuleadan/sdk-ops/k3s"
 	"github.com/natuleadan/sdk-ops/providers"
 	"github.com/natuleadan/sdk-ops/ssh"
 )
@@ -1333,6 +1334,9 @@ func applyPerHostPhaseOn(pf ProvisionFile, h ProvisionHost) error {
 // security watch, fail2ban jail, firewall state watchdog, logrotate and the
 // traefik watchdog.
 func applyWatchdogPhasesOn(pf ProvisionFile, h ProvisionHost) error {
+	if err := installHostTuningOn(pf, h); err != nil {
+		return err
+	}
 	r := resolveHostConfig(&pf, h)
 	if r.security.Enabled {
 		if err := installSecurityOn(pf, h, r.security.Threshold); err != nil {
@@ -1350,6 +1354,37 @@ func applyWatchdogPhasesOn(pf ProvisionFile, h ProvisionHost) error {
 	}
 	if !pf.NoTraefik {
 		if err := installTraefikWatchOn(pf, h); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// installHostTuningOn applies the host tuning phases on one host:
+//   - turn off the continuous-TRIM `discard` mount option (pathological TRIM
+//     latency on some cloud disks stalls etcd fdatasync and can wedge k3s);
+//   - disable TX checksum offloads on the flannel vxlan device and the underlay
+//     NIC (virtio-net corrupts the inner vxlan checksum -> cross-node pod
+//     traffic dropped by receivers). The udev rule keeps it applied across
+//     flannel recreations.
+//
+// Idempotent — runs on every provision, initial or phases-only.
+func installHostTuningOn(pf ProvisionFile, h ProvisionHost) error {
+	port := h.Port
+	if port == 0 {
+		port = 22
+	}
+	f := hostInfraFlags(pf, h, port)
+	conn, err := infraConnect(h.Host, &f)
+	if err != nil {
+		return fmt.Errorf("host tuning: connect %s: %w", h.Name, err)
+	}
+	defer closeConn(conn)
+	if err := k3s.EnsureStorageDiscardOff(conn); err != nil {
+		return err
+	}
+	if pf.Mode == "k3s" {
+		if err := k3s.EnsureNetOffloadsOff(conn, pf.K3sIface); err != nil {
 			return err
 		}
 	}
