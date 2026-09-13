@@ -1,7 +1,9 @@
 # df-cluster — resource profiles (k3s Dragonfly CR sizing).
-lite:        # 0.25c / 128Mi per pod
-  cpu: "250m"
-  mem: 128Mi
+# Dragonfly requires >=256MiB per proactor thread (it exits below that), so
+# lite keeps the floor + headroom instead of the generic 128Mi.
+lite:        # 0.1c / 384Mi per pod (Dragonfly floor + tiny-node coexistence)
+  cpu: "100m"
+  mem: 384Mi
   storage: 1Gi
 normal:      # 1c / 1Gi
   cpu: "1"

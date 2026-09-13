@@ -1,8 +1,8 @@
 lite:
   MemLimit: "256m"
-  Cpus: "0.5"
+  Cpus: "0.25"
   Mem: "128Mi"
-  CPU: "250m"
+  CPU: "100m"
   MaxMemory: "96mb"
 normal:
   MemLimit: "512m"
