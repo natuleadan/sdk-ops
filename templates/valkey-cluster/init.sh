@@ -18,7 +18,9 @@ PASSWORD="${VK_PASSWORD:-{{ .Password }}}"
 log()  { echo "[valkey-cluster] $1"; }
 fail() { echo "[valkey-cluster] FAIL: $1"; exit 1; }
 
-VK() { $KUBECTL -n "$NS" exec valkey-0 -c valkey -- valkey-cli -a "$PASSWORD" --no-auth-warning "$@" 2>/dev/null; }
+# kubectl exec can occasionally hang (kubelet streaming flake) — every call is
+# bounded so the deadline loops can never block on a single exec.
+VK() { timeout -k 5 15 $KUBECTL -n "$NS" exec valkey-0 -c valkey -- valkey-cli -a "$PASSWORD" --no-auth-warning "$@" 2>/dev/null; }
 
 log "applying manifest"
 $KUBECTL apply -f "$DIR/valkey.yaml" >/dev/null || fail "manifest apply"
@@ -63,7 +65,7 @@ else
   if [ "${slots:-0}" = "0" ]; then
     log "no slots assigned — CLUSTER RESET HARD on all nodes"
     for i in $(seq 0 $((NODES - 1))); do
-      $KUBECTL -n "$NS" exec "valkey-$i" -c valkey -- valkey-cli -a "$PASSWORD" --no-auth-warning cluster reset hard >/dev/null 2>&1 || true
+      timeout -k 5 15 $KUBECTL -n "$NS" exec "valkey-$i" -c valkey -- valkey-cli -a "$PASSWORD" --no-auth-warning cluster reset hard >/dev/null 2>&1 || true
     done
     sleep 3
   fi

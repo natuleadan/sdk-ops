@@ -2,7 +2,8 @@
 # etcd-cluster init - deploy etcd inside k3s via the official bitnami helm
 # chart: an external DCS for services running in the cluster that need etcd
 # (k3s itself keeps its own embedded one - this does not touch it).
-# Runs ON the k3s server node: k3s kubectl + helm (auto-installed here).
+# Runs ON the k3s server node: k3s kubectl + the helm installed by the fleet
+# provision (pinned, verified here).
 # Idempotent: re-runs converge to the same release (helm upgrade --install).
 set -euo pipefail
 
@@ -22,28 +23,10 @@ kctl() { k3s kubectl "$@"; }
 # otherwise the release is suffixed with the chart name (<release>-etcd).
 if [[ "$RELEASE" == *etcd* ]]; then STS="$RELEASE"; else STS="${RELEASE}-etcd"; fi
 
-# 1. Ensure the helm binary ({{ .HelmVersion }}, linux amd64/arm64).
-if ! command -v helm >/dev/null 2>&1; then
-  echo "--- Installing helm $HELM_VERSION ---"
-  case "$(uname -m)" in
-    x86_64)        HELM_ARCH="amd64" ;;
-    aarch64|arm64) HELM_ARCH="arm64" ;;
-    *) echo "ERROR: unsupported arch: $(uname -m)"; exit 1 ;;
-  esac
-  HELM_TGZ="/tmp/helm-${HELM_VERSION}-linux-${HELM_ARCH}.tar.gz"
-  HELM_URL="https://get.helm.sh/helm-${HELM_VERSION}-linux-${HELM_ARCH}.tar.gz"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$HELM_URL" -o "$HELM_TGZ"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$HELM_TGZ" "$HELM_URL"
-  else
-    echo "ERROR: curl or wget required to install helm"
-    exit 1
-  fi
-  tar -xzf "$HELM_TGZ" -C /tmp
-  install -m 0755 "/tmp/linux-${HELM_ARCH}/helm" /usr/local/bin/helm
-  rm -rf "/tmp/linux-${HELM_ARCH}" "$HELM_TGZ"
-fi
+# 1. Helm is installed by the fleet provision on every k3s host (pinned
+#    version) — verify it here instead of downloading per-template.
+command -v helm >/dev/null 2>&1 || { echo "ERROR: helm not found — run the fleet provision (it installs helm on k3s hosts)"; exit 1; }
+helm version --short 2>/dev/null | grep -q "$HELM_VERSION" || echo "WARN: helm $HELM_VERSION expected, got $(helm version --short 2>/dev/null || echo none)"
 
 # 2. Namespace (dry-run apply keeps it idempotent).
 kctl create namespace "$NAMESPACE" --dry-run=client -o yaml | kctl apply -f -

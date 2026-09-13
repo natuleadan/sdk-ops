@@ -1,9 +1,9 @@
 #!/bin/bash
 # nats-cluster init — deploy NATS JetStream R3 in k3s via the official nats
 # helm chart, plus the NACK JetStream controller (declarative Stream/Consumer
-# CRDs). Runs ON THE NODE: uses k3s kubectl and a locally installed helm
-# (auto-downloaded, pinned). Idempotent: re-running upgrades to the rendered
-# values and waits for rollout.
+# CRDs). Runs ON THE NODE: uses k3s kubectl and the helm installed by the
+# fleet provision (pinned, verified here). Idempotent: re-running upgrades to
+# the rendered values and waits for rollout.
 set -e
 
 NS="{{ .Namespace }}"
@@ -18,20 +18,10 @@ DIR="/opt/sdk-ops/services/nats-cluster"
 log() { echo "[nats-cluster] $1"; }
 fail() { echo "[nats-cluster] FAIL: $1"; exit 1; }
 
-# 1. Ensure helm (pinned version, amd64/arm64) — the k3s node may not have it.
-if ! command -v /usr/local/bin/helm >/dev/null 2>&1; then
-  ARCH="$(uname -m)"
-  case "$ARCH" in
-    x86_64|amd64)  HARCH="amd64" ;;
-    aarch64|arm64) HARCH="arm64" ;;
-    *) fail "unsupported arch $ARCH" ;;
-  esac
-  log "installing helm ${HELM_VER} (${HARCH})"
-  curl -fsSL "https://get.helm.sh/helm-${HELM_VER}-linux-${HARCH}.tar.gz" -o /tmp/helm.tgz || fail "helm download"
-  tar -xzf /tmp/helm.tgz -C /tmp
-  mv "/tmp/linux-${HARCH}/helm" /usr/local/bin/helm
-  rm -rf /tmp/helm.tgz "/tmp/linux-${HARCH}"
-fi
+# 1. Helm is installed by the fleet provision on every k3s host (pinned
+#    version) — verify it here instead of downloading per-template.
+command -v helm >/dev/null 2>&1 || fail "helm not found — run the fleet provision (it installs helm on k3s hosts)"
+helm version --short 2>/dev/null | grep -q "$HELM_VER" || log "warn: helm $HELM_VER expected, got $(helm version --short 2>/dev/null || echo none)"
 
 # 2. Namespace + chart repo (both idempotent).
 $KUBECTL create namespace "$NS" --dry-run=client -o yaml | $KUBECTL apply -f - || fail "namespace"
@@ -60,10 +50,18 @@ fi
 log "checking /healthz on all replicas"
 i=0
 while [ "$i" -lt "{{ .Replicas }}" ]; do
-  until $KUBECTL -n "$NS" exec "${REL}-${i}" -c nats -- wget -qO- http://localhost:8222/healthz 2>/dev/null | grep -q ok; do
+  tries=0
+  until timeout -k 5 10 $KUBECTL -n "$NS" exec "${REL}-${i}" -c nats -- wget -qO- http://localhost:8222/healthz 2>/dev/null | grep -q ok; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 20 ]; then
+      log "  WARN ${REL}-${i} healthz not confirmed after ${tries} tries (kubectl exec flake?) - continuing"
+      break
+    fi
     sleep 3
   done
-  log "  ${REL}-${i} healthz OK"
+  if [ "$tries" -lt 20 ]; then
+    log "  ${REL}-${i} healthz OK"
+  fi
   i=$((i + 1))
 done
 
