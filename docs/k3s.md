@@ -55,13 +55,13 @@ following host joins as an **HA server** (not agent) via
 k3s_ha: true
 k3s_iface: ens19           # flannel binds to the VLAN NIC
 hosts:
-  - name: mia-01
+  - name: node-01
     host: 192.0.2.10
     peer_ip: 192.0.2.20    # the private/VLAN address — flannel + etcd peer
-  - name: mia-02
+  - name: node-02
     host: 192.0.2.11
     peer_ip: 192.0.2.21
-  - name: mia-03
+  - name: node-03
     host: 192.0.2.12
     peer_ip: 192.0.2.22
 ```
@@ -80,6 +80,71 @@ sh -s - server --server https://<first-peer-ip>:6443
 
 The provision handles this automatically; the join form is documented for
 manual recovery.
+
+**Traefik note**: the k3s traefik addon is disabled only with
+`k3s_disable_traefik: true` (default: enabled). `no_traefik` is a different
+knob — it skips the HOST-level docker traefik (for bare/docker hosts), not the
+in-cluster ingress.
+
+## Roles (control-plane / worker)
+
+Every host can declare its cluster role explicitly. When any host declares a
+role, the fleet builds ONE cluster: servers form the control plane and roleless
+hosts (or `role: agent`) are workers.
+
+```yaml
+mode: k3s
+k3s_iface: ens19
+hosts:
+  - name: cp1
+    host: 192.0.2.10
+    peer_ip: 192.0.2.20
+    role: server            # control-plane (boots the cluster)
+  - name: w1
+    host: 192.0.2.11
+    peer_ip: 192.0.2.21
+    role: agent             # worker (K3S_URL join)
+```
+
+- **One server** = standalone control plane (sqlite) + workers.
+- **More than one server** requires `k3s_ha: true` (embedded-etcd quorum);
+  the provision rejects it otherwise.
+- Hosts without `role` in a roles fleet default to **agent**.
+- A **dedicated control-plane node** is just a host whose role is `server`
+  (the future external-CP topology: one server elsewhere + agents on the app
+  nodes). Without any role, the legacy behavior applies (`k3s_ha`: all
+  servers; otherwise an independent single-node k3s per host).
+
+## Helm (centralized)
+
+The provision installs a **pinned helm** (`v3.15.4`) on every k3s host during
+the tuning phase — one binary version for the whole fleet. The helm-based
+service templates (`nats-cluster`, `etcd-cluster`, `crowdsec-cluster`) only
+VERIFY it (`command -v helm` + version check); they never download helm
+themselves. Re-provisioning is idempotent (a matching version is a no-op).
+
+## Hardening + k3s (firewall, peers, kubelet)
+
+With `hardening: true` the host input chain is default-deny (nftables); only
+22/80/443/6443 stay open to the world. A k3s fleet needs the cluster ports
+between the nodes — declare them in `peers` (the fleet YAML is the single
+source of truth):
+
+- `8472/udp` — flannel vxlan (cross-node pod traffic), every pair.
+- `10250/tcp` — kubelet: the apiserver dials it for exec/logs and
+  metrics-server scrapes it; every pair.
+- `2379`, `2380`, `6443` — only when `k3s_ha: true` (embedded etcd peering).
+
+The provision also opens `10250` from each node's own addresses (`peer_ip` and
+`host`): the local apiserver reaches the kubelet through the node address,
+which is not a fleet peer. This is not an exposure — the kubelet keeps its TLS
+client auth + authorization (k3s disables anonymous auth).
+
+Peers are opened with the provider allowlist when it is installed, otherwise
+with direct persisted nftables rules. The two modes are mutually exclusive:
+mixing them poisons the `exposed` chain with per-port catch-alls (a
+`dport 10250 drop` there hangs every `kubectl exec`). Never expose the kubelet
+or the vxlan beyond the declared peer set.
 
 ## The registry images (private/public)
 
@@ -177,6 +242,28 @@ schedule on the small plans.
 DR: every template ships `backup-s3.sh` / `restore-s3.sh` (per-shard RDB for
 valkey, barman PITR for cnpg, native snapshots for df, nkey-sealed streams for
 nats) — see each `templates/<name>/README.md`.
+
+## WAF/IPS inside k3s (`crowdsec-cluster`)
+
+`crowdsec-cluster` deploys CrowdSec (LAPI + agent) via helm and wires the
+**Traefik bouncer plugin**: when the native k3s traefik addon is present,
+`init.sh` applies a `HelmChartConfig` (`experimental.plugins.crowdsec-bouncer`
++ the middleware attached to the `web`/`websecure` entrypoints), creates the
+bouncer (`traefik-bouncer`) and the middleware, and applies default-deny
+NetworkPolicies to the namespace. `lite` profile = stream IPS (IP/behavior
+decisions); `normal`+ enables the **AppSec WAF** (OWASP CRS).
+
+```yaml
+services:
+  crowdsec-cluster:
+    profile: lite      # declare it on a k3s SERVER host (uses k3s kubectl + helm)
+```
+
+Validate/e2e: `validate.sh` (LAPI/agent/bouncer/middleware/netpols) and
+`test/test.sh` (decision lifecycle + an end-to-end block through traefik:
+a client pod gets 200, is banned, gets 403, and gets 200 again after the
+unban). Keep it behind an edge WAF/CDN so the tiny nodes never absorb a
+DDoS at the origin. Usage guide (cscli, dashboards, AppSec): `docs/crowdsec.md`.
 
 ## YugabyteDB inside k3s (operator)
 
