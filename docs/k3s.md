@@ -136,15 +136,24 @@ source of truth):
 - `2379`, `2380`, `6443` — only when `k3s_ha: true` (embedded etcd peering).
 
 The provision also opens `10250` from each node's own addresses (`peer_ip` and
-`host`): the local apiserver reaches the kubelet through the node address,
-which is not a fleet peer. This is not an exposure — the kubelet keeps its TLS
-client auth + authorization (k3s disables anonymous auth).
+`host`) **and from the pod network** (`10.42.0.0/16`<!-- go-check:ignore-ip -->): the local apiserver
+reaches the kubelet through the node address, and a metrics-server pod on the
+same node scrapes it from its pod IP (same-node traffic is not SNATed) — the
+scrape fails with `<unknown>` without that rule. None of this is an exposure:
+the kubelet keeps its TLS client auth + authorization (k3s disables anonymous
+auth).
 
-Peers are opened with the provider allowlist when it is installed, otherwise
-with direct persisted nftables rules. The two modes are mutually exclusive:
-mixing them poisons the `exposed` chain with per-port catch-alls (a
-`dport 10250 drop` there hangs every `kubectl exec`). Never expose the kubelet
-or the vxlan beyond the declared peer set.
+Peers are **always** direct persisted rules in the `input` chain, and every
+application first purges stale allowlist state for the port (an old `exposed`
+accept+drop entry shadows the local accepts, and the 5-minute state watchdog
+re-applies registry entries — a `dport 10250 drop` there hangs every
+`kubectl exec`). `allowlist expose` refuses the peer ports (8472, 2379, 2380,
+10250) for the same reason. Audit anytime with:
+
+```bash
+sudo nft list chain inet filter exposed   # must stay empty for peer ports
+kubectl exec <pod> -- true                # hangs => the exposed chain is poisoned
+```
 
 ## The registry images (private/public)
 
@@ -242,6 +251,24 @@ schedule on the small plans.
 DR: every template ships `backup-s3.sh` / `restore-s3.sh` (per-shard RDB for
 valkey, barman PITR for cnpg, native snapshots for df, nkey-sealed streams for
 nats) — see each `templates/<name>/README.md`.
+
+S3 conventions (shared by the templates and their DR scripts):
+
+- `S3_ENDPOINT` may be given with or without scheme; each consumer normalizes
+  it (df's `--s3_endpoint` takes the bare host, pg composes `https://` from
+  it, the scripts strip it for `s3cfg`).
+- Key prefix per service: `DF_S3_PREFIX` (df), `PG_S3_PREFIX` (pg),
+  `VK_S3_PREFIX` (valkey), `NATS_S3_PREFIX` (nats) — never a shared
+  `S3_PREFIX` (it leaked one service's prefix into another service's `.env`).
+- The df/pg inits install `s3cmd` and write `~/.s3cfg` from the env, so the
+  explicit backup/restore scripts work on a fresh node.
+- **Clean the prefix before a fresh deploy**: barman refuses to archive over an
+  existing store ("Expected empty archive") and CNPG then retries in a loop
+  that saturates the node (io wait 100%, apiserver timeouts, hung
+  `kubectl exec`). The pg init fails fast with the exact cleaning command; a
+  re-provision of a live cluster skips the check.
+- The acceptance tooling ships with the service: `validate.sh` and `test/`
+  land in `/opt/sdk-ops/services/<name>/` after a provision.
 
 ## WAF/IPS inside k3s (`crowdsec-cluster`)
 

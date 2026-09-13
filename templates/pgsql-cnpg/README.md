@@ -43,3 +43,9 @@ bash restore-s3.sh    # DR: bootstrap <name>-restore from the S3 store (PITR opt
 - True same-name DR: delete the source cluster + PVCs first, then run
   `RESTORE_NAME=<name> restore-s3.sh`.
 - The operator release is pinned via `PG_K8S_OPERATOR_MANIFEST`.
+- A fresh bootstrap requires an EMPTY barman prefix: barman refuses to
+  archive over an existing store ("Expected empty archive") and the retry
+  loop saturates the node. The init fails fast with the cleaning command —
+  clean `s3://<bucket>/<prefix>/` or deploy with a fresh `PG_S3_PREFIX`.
+- The init installs `s3cmd` + writes `~/.s3cfg` from the env, so
+  `backup-s3.sh` / `restore-s3.sh` work on a fresh node.

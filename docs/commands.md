@@ -342,6 +342,13 @@ lists the registry. `db create` applies this policy automatically: `--db-port`
 exposes admin-only by default, `--db-global` opens to all IPs, and
 `--db-ips` restricts to an explicit IP list.
 
+Exposing is **declarative per port**: the given IP set replaces the previous
+one, so pass every allowed IP in one call. The cluster peer ports (8472/udp
+flannel, 2379/2380 etcd, 10250 kubelet) are refused — the fleet peer rules own
+them (direct `input`-chain accepts) and an allowlist entry would write a
+catch-all drop into `exposed` that shadows local traffic and hangs
+`kubectl exec`.
+
 **Security prechecks:** `db create` and `allowlist expose` verify the node
 before any operation: nftables is enabled, and if the provider allowlist is
 missing it is installed automatically (cf-normal, with the operator IP) so a

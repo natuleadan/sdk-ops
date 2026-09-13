@@ -15,7 +15,8 @@ P2P image distribution system; same name, different product).
   operator env carries `S3_*`; explicit DR cycle always available through
   `backup`/`restore` (BGSAVE -> kubectl cp -> s3cmd, and back). The S3 key
   prefix is `DF_S3_PREFIX` (default `df`) and `S3_ENDPOINT` may be given with
-  or without scheme (normalized for Dragonfly's `--s3_endpoint`).
+  or without scheme (normalized for Dragonfly's `--s3_endpoint`). The init
+  installs `s3cmd` + writes `~/.s3cfg` from the env when S3 is wired.
 
 ## Deploy (fleet YAML)
 
