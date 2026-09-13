@@ -188,7 +188,29 @@ func (c *Client) Connect() (*ssh.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
+	go keepAlive(conn)
 	return conn, nil
+}
+
+// keepAlive probes the connection every 15s. A half-open session (remote sshd
+// restarted, path dropped) would otherwise block a pending Run forever: three
+// consecutive failed probes close the connection so callers get an error
+// instead of hanging.
+func keepAlive(conn *ssh.Client) {
+	t := time.NewTicker(15 * time.Second)
+	defer t.Stop()
+	fails := 0
+	for range t.C {
+		if _, _, err := conn.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+			fails++
+			if fails >= 3 {
+				_ = conn.Close()
+				return
+			}
+			continue
+		}
+		fails = 0
+	}
 }
 
 func RunWithStdin(client *ssh.Client, cmd, stdin string) (string, string, error) {
