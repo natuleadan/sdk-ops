@@ -42,21 +42,25 @@ type ProvisionFile struct {
 	// https://<first-peer-ip>:6443 — 3 servers = etcd quorum 2/3. Without it
 	// each host runs an independent single-node k3s (server + agents joined
 	// separately with infra join).
-	K3sHA       bool                   `yaml:"k3s_ha,omitempty"`
-	K3sIface    string                 `yaml:"k3s_iface,omitempty"` // flannel iface (e.g. the VLAN nic)
-	Groups      map[string]GroupConfig `yaml:"groups"`
-	Hosts       []ProvisionHost        `yaml:"hosts"`
-	Peers       []ProvisionPeer        `yaml:"peers"`
-	Bans        []string               `yaml:"bans"`
-	Telegram    TelegramConfig         `yaml:"telegram"`
-	Security    SecurityConfig         `yaml:"security"`
-	Fail2ban    Fail2banConfig         `yaml:"fail2ban"`
-	SSL         SSLConfig              `yaml:"ssl"`
-	Traefik     TraefikConfig          `yaml:"traefik"`
-	Swap        SwapConfig             `yaml:"swap"`
-	Services    ProvisionServices      `yaml:"services,omitempty"`
-	VLANs       []ProvisionVLAN        `yaml:"vlans"`
-	DeployOrder []DeployStep           `yaml:"deploy_order"`
+	K3sHA    bool   `yaml:"k3s_ha,omitempty"`
+	K3sIface string `yaml:"k3s_iface,omitempty"` // flannel iface (e.g. the VLAN nic)
+	// K3sDisableTraefik installs k3s with the traefik addon disabled (no
+	// in-cluster ingress). `no_traefik` only skips the HOST-level docker
+	// traefik; the in-cluster one is controlled here (default: enabled).
+	K3sDisableTraefik bool                   `yaml:"k3s_disable_traefik,omitempty"`
+	Groups            map[string]GroupConfig `yaml:"groups"`
+	Hosts             []ProvisionHost        `yaml:"hosts"`
+	Peers             []ProvisionPeer        `yaml:"peers"`
+	Bans              []string               `yaml:"bans"`
+	Telegram          TelegramConfig         `yaml:"telegram"`
+	Security          SecurityConfig         `yaml:"security"`
+	Fail2ban          Fail2banConfig         `yaml:"fail2ban"`
+	SSL               SSLConfig              `yaml:"ssl"`
+	Traefik           TraefikConfig          `yaml:"traefik"`
+	Swap              SwapConfig             `yaml:"swap"`
+	Services          ProvisionServices      `yaml:"services,omitempty"`
+	VLANs             []ProvisionVLAN        `yaml:"vlans"`
+	DeployOrder       []DeployStep           `yaml:"deploy_order"`
 }
 
 // ProvisionHost is a single VPS entry. Per-host values override the group
@@ -87,6 +91,15 @@ type ProvisionHost struct {
 	Traefik           *TraefikConfig    `yaml:"traefik,omitempty"`
 	Services          ProvisionServices `yaml:"services,omitempty"`
 	Tags              []string          `yaml:"tags,omitempty"`
+	// Role declares the k3s cluster role of the host: "server" (control-plane)
+	// or "agent" (worker). When any host declares a role the fleet builds ONE
+	// cluster: the first server boots it (embedded etcd via --cluster-init with
+	// k3s_ha), the remaining servers join as HA servers and the agents as
+	// workers after the wave; hosts without a role default to agent. Without
+	// roles the legacy behavior applies (k3s_ha: all servers; otherwise an
+	// independent single-node k3s per host). A future dedicated control plane
+	// is just a host whose role is server.
+	Role string `yaml:"role,omitempty"`
 }
 
 // ProvisionServices declares which services run on a node and how they are
@@ -415,12 +428,22 @@ func runProvision(path, tags string) error {
 		return fmt.Errorf("%d/%d hosts failed to provision", failed, len(results))
 	}
 
-	// k3s HA: after every host is initialized (server standalone, joiners
-	// docker-only), join the rest as HA servers — etcd quorum N/2+1.
-	if pf.Mode == "k3s" && pf.K3sHA {
-		if err := k3sHAJoin(pf, hosts); err != nil {
-			return fmt.Errorf("k3s ha join: %w", err)
+	// k3s join: with roles the fleet builds one cluster (servers + agents);
+	// legacy k3s_ha joins every non-first host as an HA server. The peer ports
+	// must be OPEN before the join when the hosts are hardened: the joiner
+	// reaches the server's etcd peers (2379/2380) and flannel (8472) after the
+	// initial 6443 contact, and the default-deny input chain would drop them.
+	if pf.Mode == "k3s" {
+		if err := applyProvisionPeers(pf, names); err != nil {
+			return fmt.Errorf("peers before k3s join: %w", err)
 		}
+		if err := k3sClusterJoin(pf, hosts); err != nil {
+			return fmt.Errorf("k3s join: %w", err)
+		}
+		// Let the control plane settle before the phases/services load it: a
+		// lease-starved apiserver makes the k3s supervisor exit, and a crash
+		// mid-bootstrap can leave the local etcd needing a clean restart.
+		waitForClusterSettle(hosts)
 	}
 
 	if err := applyProvisionPhases(pf, names); err != nil {
@@ -704,7 +727,7 @@ func provisionHost(pf ProvisionFile, h ProvisionHost) provisionResult {
 		port = 22
 	}
 	f := infraFlags{
-		user:              h.User,
+		user:              fleetUser(h),
 		key:               h.SSHKey,
 		port:              port,
 		mode:              pf.Mode,
@@ -713,30 +736,9 @@ func provisionHost(pf ProvisionFile, h ProvisionHost) provisionResult {
 		noTraefik:         pf.NoTraefik,
 		noHardening:       pf.Hardening != nil && !*pf.Hardening,
 	}
-	// k3s HA fleet: the FIRST host boots the HA server (--cluster-init, etcd
-	// embebido, bound to its peer_ip); every following host initializes
-	// docker-only here and joins as an HA server in k3sHAJoin after the wave.
-	// OPEN: the joiner unit renders but the service fails against the VLAN
-	// apiserver — the k3s docs require the join as `sh -s - server --server
-	// https://<ip>:6443` and the CRITICAL FLAGS (cluster-dns/cidr,
-	// service-cidr, disable-*, secrets-encryption) to be IDENTICAL on every
-	// server. Pending: switch the join to the documented form + flag parity.
-	if pf.Mode == "k3s" && pf.K3sHA {
-		first := k3sHAServerHost(pf)
-		if first != nil && first.Name == h.Name {
-			f.k3sExtraArgs = k3sHAServerArgs(h, pf)
-			// Write config.yaml BEFORE the k3s install — the install script
-			// reads it and persists the flags into the systemd unit.
-			conn, err := infraConnect(h.Host, &f)
-			if err == nil {
-				_ = writeK3sConfigYAML(conn, &h, pf, true)
-				closeConn(conn)
-			}
-		} else {
-			f.mode = "docker" // no independent k3s — the join phase installs it
-			f.disableTraefik = pf.NoTraefik
-		}
-	}
+	// k3s topology: roles (server|agent) build one cluster; legacy behavior
+	// without roles keeps working (see applyK3sTopology).
+	applyK3sTopology(&f, pf, h)
 	fmt.Printf("\n--- Host %s (%s) [group=%s] ---\n", h.Name, h.Host, h.Group)
 	already := hostAlreadyInitialized(h, &f)
 	if !already {
@@ -951,7 +953,46 @@ func validateProvision(pf *ProvisionFile) (map[string]string, error) {
 	if err := validateServiceReplicas(pf); err != nil {
 		return nil, err
 	}
+	if err := validateK3sRoles(pf); err != nil {
+		return nil, err
+	}
 	return names, nil
+}
+
+// validateK3sRoles checks the declared k3s cluster roles (server|agent).
+// Roles only make sense in k3s mode; when any host declares one, the fleet
+// builds a single cluster, so a server must exist and more than one server
+// requires k3s_ha (embedded-etcd HA control plane). Hosts without a role in a
+// roles-declared fleet default to agent.
+func validateK3sRoles(pf *ProvisionFile) error {
+	servers := 0
+	declared := false
+	for _, h := range pf.Hosts {
+		if h.Role == "" {
+			continue
+		}
+		declared = true
+		switch h.Role {
+		case "server":
+			servers++
+		case "agent":
+		default:
+			return fmt.Errorf("host %q role %q is invalid (server|agent)", h.Name, h.Role)
+		}
+	}
+	if !declared {
+		return nil
+	}
+	if pf.Mode != "k3s" {
+		return fmt.Errorf("roles (server|agent) are only supported in k3s mode")
+	}
+	if servers == 0 {
+		return fmt.Errorf("roles declared without a server: one host needs role: server")
+	}
+	if servers > 1 && !pf.K3sHA {
+		return fmt.Errorf("%d servers declared without k3s_ha — set k3s_ha: true for an HA control plane", servers)
+	}
+	return nil
 }
 
 // validateServiceReplicas checks the service replicas declaration. Replicas
@@ -1198,14 +1239,8 @@ func hasAnyTraefikDomains(pf *ProvisionFile) bool {
 // applyProvisionPhases runs peers, bans, telegram, security and per-host
 // traefik/security phases after all hosts are initialized.
 func applyProvisionPhases(pf ProvisionFile, names map[string]string) error {
-	if len(pf.Peers) > 0 {
-		fmt.Println("\n-> Configuring peers...")
-		for _, peer := range pf.Peers {
-			if err := applyProvisionPeer(pf, names, peer); err != nil {
-				return err
-			}
-		}
-		fmt.Println("-> Peers configured")
+	if err := applyProvisionPeers(pf, names); err != nil {
+		return err
 	}
 	if len(pf.Bans) > 0 {
 		if err := applyProvisionBans(pf); err != nil {
@@ -1255,11 +1290,7 @@ func applyFleetEtcd(pf ProvisionFile) error {
 		if port == 0 {
 			port = 22
 		}
-		etcdUser := h.User
-		if etcdUser == "" {
-			etcdUser = "sdkops"
-		}
-		f := infraFlags{user: etcdUser, key: h.SSHKey, port: port, mode: pf.Mode, noHardening: pf.Hardening != nil && !*pf.Hardening}
+		f := infraFlags{user: fleetUser(h), key: h.SSHKey, port: port, mode: pf.Mode, noHardening: pf.Hardening != nil && !*pf.Hardening}
 		conn, err := infraConnect(h.Host, &f)
 		if err != nil {
 			return fmt.Errorf("fleet etcd: connect %s: %w", h.Name, err)
@@ -1276,11 +1307,35 @@ func applyFleetEtcd(pf ProvisionFile) error {
 
 // hostInfraFlags builds the SSH flags for a host: the YAML user (root in the
 // no-hardening mode) with the sdkops fallback for hardened nodes.
-func hostInfraFlags(pf ProvisionFile, h ProvisionHost, port int) infraFlags {
+// fleetUser resolves the SSH user for fleet operations on a bootstrapped host:
+// the post-hardening user (sdkops) when it accepts the key — probing it first
+// also avoids counting failed root auths against fail2ban — otherwise the
+// declared bootstrap user (root) for first-time init.
+func fleetUser(h ProvisionHost) string {
 	user := h.User
-	if user == "" {
-		user = "sdkops"
+	if user == "" || user == "sdkops" {
+		return "sdkops"
 	}
+	probe := func(u string) bool {
+		f := infraFlags{user: u, key: h.SSHKey, port: hostPort(&h), noHardening: true}
+		conn, err := infraConnect(h.Host, &f)
+		if err != nil {
+			return false
+		}
+		closeConn(conn)
+		return true
+	}
+	if probe("sdkops") {
+		return "sdkops"
+	}
+	if probe(user) {
+		return user
+	}
+	return "sdkops"
+}
+
+func hostInfraFlags(pf ProvisionFile, h ProvisionHost, port int) infraFlags {
+	user := fleetUser(h)
 	return infraFlags{
 		user:        user,
 		key:         h.SSHKey,
@@ -1360,13 +1415,46 @@ func applyWatchdogPhasesOn(pf ProvisionFile, h ProvisionHost) error {
 	return nil
 }
 
+// applyK3sTopology resolves the k3s role of one host and mutates the init
+// flags accordingly. With explicit roles the fleet builds ONE cluster: the
+// first server boots it here (embedded etcd via --cluster-init with k3s_ha),
+// and every other server/agent initializes docker-only so the join phase
+// installs k3s (k3sClusterJoin). Legacy behavior without roles: k3s_ha makes
+// every non-first host an HA server; otherwise each host is an independent
+// single-node k3s (flags untouched).
+func applyK3sTopology(f *infraFlags, pf ProvisionFile, h ProvisionHost) {
+	if pf.Mode != "k3s" {
+		return
+	}
+	role := k3sRoleOf(pf, h.Name)
+	first := k3sFirstServerHost(pf)
+	boots := first != nil && first.Name == h.Name && (role == "server" || role == "")
+	switch {
+	case boots:
+		// Flags live in config.yaml (node-ip, advertise, tls-san, flannel-iface,
+		// cluster-init) — passing them ALSO as install args duplicates them
+		// (kubelet rejects a repeated --node-ip), so the install stays bare.
+		// Write config.yaml BEFORE the k3s install: the install script reads
+		// it and persists the flags into the systemd unit.
+		if conn, err := infraConnect(h.Host, f); err == nil {
+			_ = writeK3sConfigYAML(conn, &h, pf, pf.K3sHA)
+			closeConn(conn)
+		}
+	case role == "server" || role == "agent" || pf.K3sHA:
+		f.mode = "docker" // no standalone k3s — the join phase installs it
+		f.disableTraefik = pf.K3sDisableTraefik
+	}
+}
+
 // installHostTuningOn applies the host tuning phases on one host:
 //   - turn off the continuous-TRIM `discard` mount option (pathological TRIM
 //     latency on some cloud disks stalls etcd fdatasync and can wedge k3s);
 //   - disable TX checksum offloads on the flannel vxlan device and the underlay
 //     NIC (virtio-net corrupts the inner vxlan checksum -> cross-node pod
 //     traffic dropped by receivers). The udev rule keeps it applied across
-//     flannel recreations.
+//     flannel recreations;
+//   - ensure the pinned helm binary is installed on k3s hosts (the service
+//     templates only VERIFY helm — the provision owns the install).
 //
 // Idempotent — runs on every provision, initial or phases-only.
 func installHostTuningOn(pf ProvisionFile, h ProvisionHost) error {
@@ -1386,6 +1474,20 @@ func installHostTuningOn(pf ProvisionFile, h ProvisionHost) error {
 	if pf.Mode == "k3s" {
 		if err := k3s.EnsureNetOffloadsOff(conn, pf.K3sIface); err != nil {
 			return err
+		}
+		if err := k3s.EnsureHelmOn(conn, ""); err != nil {
+			return err
+		}
+		// Kubelet must accept connections from the node itself: the local
+		// apiserver dials the kubelet via the node address (kubectl exec/logs)
+		// and metrics-server pods SNAT to the local node IP — neither is a
+		// fleet peer, so the default-deny input chain drops them and exec
+		// hangs forever.
+		if h.PeerIP != "" {
+			_ = hardening.ExposePeerPortDirect(conn, 10250, "tcp", h.PeerIP)
+		}
+		if h.Host != "" {
+			_ = hardening.ExposePeerPortDirect(conn, 10250, "tcp", h.Host)
 		}
 	}
 	return nil
@@ -1768,10 +1870,7 @@ func applyProvisionPeer(pf ProvisionFile, names map[string]string, peer Provisio
 	if port == 0 {
 		port = 22
 	}
-	peerUser := toHost.User
-	if peerUser == "" {
-		peerUser = "sdkops"
-	}
+	peerUser := fleetUser(toHost)
 	f := infraFlags{
 		user:        peerUser,
 		key:         toHost.SSHKey,
@@ -1875,109 +1974,282 @@ func k3sHAServerHost(pf ProvisionFile) *ProvisionHost {
 	return &pf.Hosts[0]
 }
 
-// k3sHAServerArgs builds the HA server bootstrap: embedded etcd via
-// --cluster-init, bound and advertised on the host's peer_ip (the VLAN
-// address the joiners reach by the declared peers).
-func k3sHAServerArgs(h ProvisionHost, pf ProvisionFile) string {
+// k3sRolesDeclared reports whether any host declares an explicit k3s role.
+func k3sRolesDeclared(pf ProvisionFile) bool {
+	if pf.Mode != "k3s" {
+		return false
+	}
+	for _, h := range pf.Hosts {
+		if h.Role != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// k3sRoleOf resolves the effective k3s role of one host. Empty means the
+// fleet declares no roles (legacy behavior). In a roles-declared fleet, hosts
+// without an explicit role default to agent.
+func k3sRoleOf(pf ProvisionFile, name string) string {
+	if !k3sRolesDeclared(pf) {
+		return ""
+	}
+	for _, h := range pf.Hosts {
+		if h.Name != name {
+			continue
+		}
+		if h.Role != "" {
+			return h.Role
+		}
+		return "agent"
+	}
+	return ""
+}
+
+// k3sFirstServerHost returns the host that boots the cluster: the first host
+// with role server in a roles fleet, or the first host in legacy k3s_ha.
+func k3sFirstServerHost(pf ProvisionFile) *ProvisionHost {
+	for i := range pf.Hosts {
+		if pf.Hosts[i].Role == "server" {
+			return &pf.Hosts[i]
+		}
+	}
+	return k3sHAServerHost(pf)
+}
+
+// k3sServerArgs is retained for the documented manual bootstrap (the flags
+// live in config.yaml for automated provisioning to avoid duplicate-flag
+// merges; kubelet rejects a repeated --node-ip).
+func k3sServerArgs(h ProvisionHost, pf ProvisionFile, clusterInit bool) string {
 	ip := h.PeerIP
 	if ip == "" {
 		ip = h.Host
 	}
-	args := fmt.Sprintf("--cluster-init --node-ip %s --advertise-address %s --tls-san %s --tls-san %s", ip, ip, ip, h.Host)
+	init := ""
+	if clusterInit {
+		init = "--cluster-init "
+	}
+	args := fmt.Sprintf("%s--node-ip %s --advertise-address %s --tls-san %s --tls-san %s", init, ip, ip, ip, h.Host)
 	if pf.K3sIface != "" {
 		args = strings.TrimSpace(args + fmt.Sprintf(" --flannel-iface %s", pf.K3sIface))
 	}
 	return args
 }
 
-// k3sHAJoin joins every fleet host after the first as an HA k3s SERVER via
-// https://<server-peer-ip>:6443 — 3 servers form the embedded-etcd quorum.
-// The joiners were initialized docker-only by provisionHost; this phase
-// installs their k3s server joined to the cluster (no standalone init).
-func k3sHAJoin(pf ProvisionFile, hosts []ProvisionHost) error {
-	server := k3sHAServerHost(pf)
+// waitForClusterSettle waits (best-effort) for the k3s system addons to be
+// Available before the phases/services load the control plane.
+func waitForClusterSettle(hosts []ProvisionHost) {
+	if len(hosts) == 0 {
+		return
+	}
+	h := hosts[0]
+	conn, err := infraConnect(h.Host, &infraFlags{user: fleetUser(h), key: h.SSHKey, port: hostPort(&h), noHardening: true})
+	if err != nil {
+		return
+	}
+	defer closeConn(conn)
+	script := `K="sudo k3s kubectl"
+$K -n kube-system wait --for=condition=Available deploy/coredns --timeout=240s >/dev/null 2>&1 || true
+if $K -n kube-system get deploy metrics-server >/dev/null 2>&1; then
+  $K -n kube-system wait --for=condition=Available deploy/metrics-server --timeout=240s >/dev/null 2>&1 || true
+fi
+if $K -n kube-system get deploy traefik >/dev/null 2>&1; then
+  $K -n kube-system wait --for=condition=Available deploy/traefik --timeout=300s >/dev/null 2>&1 || true
+fi
+echo "cluster settle: addons available (best-effort)"`
+	if out, _, err := ssh.Run(conn, script); err == nil {
+		fmt.Print("  " + strings.TrimSpace(out) + "\n")
+	}
+}
+
+// k3sClusterJoin joins the fleet after the wave. With explicit roles the
+// fleet is ONE cluster: server hosts join as HA servers (embedded-etcd
+// quorum when k3s_ha) and agent hosts (plus roleless hosts in a roles fleet)
+// join as workers via K3S_URL. Legacy k3s_ha (no roles) joins every non-first
+// host as an HA server; legacy non-HA fleets are independent nodes (no-op).
+func k3sClusterJoin(pf ProvisionFile, hosts []ProvisionHost) error {
+	if !pf.K3sHA && !k3sRolesDeclared(pf) {
+		return nil
+	}
+	server := k3sFirstServerHost(pf)
 	if server == nil {
 		return nil
 	}
-	fmt.Printf("\n-> k3s HA join: %d joiners -> https://%s:6443\n", len(hosts)-1, server.PeerIP)
+	fmt.Printf("\n-> k3s join: %d hosts -> https://%s:6443\n", len(hosts)-1, server.PeerIP)
 	serverConn, err := infraConnect(server.Host, &infraFlags{
-		user: server.User, key: server.SSHKey, port: hostPort(server), noHardening: true,
+		user: fleetUser(*server), key: server.SSHKey, port: hostPort(server), noHardening: true,
 	})
 	if err != nil {
-		return fmt.Errorf("ssh to k3s HA server: %w", err)
+		return fmt.Errorf("ssh to k3s server: %w", err)
 	}
 	defer closeConn(serverConn)
-	tokenOut, _, err := ssh.Run(serverConn, "cat /var/lib/rancher/k3s/server/token")
+	tokenOut, _, err := ssh.Run(serverConn, "sudo cat /var/lib/rancher/k3s/server/token")
 	if err != nil || strings.TrimSpace(tokenOut) == "" {
-		return fmt.Errorf("k3s HA token: %w", err)
+		return fmt.Errorf("k3s token: %w", err)
 	}
 	token := strings.TrimSpace(tokenOut)
 
-	// Write config.yaml on the FIRST server (cluster-init already running,
-	// but the config file ensures future restarts keep the same flags).
-	if err := writeK3sConfigYAML(serverConn, server, pf, true); err != nil {
+	// Write config.yaml on the FIRST server (it already booted; the file
+	// persists the flags across restarts).
+	if err := writeK3sConfigYAML(serverConn, server, pf, pf.K3sHA); err != nil {
 		return fmt.Errorf("k3s config.yaml on server: %w", err)
 	}
+
+	// Hosts already joined and Ready are skipped: re-running the installer on
+	// a healthy member restarts k3s and churns the embedded-etcd peers, which
+	// was observed to destabilize the boot server's local etcd.
+	readyIPs := k3sReadyNodeIPs(serverConn)
 
 	for _, h := range hosts {
 		if h.Name == server.Name {
 			continue
 		}
-		ip := h.PeerIP
-		if ip == "" {
-			ip = h.Host
-		}
-		fmt.Printf("  -> joining %s as HA server (node-ip %s)\n", h.Name, ip)
-		joinerConn, err := infraConnect(h.Host, &infraFlags{
-			user: h.User, key: h.SSHKey, port: hostPort(&h), noHardening: true,
-		})
-		if err != nil {
-			return fmt.Errorf("ssh to joiner %s: %w", h.Name, err)
-		}
-		// Write config.yaml BEFORE installing k3s — the install script
-		// reads it and persists the flags into the systemd unit.
-		if err := writeK3sConfigYAML(joinerConn, &h, pf, false); err != nil {
-			closeConn(joinerConn)
-			return fmt.Errorf("k3s config.yaml on %s: %w", h.Name, err)
-		}
-		// Documented HA server join form: sh -s - server --server https://<ip>:6443
-		install := fmt.Sprintf(
-			"curl -sfL https://get.k3s.io | K3S_TOKEN=%s sh -s - server --server https://%s:6443",
-			token, server.PeerIP)
-		if _, _, err := ssh.Run(joinerConn, install); err != nil {
-			closeConn(joinerConn)
-			return fmt.Errorf("k3s HA join %s: %w", h.Name, err)
-		}
-		if err := waitForK3sNode(joinerConn); err != nil {
-			closeConn(joinerConn)
+		if err := k3sJoinFleetHost(h, server, token, pf, readyIPs); err != nil {
 			return err
 		}
-		closeConn(joinerConn)
 	}
-	// Quorum check from the server: every HA server must show up Ready.
-	out, _, err := ssh.Run(serverConn, "kubectl get nodes --no-headers 2>/dev/null | grep -c Ready || true")
+	// Every fleet host must show up Ready (retries: raft/agent convergence).
+	return waitForFleetReady(serverConn, len(hosts))
+}
+
+// k3sReadyNodeIPs snapshots the Ready nodes' internal IPs from the server.
+func k3sReadyNodeIPs(serverConn *golang_ssh.Client) map[string]bool {
+	ready := map[string]bool{}
+	out, _, err := ssh.Run(serverConn, `sudo k3s kubectl get nodes --no-headers -o wide 2>/dev/null | awk '$2=="Ready"{print $6}'`)
 	if err != nil {
-		return err
+		return ready
 	}
-	want := len(hosts)
-	if got := strings.TrimSpace(out); got != fmt.Sprintf("%d", want) {
-		return fmt.Errorf("k3s HA quorum incomplete: %s/%d nodes Ready", got, want)
+	for ip := range strings.FieldsSeq(strings.TrimSpace(out)) {
+		ready[ip] = true
 	}
-	fmt.Printf("  -> k3s HA cluster up: %d/%d servers ready (etcd quorum %d)\n", want, want, want/2+1)
-	return nil
+	return ready
+}
+
+// waitForFleetReady waits until every fleet host shows Ready on the server.
+func waitForFleetReady(serverConn *golang_ssh.Client, want int) error {
+	ready := ""
+	for attempt := 1; attempt <= 12; attempt++ {
+		out, _, err := ssh.Run(serverConn, "sudo k3s kubectl get nodes --no-headers 2>/dev/null | grep -c Ready || true")
+		if err != nil {
+			return err
+		}
+		ready = strings.TrimSpace(out)
+		if ready == fmt.Sprintf("%d", want) {
+			fmt.Printf("  -> k3s cluster up: %d/%d nodes ready\n", want, want)
+			return nil
+		}
+		fmt.Printf("  -> waiting for cluster readiness (%s/%d nodes)...\n", ready, want)
+		time.Sleep(10 * time.Second)
+	}
+	return fmt.Errorf("k3s cluster incomplete: %s/%d nodes Ready", ready, want)
+}
+
+// k3sJoinFleetHost joins one non-boot host: Ready members are skipped (a
+// re-install churns the embedded etcd) and the role decides server vs agent.
+func k3sJoinFleetHost(h ProvisionHost, server *ProvisionHost, token string, pf ProvisionFile, readyIPs map[string]bool) error {
+	ip := h.PeerIP
+	if ip == "" {
+		ip = h.Host
+	}
+	if readyIPs[ip] {
+		fmt.Printf("  -> %s already joined (Ready at %s) - skipping\n", h.Name, ip)
+		return nil
+	}
+	if k3sRoleOf(pf, h.Name) == "agent" {
+		return k3sJoinAgent(h, server, token, pf)
+	}
+	return k3sJoinServer(h, server, token, pf)
+}
+
+// k3sJoinServer joins one host as an HA server (documented form:
+// sh -s - server --server https://<peer-ip>:6443).
+func k3sJoinServer(h ProvisionHost, server *ProvisionHost, token string, pf ProvisionFile) error {
+	ip := h.PeerIP
+	if ip == "" {
+		ip = h.Host
+	}
+	fmt.Printf("  -> joining %s as HA server (node-ip %s)\n", h.Name, ip)
+	joinerConn, err := infraConnect(h.Host, &infraFlags{
+		user: fleetUser(h), key: h.SSHKey, port: hostPort(&h), noHardening: true,
+	})
+	if err != nil {
+		return fmt.Errorf("ssh to joiner %s: %w", h.Name, err)
+	}
+	defer closeConn(joinerConn)
+	// Write config.yaml BEFORE installing k3s — the install script reads it
+	// and persists the flags into the systemd unit. The periodic-TRIM discard
+	// option stalls etcd fdatasync, so switch it off before the data dir.
+	if err := k3s.EnsureStorageDiscardOff(joinerConn); err != nil {
+		return fmt.Errorf("k3s storage tuning on %s: %w", h.Name, err)
+	}
+	if err := writeK3sConfigYAML(joinerConn, &h, pf, false); err != nil {
+		return fmt.Errorf("k3s config.yaml on %s: %w", h.Name, err)
+	}
+	install := fmt.Sprintf(
+		`SUDO=""; [ "$(id -u)" != "0" ] && SUDO="sudo"; curl -sfL https://get.k3s.io | $SUDO env K3S_TOKEN=%s INSTALL_K3S_EXEC="server --server https://%s:6443" sh -`,
+		token, server.PeerIP)
+	if _, _, err := ssh.Run(joinerConn, install); err != nil {
+		return fmt.Errorf("k3s HA join %s: %w", h.Name, err)
+	}
+	return waitForK3sNode(joinerConn)
+}
+
+// k3sJoinAgent joins one host as a worker agent via K3S_URL (the member
+// server reachable by its peer_ip). Agents have no local kubectl — the wait
+// checks the k3s-agent unit and the final Ready count happens on the server.
+func k3sJoinAgent(h ProvisionHost, server *ProvisionHost, token string, pf ProvisionFile) error {
+	ip := h.PeerIP
+	if ip == "" {
+		ip = h.Host
+	}
+	fmt.Printf("  -> joining %s as agent (node-ip %s)\n", h.Name, ip)
+	joinerConn, err := infraConnect(h.Host, &infraFlags{
+		user: fleetUser(h), key: h.SSHKey, port: hostPort(&h), noHardening: true,
+	})
+	if err != nil {
+		return fmt.Errorf("ssh to joiner %s: %w", h.Name, err)
+	}
+	defer closeConn(joinerConn)
+	if err := k3s.EnsureStorageDiscardOff(joinerConn); err != nil {
+		return fmt.Errorf("k3s storage tuning on %s: %w", h.Name, err)
+	}
+	extra := fmt.Sprintf("--node-ip %s", ip)
+	if pf.K3sIface != "" {
+		extra += fmt.Sprintf(" --flannel-iface %s", pf.K3sIface)
+	}
+	if err := k3s.Join(joinerConn, nil, k3s.JoinConfig{
+		ServerIP:  server.PeerIP,
+		Token:     token,
+		ExtraArgs: extra,
+	}); err != nil {
+		return fmt.Errorf("k3s agent join %s: %w", h.Name, err)
+	}
+	return waitForK3sAgent(joinerConn)
+}
+
+// waitForK3sAgent waits until the k3s-agent unit is active on a worker.
+func waitForK3sAgent(conn *golang_ssh.Client) error {
+	for range 60 {
+		out, _, err := ssh.Run(conn, "systemctl is-active k3s-agent 2>/dev/null || true")
+		if err == nil && strings.TrimSpace(out) == "active" {
+			return nil
+		}
+		time.Sleep(5 * time.Second)
+	}
+	return fmt.Errorf("k3s agent did not become active")
 }
 
 // writeK3sConfigYAML writes /etc/rancher/k3s/config.yaml on a node with the
-// critical flags that must be IDENTICAL on every HA server. The k3s install
-// script reads this file regardless of how k3s is installed (first server or
-// joiner), ensuring flag parity.
-func writeK3sConfigYAML(conn *golang_ssh.Client, h *ProvisionHost, pf ProvisionFile, isServer bool) error {
+// critical flags that must be IDENTICAL on every HA server (cluster-init only
+// on the booting server). The k3s install script reads this file regardless
+// of how k3s is installed (first server or joiner), ensuring flag parity.
+func writeK3sConfigYAML(conn *golang_ssh.Client, h *ProvisionHost, pf ProvisionFile, clusterInit bool) error {
 	ip := h.PeerIP
 	if ip == "" {
 		ip = h.Host
 	}
 	var cfg strings.Builder
-	if isServer {
+	if clusterInit {
 		cfg.WriteString("cluster-init: true\n")
 	}
 	fmt.Fprintf(&cfg, "node-ip: %s\n", ip)
@@ -1986,11 +2258,11 @@ func writeK3sConfigYAML(conn *golang_ssh.Client, h *ProvisionHost, pf ProvisionF
 	if pf.K3sIface != "" {
 		fmt.Fprintf(&cfg, "flannel-iface: %s\n", pf.K3sIface)
 	}
-	if pf.NoTraefik {
+	if pf.K3sDisableTraefik {
 		cfg.WriteString("disable:\n  - traefik\n")
 	}
 	script := fmt.Sprintf(`sudo mkdir -p /etc/rancher/k3s
-cat > /etc/rancher/k3s/config.yaml <<'YAML'
+sudo tee /etc/rancher/k3s/config.yaml >/dev/null <<'YAML'
 %sYAML
 `, cfg.String())
 	_, _, err := ssh.Run(conn, script)
@@ -2008,7 +2280,7 @@ func hostPort(h *ProvisionHost) int {
 // waitForK3sNode waits until a node appears Ready in its local kubectl.
 func waitForK3sNode(conn *golang_ssh.Client) error {
 	for range 60 {
-		out, _, err := ssh.Run(conn, "kubectl get nodes 2>/dev/null | grep -c Ready || true")
+		out, _, err := ssh.Run(conn, "sudo k3s kubectl get nodes 2>/dev/null | grep -c Ready || true")
 		if err == nil && strings.TrimSpace(out) != "" && strings.TrimSpace(out) != "0" {
 			return nil
 		}

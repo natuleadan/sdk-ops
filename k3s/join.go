@@ -34,17 +34,17 @@ func Join(agentClient, serverClient *goss.Client, cfg JoinConfig) error {
 		return fmt.Errorf("token is required (provide --token or ensure SSH access to server)")
 	}
 
-	installCmd := "curl -sfL https://get.k3s.io"
+	// Env vars must reach the install script (assignments before the pipe
+	// only apply to curl) and the whole thing needs root — the caller may be
+	// the post-hardening user (sdkops) with NOPASSWD sudo.
+	env := fmt.Sprintf("K3S_URL=https://%s:6443 K3S_TOKEN=%s", cfg.ServerIP, token)
 	if cfg.K3sChannel != "" {
-		installCmd = fmt.Sprintf("INSTALL_K3S_CHANNEL=%s %s", cfg.K3sChannel, installCmd)
+		env = fmt.Sprintf("INSTALL_K3S_CHANNEL=%s %s", cfg.K3sChannel, env)
 	}
 	if cfg.K3sVersion != "" {
-		installCmd = fmt.Sprintf("INSTALL_K3S_VERSION=%s %s", cfg.K3sVersion, installCmd)
+		env = fmt.Sprintf("INSTALL_K3S_VERSION=%s %s", cfg.K3sVersion, env)
 	}
-
-	agentArgs := cfg.ExtraArgs
-	installCmd = fmt.Sprintf("%s K3S_URL=https://%s:6443 K3S_TOKEN=%s INSTALL_K3S_EXEC='agent %s' | sh",
-		installCmd, cfg.ServerIP, token, agentArgs)
+	installCmd := fmt.Sprintf(`SUDO=""; [ "$(id -u)" != "0" ] && SUDO="sudo"; curl -sfL https://get.k3s.io | $SUDO env %s INSTALL_K3S_EXEC="agent %s" sh -`, env, cfg.ExtraArgs)
 
 	out, _, err := ssh.Run(agentClient, installCmd)
 	if err != nil {

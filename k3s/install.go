@@ -83,10 +83,11 @@ func Install(client *goss.Client, cfg InstallConfig) error {
 // healthz timeout -> k3s panic-restart loop). Periodic fstrim.timer is enabled
 // instead, the standard practice when the discard mount option is off.
 func EnsureStorageDiscardOff(client *goss.Client) error {
-	script := `if findmnt -no OPTIONS / | grep -q discard; then
-  mount -o remount,nodiscard / 2>/dev/null || true
-  sed -i -E '/[[:space:]]\/[[:space:]]/ s/discard,?//' /etc/fstab 2>/dev/null || true
-  systemctl enable --now fstrim.timer >/dev/null 2>&1 || true
+	script := `SUDO=""; [ "$(id -u)" != "0" ] && SUDO="sudo"
+if findmnt -no OPTIONS / | grep -q discard; then
+  $SUDO mount -o remount,nodiscard / 2>/dev/null || true
+  $SUDO sed -i -E '/[[:space:]]\/[[:space:]]/ s/discard,?//' /etc/fstab 2>/dev/null || true
+  $SUDO systemctl enable --now fstrim.timer >/dev/null 2>&1 || true
   echo "storage: root remounted without discard (periodic fstrim enabled)"
 else
   echo "storage: no discard option, nothing to do"
@@ -110,18 +111,23 @@ func EnsureNetOffloadsOff(client *goss.Client, iface string) error {
 	if iface == "" {
 		iface = "ens19" // platform default; the fleet YAML sets k3s_iface explicitly
 	}
-	script := fmt.Sprintf(`cat > /etc/udev/rules.d/99-sdk-ops-offloads.rules <<'EOF'
+	script := fmt.Sprintf(`SUDO=""; [ "$(id -u)" != "0" ] && SUDO="sudo"
+$SUDO tee /etc/udev/rules.d/99-sdk-ops-offloads.rules >/dev/null <<'EOF'
 # Disable TX checksum offload on the vxlan (flannel.1) and the underlay NIC:
 # virtio-net does not complete the inner vxlan checksum, corrupting cross-node
 # pod-to-pod traffic (receivers drop it silently). Managed by sdk-ops.
 ACTION=="add", SUBSYSTEM=="net", KERNEL=="flannel.1", RUN+="/usr/sbin/ethtool -K flannel.1 tx off"
 ACTION=="add", SUBSYSTEM=="net", KERNEL=="%[1]s", RUN+="/usr/sbin/ethtool -K %[1]s tx off"
 EOF
-udevadm control --reload-rules 2>/dev/null || true
+$SUDO udevadm control --reload-rules 2>/dev/null || true
 for i in $(seq 1 10); do ip link show flannel.1 >/dev/null 2>&1 && break; sleep 3; done
-ethtool -K flannel.1 tx off >/dev/null 2>&1 || true
-ethtool -K %[1]s tx off >/dev/null 2>&1 || true
-echo "net: tx offloads off (flannel.1 + %[1]s, udev-persistent)"`, iface)
+$SUDO ethtool -K flannel.1 tx off >/dev/null 2>&1 || true
+$SUDO ethtool -K %[1]s tx off >/dev/null 2>&1 || true
+if $SUDO ethtool -k flannel.1 2>/dev/null | grep -q 'tx-checksumming: on'; then
+  echo "net: WARN flannel.1 tx offloads are still ON (re-created after the fix?)"
+else
+  echo "net: tx offloads off (flannel.1 + %[1]s, udev-persistent)"
+fi`, iface)
 	out, _, err := ssh.Run(client, script)
 	if err != nil {
 		return fmt.Errorf("net offload fix: %w", err)
@@ -174,19 +180,22 @@ func buildInstallCmd(cfg InstallConfig) string {
 		serverFlags = serverFlags + " " + extraArgs
 	}
 
-	return fmt.Sprintf("curl -sfL https://get.k3s.io | %sINSTALL_K3S_EXEC='server %s' sudo sh -", envVars, serverFlags)
+	// Root or sudo: the bootstrap may run as the post-hardening user (sdkops).
+	// The env vars must go through `env` so they reach the install script
+	// (assignments before the pipe would only apply to curl).
+	return fmt.Sprintf(`SUDO=""; [ "$(id -u)" != "0" ] && SUDO="sudo"; curl -sfL https://get.k3s.io | $SUDO env %sINSTALL_K3S_EXEC="server %s" sh -`, envVars, serverFlags)
 }
 
 func waitForK3s(client *goss.Client) error {
 	fmt.Println("  -> Waiting for k3s to be ready...")
-	waitCmd := `for i in $(seq 1 30); do
+	waitCmd := `for i in $(seq 1 60); do
   if sudo kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes 2>/dev/null | grep -q Ready; then
     echo "k3s ready"
     exit 0
   fi
   sleep 2
 done
-echo "k3s not ready after 60s"
+echo "k3s not ready after 120s"
 exit 1`
 	_, _, err := ssh.Run(client, waitCmd)
 	if err != nil {

@@ -89,7 +89,7 @@ hosts:
 	}
 }
 
-func TestValidateHTTPSModeAndWildcard(t *testing.T) {	// valid: https_mode cf/all + wildcard with dns01 token
+func TestValidateHTTPSModeAndWildcard(t *testing.T) { // valid: https_mode cf/all + wildcard with dns01 token
 	ok := &ProvisionFile{
 		Mode:      "docker",
 		HTTPSMode: "all",
