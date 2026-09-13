@@ -795,15 +795,17 @@ func crowdsecClusterRenderData(prof map[string]any) (map[string]any, error) {
 		"PluginVersion": envOr("CS_K8S_PLUGIN_VERSION", "v1.4.5"),
 		"HelmVersion":   envOr("CS_K8S_HELM_VERSION", "v3.15.4"),
 		"StorageClass":  envOr("CS_K8S_STORAGE_CLASS", "local-path"),
-		"LapiCPU":       prof["lapi_cpu"],
-		"LapiCPULimit":  prof["lapi_cpu_limit"],
-		"LapiMem":       prof["lapi_mem"],
-		"LapiMemLimit":  prof["lapi_mem_limit"],
+		// Per-component sizing overrides on top of the profile (fit AppSec into
+		// fleets whose scheduling requests are already saturated).
+		"LapiCPU":       envOr("CS_K8S_LAPI_CPU", fmt.Sprint(prof["lapi_cpu"])),
+		"LapiCPULimit":  envOr("CS_K8S_LAPI_CPU_LIMIT", fmt.Sprint(prof["lapi_cpu_limit"])),
+		"LapiMem":       envOr("CS_K8S_LAPI_MEM", fmt.Sprint(prof["lapi_mem"])),
+		"LapiMemLimit":  envOr("CS_K8S_LAPI_MEM_LIMIT", fmt.Sprint(prof["lapi_mem_limit"])),
 		"LapiStorage":   prof["lapi_storage"],
-		"AgentCPU":      prof["agent_cpu"],
-		"AgentCPULimit": prof["agent_cpu_limit"],
-		"AgentMem":      prof["agent_mem"],
-		"AgentMemLimit": prof["agent_mem_limit"],
+		"AgentCPU":      envOr("CS_K8S_AGENT_CPU", fmt.Sprint(prof["agent_cpu"])),
+		"AgentCPULimit": envOr("CS_K8S_AGENT_CPU_LIMIT", fmt.Sprint(prof["agent_cpu_limit"])),
+		"AgentMem":      envOr("CS_K8S_AGENT_MEM", fmt.Sprint(prof["agent_mem"])),
+		"AgentMemLimit": envOr("CS_K8S_AGENT_MEM_LIMIT", fmt.Sprint(prof["agent_mem_limit"])),
 		"AppSecEnabled": fmt.Sprint(prof["appsec"]) == "true",
 		"PodCIDR":       envOr("CS_K8S_POD_CIDR", "10.42.0.0/16"),                           // go-check:ignore-ip
 		"TrustedCIDRs":  splitCsv(envOr("CS_K8S_TRUSTED_CIDRS", "10.0.0.0/8,10.42.0.0/16")), // go-check:ignore-ip

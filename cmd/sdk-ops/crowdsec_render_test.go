@@ -68,3 +68,28 @@ func TestCrowdsecClusterUninstallAndOrder(t *testing.T) {
 		t.Errorf("order wrong: %v", ordered)
 	}
 }
+
+// TestCrowdsecSizingOverrides locks the per-component sizing overrides: they
+// exist so AppSec can fit into fleets whose scheduling requests are already
+// saturated, on top of the profile values.
+func TestCrowdsecSizingOverrides(t *testing.T) {
+	prof := map[string]any{
+		"lapi_cpu": "250m", "lapi_cpu_limit": "1", "lapi_mem": "256Mi", "lapi_mem_limit": "512Mi",
+		"agent_cpu": "250m", "agent_cpu_limit": "500m", "agent_mem": "128Mi", "agent_mem_limit": "256Mi",
+	}
+	t.Setenv("CS_K8S_LAPI_CPU", "150m")
+	t.Setenv("CS_K8S_AGENT_MEM", "96Mi")
+	data, err := crowdsecClusterRenderData(prof)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if data["LapiCPU"] != "150m" {
+		t.Errorf("LapiCPU override not honored: %v", data["LapiCPU"])
+	}
+	if data["AgentMem"] != "96Mi" {
+		t.Errorf("AgentMem override not honored: %v", data["AgentMem"])
+	}
+	if data["LapiMem"] != "256Mi" || data["AgentCPU"] != "250m" {
+		t.Errorf("profile fallback broken: lapi_mem=%v agent_cpu=%v", data["LapiMem"], data["AgentCPU"])
+	}
+}
