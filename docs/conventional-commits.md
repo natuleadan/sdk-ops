@@ -15,7 +15,7 @@ This project follows [Conventional Commits](https://www.conventionalcommits.org/
 ```
 feat(cli): add --crowdsec flag to infra init
 fix(ssh): handle reconnection after port change
-docs(readme): update installation guide
+chore(readme): update installation guide
 test(deploy): add unit tests for rollback
 refactor(hardening): extract SSH config into builder
 chore(ci): update Go version to 1.27
@@ -27,15 +27,18 @@ chore(ci): update Go version to 1.27
 |----------|---------------------------|--------------|
 | `feat`   | New feature               | minor (or patch in 0.x) |
 | `fix`    | Bug fix                   | patch        |
-| `docs`   | Documentation             | none         |
 | `refactor` | Code refactoring         | none         |
 | `test`   | Adding or fixing tests    | none         |
-| `chore`  | Build, CI, tooling        | none         |
+| `chore`  | Build, CI, tooling, docs  | none         |
 | `ci`     | CI configuration changes  | none         |
 | `perf`   | Performance improvement   | patch        |
 | `style`  | Formatting, linting       | none         |
 | `build`  | Build system changes      | none         |
 | `revert` | Revert a previous commit  | none         |
+
+> The validation gate applied to this repository accepts only the ten types
+> above: `docs` is **not** a valid type — documentation-only changes use
+> `chore(<scope>)`.
 
 ## Breaking Changes
 
@@ -75,6 +78,6 @@ No manual "Run workflow" step needed. The CI reads the commit message on push to
 | `release(patch):` | `release(patch): hotfix` | PATCH |
 | `feat:` | `feat(cli): add backup` | MINOR |
 | `fix:` or `perf:` | `fix(ssh): handle timeout` | PATCH |
-| `docs:`, `chore:`, `ci:`, etc. | `docs(readme): update` | SKIP (no release) |
+| `chore:`, `ci:`, etc. | `chore(readme): update` | SKIP (no release) |
 
 **First release:** when no tags exist, CI forces v0.0.1 regardless of commit type.
