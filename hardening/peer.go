@@ -26,17 +26,17 @@ func PeerProto(port int) string {
 // same tuple are replaced.
 func ExposePeerPortDirect(client *goss.Client, port int, proto, ip string) error {
 	// Defense in depth: the address is interpolated into a remote nftables
-	// script — never accept anything that is not a plain IP.
+	// script — accept only a plain IP or a CIDR.
 	ip = strings.TrimSpace(ip)
-	if net.ParseIP(ip) == nil {
-		return fmt.Errorf("peer expose: %q is not a valid IP", ip)
-	}
 	fam := "ip"
 	if strings.Contains(ip, ":") {
 		fam = "ip6"
 	}
 	addr := ip
-	if !strings.Contains(addr, "/") {
+	if _, _, err := net.ParseCIDR(ip); err != nil {
+		if net.ParseIP(ip) == nil {
+			return fmt.Errorf("peer expose: %q is not a valid IP or CIDR", ip)
+		}
 		if fam == "ip" {
 			addr += "/32"
 		} else {

@@ -1488,15 +1488,19 @@ func installHostTuningOn(pf ProvisionFile, h ProvisionHost) error {
 		}
 		// Kubelet must accept connections from the node itself: the local
 		// apiserver dials the kubelet via the node address (kubectl exec/logs)
-		// and metrics-server pods SNAT to the local node IP — neither is a
+		// and cross-node scrapes SNAT to the source node IP — neither is a
 		// fleet peer, so the default-deny input chain drops them and exec
-		// hangs forever.
+		// hangs forever. Same-node pods are NOT SNATed (a metrics-server pod
+		// on the server scrapes its own node from its pod IP), so the pod
+		// network is accepted too; kubelet still requires TLS auth (401 for
+		// anonymous).
 		if h.PeerIP != "" {
 			_ = hardening.ExposePeerPortDirect(conn, 10250, "tcp", h.PeerIP)
 		}
 		if h.Host != "" {
 			_ = hardening.ExposePeerPortDirect(conn, 10250, "tcp", h.Host)
 		}
+		_ = hardening.ExposePeerPortDirect(conn, 10250, "tcp", "10.42.0.0/16") // go-check:ignore-ip - k3s default pod network, same-node scrapes
 	}
 	return nil
 }
