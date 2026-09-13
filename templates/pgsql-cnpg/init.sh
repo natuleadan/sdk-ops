@@ -18,6 +18,28 @@ fail() { echo "[pgsql-cnpg] FAIL: $1"; exit 1; }
 # 0. Secrets from the wiring env (S3_* — never in the YAML).
 [ -f "$DIR/.env" ] && . "$DIR/.env"
 
+# 0b. DR tooling: the explicit backup/restore scripts need s3cmd + its config
+#     on the host (never manual setup). Only when S3 is wired.
+if [ -n "${S3_BUCKET:-}" ] && [ -n "${S3_ENDPOINT:-}" ]; then
+  if ! command -v s3cmd >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    sudo apt-get update -qq >/dev/null 2>&1 || true
+    sudo apt-get install -y -qq s3cmd >/dev/null 2>&1 || log "WARN: s3cmd install failed - the DR scripts will need it"
+  fi
+  ES3="$(echo "$S3_ENDPOINT" | sed 's#https\?://##; s#/*$##')"
+  cat > "$HOME/.s3cfg" <<EOF2
+[default]
+access_key = ${S3_ACCESS_KEY:-}
+secret_key = ${S3_SECRET_KEY:-}
+host_base = $ES3
+host_bucket = %(bucket)s.$ES3
+use_https = True
+signature_v2 = False
+EOF2
+  chmod 600 "$HOME/.s3cfg"
+  log "s3cmd DR tooling ready ($ES3)"
+fi
+
 # 1. Namespace.
 $KUBECTL create namespace "$NS" --dry-run=client -o yaml | $KUBECTL apply -f - || fail "namespace"
 
