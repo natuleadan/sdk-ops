@@ -907,6 +907,14 @@ func validateHosts(pf *ProvisionFile) (map[string]string, error) {
 		if h.Host == "" && h.Provider == "" {
 			return nil, fmt.Errorf("every host needs name and host")
 		}
+		// IPs are always explicit and the address ends up interpolated into
+		// remote firewall scripts — never accept a non-IP here (a hostname or
+		// a typo would be a shell-injection vector).
+		if h.Host != "" {
+			if net.ParseIP(strings.TrimSpace(h.Host)) == nil {
+				return nil, fmt.Errorf("host %q host %q is not a valid IP", h.Name, h.Host)
+			}
+		}
 		peerIP := h.Host
 		if peerIP == "" {
 			peerIP = h.Name
@@ -1858,6 +1866,23 @@ fi
 	return nil
 }
 
+// applyProvisionPeers opens the declared peer ports on every target host
+// (fleet YAML is the single source of truth). Idempotent: the k3s join runs
+// it before joining and the phases re-apply it.
+func applyProvisionPeers(pf ProvisionFile, names map[string]string) error {
+	if len(pf.Peers) == 0 {
+		return nil
+	}
+	fmt.Println("\n-> Configuring peers...")
+	for _, peer := range pf.Peers {
+		if err := applyProvisionPeer(pf, names, peer); err != nil {
+			return err
+		}
+	}
+	fmt.Println("-> Peers configured")
+	return nil
+}
+
 // applyProvisionPeer opens the peer ports on the target host for the source
 // host IP (scope ips). The fleet file is the single source of truth for peers.
 func applyProvisionPeer(pf ProvisionFile, names map[string]string, peer ProvisionPeer) error {
@@ -1889,9 +1914,13 @@ func applyProvisionPeer(pf ProvisionFile, names map[string]string, peer Provisio
 			fmt.Printf("  -> %s can reach %s:%d (no firewall)\n", peer.From, peer.To, p)
 			continue
 		}
-		_ = hardening.AllowlistUnexposePort(conn, p)
 		fmt.Printf("  -> %s can reach %s:%d\n", peer.From, peer.To, p)
-		if err := hardening.AllowlistExposePort(conn, p, "tcp", hardening.PortScopeIPs, fromIP); err != nil {
+		// Peer ports are static host-to-host rules: always the direct persisted
+		// path into the input chain. The provider-allowlist path rewrote the
+		// shared `exposed` chain per port (accept + catch-all drop), wiping the
+		// other peers' accepts; the drop also shadowed the base chain and
+		// killed local kubelet traffic (every kubectl exec hung).
+		if err := hardening.ExposePeerPortDirect(conn, p, hardening.PeerProto(p), fromIP); err != nil {
 			return fmt.Errorf("peer %s -> %s port %d: %w", peer.From, peer.To, p, err)
 		}
 	}

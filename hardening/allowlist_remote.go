@@ -532,7 +532,20 @@ echo "port %[2]d/%[4]s exposed (%[5]s)"
 	return nil
 }
 
+// AllowlistInstalled reports whether the provider-allowlist stack is really
+// installed on the host: it owns a refresh timer (/etc/systemd/system/
+// sdk-ops-allowlist.timer) and a ports registry. The admin4/admin6 sets are
+// NOT a valid signal — plain hardening defines them on every host, and the
+// false positive routed the peer wiring through AllowlistExposePort, which
+// wrote per-port catch-all drops into the shared `exposed` chain (observed:
+// kubelet 10250 dropped and every kubectl exec hung).
+func AllowlistInstalled(client *goss.Client) bool {
+	out, _, err := ssh.Run(client, `if [ -f /etc/systemd/system/sdk-ops-allowlist.timer ] || sudo test -f `+portsRegistryPath+`; then echo yes; else echo no; fi`)
+	return err == nil && strings.TrimSpace(out) == "yes"
+}
+
 // AllowlistUnexposePort closes a port and removes it from the registry.
+
 func AllowlistUnexposePort(client *goss.Client, port int) error {
 	// Word boundary after the port so "80" never matches rules for 8088.
 	script := fmt.Sprintf(`
