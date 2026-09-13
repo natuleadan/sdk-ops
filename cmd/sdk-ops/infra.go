@@ -1911,6 +1911,7 @@ func applyInfraHardening(conn *golang_ssh.Client, ip string, f infraFlags) harde
 	hardCfg.EnableLynis = f.lynis
 	hardCfg.EnableUSG = f.usg
 	hardCfg.LockRoot = f.lockRoot
+	hardCfg.AdminIPs = f.adminIPs
 	if f.hardSSHPort > 0 {
 		hardCfg.SSHPort = f.hardSSHPort
 	} else if p := yamlHostPort(f.provisionYAML, ip); p > 0 && p != f.port {

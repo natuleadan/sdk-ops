@@ -2,6 +2,7 @@ package hardening
 
 import (
 	"fmt"
+	"strings"
 
 	goss "golang.org/x/crypto/ssh"
 
@@ -18,6 +19,11 @@ for i in $(seq 1 30); do
     fi
     sleep 3
 done
+# apt prefers AAAA records; on a host with IPv4 but a broken IPv6 path the
+# repo connect fails instead of falling back — force IPv4 when v4 exists.
+if ip -4 addr show | grep -q 'inet '; then
+    echo 'Acquire::ForceIPv4 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv4 >/dev/null 2>&1 || true
+fi
 DEBIAN_FRONTEND=noninteractive sudo apt-get update -qq 2>&1 | tail -1
 DEBIAN_FRONTEND=noninteractive sudo apt-get install -y -qq nftables fail2ban unattended-upgrades htop iotop net-tools 2>&1
 `
@@ -26,12 +32,20 @@ DEBIAN_FRONTEND=noninteractive sudo apt-get install -y -qq nftables fail2ban una
 
 func createUser(client *goss.Client, cfg Config) error {
 	script := fmt.Sprintf(`
-if ! id "%s" &>/dev/null; then
-    sudo useradd -m -s /bin/bash -G sudo "%s"
-    echo "%s ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/%[1]s > /dev/null
+if ! id "%[1]s" &>/dev/null; then
+    sudo useradd -m -s /bin/bash -G sudo "%[1]s"
+fi
+# Heal a pre-existing account (cloud images may ship one with a nologin shell):
+# without a login shell every post-hardening SSH session dies with "This
+# account is currently not available." and the fleet locks itself out.
+if [ "$(getent passwd %[1]s | cut -d: -f7)" != "/bin/bash" ]; then
+    sudo usermod -s /bin/bash "%[1]s"
+fi
+if ! sudo test -s /etc/sudoers.d/%[1]s; then
+    echo "%[1]s ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/%[1]s > /dev/null
     sudo chmod 0440 /etc/sudoers.d/%[1]s
 fi
-`, cfg.User, cfg.User, cfg.User)
+`, cfg.User)
 
 	if cfg.LockRoot {
 		script += `sudo passwd -l root 2>/dev/null || true
@@ -51,6 +65,12 @@ func kernelTuning(client *goss.Client, cfg Config) error {
 	fmt.Println("  -> Kernel tuning (sysctl)...")
 	// Idempotent: only append keys that are not already present.
 	script := `
+# Small VPS: keep etcd/k3s off swap as long as possible (a swapped-out etcd
+# stalls fdatasync, loses its lease and the k3s supervisor exits).
+if ! sudo grep -q '^vm.swappiness' /etc/sysctl.d/99-sdk-ops.conf 2>/dev/null; then
+  echo 'vm.swappiness = 10' | sudo tee -a /etc/sysctl.d/99-sdk-ops.conf >/dev/null
+fi
+sudo sysctl -w vm.swappiness=10 >/dev/null 2>&1 || true
 for kv in \
   "net.ipv4.tcp_syncookies=1" \
   "net.ipv4.conf.all.rp_filter=1" \
@@ -81,12 +101,24 @@ func fail2banAndUpgrades(client *goss.Client, cfg Config) error {
 		sshPort = cfg.SSHPort
 	}
 
+	// Seed the operator's admin IPs as ignoreip: the first reconnect probes
+	// (root denied, sdkops before the shell heal) must never ban the operator
+	// before the fleet phase rewrites the jail from the YAML.
+	var ignore strings.Builder
+	ignore.WriteString("127.0.0.1/8 ::1")
+	for ip := range strings.SplitSeq(cfg.AdminIPs, ",") {
+		if ip = strings.TrimSpace(ip); ip != "" {
+			ignore.WriteString(" " + ip)
+		}
+	}
+
 	script := fmt.Sprintf(`
 sudo tee /etc/fail2ban/jail.local > /dev/null << 'F2B'
 [DEFAULT]
 bantime = 3600
 findtime = 600
 maxretry = 5
+ignoreip = %s
 [sshd]
 enabled = true
 port = %d
@@ -103,7 +135,7 @@ APT::Periodic::AutocleanInterval "7";
 APT::Periodic::Unattended-Upgrade "1";
 UP
 echo "unattended-upgrades: OK"
-`, sshPort)
+`, ignore.String(), sshPort)
 
 	fmt.Println("  -> fail2ban + unattended-upgrades...")
 	out, _, err := ssh.Run(client, script)

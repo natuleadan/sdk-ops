@@ -30,6 +30,12 @@ sudo rm -f /etc/apt/apt.conf.d/99force-ipv6 2>/dev/null || true
 if ! ip -4 addr show | grep -q 'inet '; then
   echo 'Acquire::ForceIPv6 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv6 >/dev/null 2>&1 || true
 fi
+# Hosts with IPv4 but a broken/absent IPv6 path: apt prefers the AAAA records
+# and fails the repo connect ("Unable to connect") instead of falling back.
+# Force IPv4 for the dependency install whenever a v4 address exists.
+if ip -4 addr show | grep -q 'inet '; then
+  echo 'Acquire::ForceIPv4 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv4 >/dev/null 2>&1 || true
+fi
 sudo apt-get update >/dev/null 2>&1 || true
 
 curl -fsSL https://get.docker.com | sudo sh

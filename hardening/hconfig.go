@@ -34,7 +34,9 @@ type HardeningLog struct {
 func ConfigDir() string {
 	homeDir, _ := os.UserHomeDir()
 	dir := filepath.Join(homeDir, ".sdk-ops", "servers")
-	if err := os.MkdirAll(dir, 0700); err != nil { log.Printf("mkdir: %v", err) }
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		log.Printf("mkdir: %v", err)
+	}
 	return dir
 }
 

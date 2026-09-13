@@ -17,6 +17,10 @@ type Config struct {
 	EnableAuditd  bool // install auditd
 	EnableLynis   bool // install Lynis security auditor
 	EnableUSG     bool // install Ubuntu Security Guide
+	// AdminIPs are the operator's admin addresses (comma-separated) seeded as
+	// fail2ban ignoreip during hardening, so the first reconnects cannot ban
+	// the operator before the fleet phase rewrites the jail.
+	AdminIPs string
 }
 
 func DefaultConfig() Config {
