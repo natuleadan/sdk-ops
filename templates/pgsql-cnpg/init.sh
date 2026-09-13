@@ -68,6 +68,22 @@ else
 fi
 {{- end }}
 
+{{- if .BackupEnabled }}
+# 3b. A FRESH bootstrap needs an EMPTY barman store: barman-cloud refuses to
+#     archive over an existing one ("Expected empty archive") and CNPG retries
+#     in a loop that hammers the kube-apiserver (observed: io wait 100% and
+#     every kubectl call timing out). Fail fast with a clear message instead;
+#     an existing cluster is a normal re-provision and skips this check.
+if ! $KUBECTL -n "$NS" get cluster "$NAME" >/dev/null 2>&1; then
+  if command -v s3cmd >/dev/null 2>&1 && [ -f "$HOME/.s3cfg" ]; then
+    FIRST="$(s3cmd ls "s3://{{ .S3Bucket }}/{{ .S3Prefix }}/" 2>/dev/null | head -1)"
+    if [ -n "$FIRST" ]; then
+      fail "S3 prefix s3://{{ .S3Bucket }}/{{ .S3Prefix }}/ is not empty - a fresh cluster needs an empty barman store. Clean it (s3cmd del --recursive --force s3://{{ .S3Bucket }}/{{ .S3Prefix }}/) or deploy with a fresh PG_S3_PREFIX."
+    fi
+  fi
+fi
+{{- end }}
+
 # 4. The Cluster CR (instances, storage, resources, backups).
 $KUBECTL apply -f "$DIR/cluster.yaml" || fail "Cluster CR apply"
 
