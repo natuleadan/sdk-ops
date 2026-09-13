@@ -22,12 +22,13 @@ S3DIR="s3://$S3_BUCKET/$S3_PREFIX/"
 
 ensure_s3cfg() {
   [ -f "$HOME/.s3cfg" ] && return 0
+  local ES3; ES3="$(echo "$S3_ENDPOINT" | sed 's#https\?://##; s#/*$##')"
   cat > "$HOME/.s3cfg" <<EOF
 [default]
 access_key = $S3_ACCESS_KEY
 secret_key = $S3_SECRET_KEY
-host_base = $S3_ENDPOINT
-host_bucket = %(bucket)s.$S3_ENDPOINT
+host_base = $ES3
+host_bucket = %(bucket)s.$ES3
 use_https = True
 EOF
   chmod 600 "$HOME/.s3cfg"

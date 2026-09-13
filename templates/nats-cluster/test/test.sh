@@ -41,10 +41,10 @@ if [ ! -x "$BIN" ]; then
   ARCH="$(uname -m)"
   case "$ARCH" in x86_64|amd64) CARCH="amd64" ;; aarch64|arm64) CARCH="arm64" ;; *) CARCH="" ;; esac
   CLI_VER="${NATS_CLI_VERSION:-0.4.0}"
-  if [ -n "$CARCH" ] && curl -fsSL "https://github.com/nats-io/natscli/releases/download/v${CLI_VER}/nats-${CLI_VER}-linux-${CARCH}.tar.gz" -o /tmp/natscli.tgz 2>/dev/null; then
-    tar -xzf /tmp/natscli.tgz -C /tmp
+  if [ -n "$CARCH" ] && curl -fsSL "https://github.com/nats-io/natscli/releases/download/v${CLI_VER}/nats-${CLI_VER}-linux-${CARCH}.zip" -o /tmp/natscli.zip 2>/dev/null; then
+    python3 -m zipfile -e /tmp/natscli.zip /tmp/
     mv "/tmp/nats-${CLI_VER}-linux-${CARCH}/nats" "$BIN" && chmod +x "$BIN"
-    rm -rf "/tmp/nats-${CLI_VER}-linux-${CARCH}" /tmp/natscli.tgz
+    rm -rf "/tmp/nats-${CLI_VER}-linux-${CARCH}" /tmp/natscli.zip
   fi
 fi
 [ -x "$BIN" ] && ok "nats CLI $("$BIN" --version 2>/dev/null || echo present)" || skip "node nats CLI (S3 DR steps will skip)"

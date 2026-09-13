@@ -14,7 +14,8 @@ export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN="$DIR/nats"
 : "${S3_BUCKET:?}" : "${NATS_SEAL_SENDER_NK:?}" : "${NATS_SEAL_RECIPIENT_PUB:?}"
-: "${S3_PREFIX:=nats}"
+: "${NATS_S3_PREFIX:=nats}"
+S3_PREFIX="$NATS_S3_PREFIX"
 TS="$(date +%Y%m%d-%H%M%S)"
 PF_PORT="14222"
 
@@ -35,8 +36,8 @@ cat > "$S3CMD_CFG" <<EOF2
 [default]
 access_key = ${S3_ACCESS_KEY:-}
 secret_key = ${S3_SECRET_KEY:-}
-host_base = $(echo "$S3_ENDPOINT" | sed 's#https\?://##')
-host_bucket = $(echo "$S3_ENDPOINT" | sed 's#https\?://##')/${S3_BUCKET}
+host_base = $(echo "$S3_ENDPOINT" | sed 's#https\?://##; s#/*$##')
+host_bucket = $(echo "$S3_ENDPOINT" | sed 's#https\?://##; s#/*$##')/${S3_BUCKET}
 use_https = true
 EOF2
 

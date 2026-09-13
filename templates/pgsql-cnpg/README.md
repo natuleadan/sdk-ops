@@ -23,8 +23,9 @@ official cloud-native operator for PostgreSQL.
 | `PG_K8S_NAME` | `pg` | Cluster name (services `<name>-rw`/`-ro`) |
 | `PG_K8S_INSTANCES` | `3` | Instances (1 primary + N-1 replicas) |
 | `PG_K8S_STORAGE_CLASS` | `local-path` | StorageClass for the data volumes |
-| `S3_BUCKET` / `S3_ENDPOINT` / `S3_PREFIX` | — | Enable backups when bucket+endpoint are set |
+| `S3_BUCKET` / `S3_ENDPOINT` | — | Enable backups when both are set (endpoint with or without scheme) |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | — | S3 credentials (never in the YAML) |
+| `PG_S3_PREFIX` | `pg` | S3 key prefix (barman `destinationPath`) |
 
 ## Commands
 

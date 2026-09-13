@@ -35,7 +35,9 @@ cluster protocol.
 | `VK_K8S_CLUSTER_REPLICAS` | `1` | Replicas per shard |
 | `VK_K8S_MAX_MEMORY` | profile | `maxmemory` per node |
 | `VK_PASSWORD` | `valkey` | Auth (`requirepass` + `masterauth`) |
-| `S3_*` | — | Enable backups when bucket+endpoint+keys are set |
+| `S3_BUCKET` / `S3_ENDPOINT` | — | Enable backups when both are set (endpoint with or without scheme) |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | — | S3 credentials (never in the YAML) |
+| `VK_S3_PREFIX` | `valkey` | S3 key prefix for the dumps |
 
 ## Backups (per shard)
 

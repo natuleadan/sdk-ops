@@ -34,6 +34,10 @@ services:
 | `test` | 8-step integration (cluster, JetStream, KV, NACK CRD, failover, S3 DR) |
 | `backup` / `restore` | node-side DR: stream backup -> nkey seal -> S3 (and back) |
 
-Env: `NATS_K8S_*` (namespace/release/tag/replicas/storage class/NACK), `S3_*`,
-`NATS_SEAL_SENDER_NK`, `NATS_SEAL_RECIPIENT_PUB` (seal side),
-`NATS_RECIPIENT_NK` (unseal half — operator secret, never on the node).
+Env: `NATS_K8S_*` (namespace/release/tag/replicas/storage class/NACK), `S3_*`
+(endpoint with or without scheme), `NATS_S3_PREFIX` (default `nats`),
+`NATS_SEAL_SENDER_NK` (PATH to the sender's XKey **seed** file — curve keys
+`X...`/`SX...`, not user nkeys: `nkey.CreateCurveKeys()` / `nsc generate nkey`),
+`NATS_SEAL_RECIPIENT_PUB` (PATH to a file with the recipient's public XKey),
+`NATS_RECIPIENT_NK` / `NATS_UNSEAL_RECIPIENT_NK` (PATH to the recipient's seed
+file — the unseal half, operator secret, never on the node).

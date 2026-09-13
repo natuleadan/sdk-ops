@@ -18,6 +18,9 @@ DIR="/opt/sdk-ops/services/pgsql-cnpg"
 S3_BUCKET="${S3_BUCKET:-pg-backups}"
 S3_PREFIX="${S3_PREFIX:-pg}"
 S3_ENDPOINT="${S3_ENDPOINT:-}"
+# Bare host for s3cfg and for composing endpointURL ("https://host"): the
+# .env carries the endpoint with or without scheme.
+S3_ENDPOINT_BARE="$(echo "$S3_ENDPOINT" | sed 's#https\?://##; s#/*$##')"
 RCI="${RCI_IMAGE:-postgres:17-alpine}"
 RESTORE_NAME="${RESTORE_NAME:-$NAME-restore}"
 TARGET_TIME=""
@@ -25,13 +28,13 @@ YES=false
 
 ensure_s3cfg() {
   [ -f "$HOME/.s3cfg" ] && return 0
-  [ -n "${S3_ENDPOINT:-}" ] || return 0
+  [ -n "${S3_ENDPOINT_BARE:-}" ] || return 0
   cat > "$HOME/.s3cfg" <<EOF
 [default]
 access_key = $S3_ACCESS_KEY
 secret_key = $S3_SECRET_KEY
-host_base = $S3_ENDPOINT
-host_bucket = %(bucket)s.$S3_ENDPOINT
+host_base = $S3_ENDPOINT_BARE
+host_bucket = %(bucket)s.$S3_ENDPOINT_BARE
 use_https = True
 EOF
   chmod 600 "$HOME/.s3cfg"
@@ -105,7 +108,7 @@ $TARGET_BLOCK  externalClusters:
         # name, here "$NAME-s3") — pin it to the source cluster name so the
         # recovery finds $S3_PREFIX/$NAME/{base,wals}.
         serverName: $NAME
-        endpointURL: "https://$S3_ENDPOINT"
+        endpointURL: "https://$S3_ENDPOINT_BARE"
         s3Credentials:
           accessKeyId:
             name: $NAME-s3

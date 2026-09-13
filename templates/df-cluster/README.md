@@ -13,7 +13,9 @@ P2P image distribution system; same name, different product).
   manifest (no `:latest` anywhere).
 - Native S3 snapshots via `spec.snapshot.dir` (dragonfly >= v1.12) when the
   operator env carries `S3_*`; explicit DR cycle always available through
-  `backup`/`restore` (BGSAVE -> kubectl cp -> s3cmd, and back).
+  `backup`/`restore` (BGSAVE -> kubectl cp -> s3cmd, and back). The S3 key
+  prefix is `DF_S3_PREFIX` (default `df`) and `S3_ENDPOINT` may be given with
+  or without scheme (normalized for Dragonfly's `--s3_endpoint`).
 
 ## Deploy (fleet YAML)
 

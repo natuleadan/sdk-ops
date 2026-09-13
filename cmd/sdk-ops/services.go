@@ -223,13 +223,17 @@ func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg Ser
 // live in the fleet YAML.
 func wireCNPGOn(conn *golang_ssh.Client, svcDir string) error {
 	var lines []string
-	for _, k := range []string{"S3_BUCKET", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_PREFIX"} {
+	for _, k := range []string{"S3_BUCKET", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"} {
 		v := os.Getenv(k)
 		if v == "" {
 			continue
 		}
 		v = strings.ReplaceAll(v, "'", `'\''`)
 		lines = append(lines, fmt.Sprintf("%s='%s'", k, v))
+	}
+	if os.Getenv("S3_BUCKET") != "" && os.Getenv("S3_ENDPOINT") != "" {
+		p := strings.ReplaceAll(s3PrefixOr("PG_S3_PREFIX", "pg"), "'", `'\''`)
+		lines = append(lines, fmt.Sprintf("S3_PREFIX='%s'", p))
 	}
 	if len(lines) == 0 {
 		verbosef("service pgsql-cnpg: no S3_* env — backups disabled")
@@ -251,11 +255,15 @@ func wireValkeyOn(conn *golang_ssh.Client, svcDir string) error {
 		pw = "valkey"
 	}
 	lines := []string{fmt.Sprintf("VK_PASSWORD='%s'", strings.ReplaceAll(pw, "'", `'\''`))}
-	for _, k := range []string{"S3_BUCKET", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_PREFIX"} {
+	for _, k := range []string{"S3_BUCKET", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"} {
 		if v := os.Getenv(k); v != "" {
 			v = strings.ReplaceAll(v, "'", `'\''`)
 			lines = append(lines, fmt.Sprintf("%s='%s'", k, v))
 		}
+	}
+	if os.Getenv("S3_BUCKET") != "" && os.Getenv("S3_ENDPOINT") != "" {
+		p := strings.ReplaceAll(s3PrefixOr("VK_S3_PREFIX", "valkey"), "'", `'\''`)
+		lines = append(lines, fmt.Sprintf("S3_PREFIX='%s'", p))
 	}
 	cmd := fmt.Sprintf("umask 077; cat > %s/.env <<'SDKOPS_VK_ENV'\n%s\nSDKOPS_VK_ENV", svcDir, strings.Join(lines, "\n"))
 	if _, _, err := ssh.Run(conn, cmd); err != nil {
@@ -272,17 +280,42 @@ func wireDFOn(conn *golang_ssh.Client, svcDir string) error {
 		pw = "dragonfly"
 	}
 	lines := []string{fmt.Sprintf("DF_PASSWORD='%s'", strings.ReplaceAll(pw, "'", `'\''`))}
-	for _, k := range []string{"S3_BUCKET", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_PREFIX"} {
+	for _, k := range []string{"S3_BUCKET", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"} {
 		if v := os.Getenv(k); v != "" {
 			v = strings.ReplaceAll(v, "'", `'\''`)
 			lines = append(lines, fmt.Sprintf("%s='%s'", k, v))
 		}
+	}
+	if os.Getenv("S3_BUCKET") != "" && os.Getenv("S3_ENDPOINT") != "" {
+		p := strings.ReplaceAll(s3PrefixOr("DF_S3_PREFIX", "df"), "'", `'\''`)
+		lines = append(lines, fmt.Sprintf("S3_PREFIX='%s'", p))
 	}
 	cmd := fmt.Sprintf("umask 077; cat > %s/.env <<'SDKOPS_DF_ENV'\n%s\nSDKOPS_DF_ENV", svcDir, strings.Join(lines, "\n"))
 	if _, _, err := ssh.Run(conn, cmd); err != nil {
 		return fmt.Errorf("write df-cluster .env: %w", err)
 	}
 	return nil
+}
+
+// bareS3Host normalizes an S3 endpoint for consumers that need the bare host
+// (no scheme, no trailing slash): Dragonfly's --s3_endpoint, the barman
+// endpointURL the template composes, and the host_base/host_bucket lines of
+// the s3cfg the DR scripts write.
+func bareS3Host(v string) string {
+	v = strings.TrimPrefix(v, "https://")
+	v = strings.TrimPrefix(v, "http://")
+	return strings.TrimSuffix(v, "/")
+}
+
+// s3PrefixOr resolves the per-service backup prefix (VK_S3_PREFIX,
+// PG_S3_PREFIX, DF_S3_PREFIX, NATS_S3_PREFIX). A shared S3_PREFIX env is
+// deliberately NOT read: with several services deployed from one shell it
+// leaked one service's prefix into another's .env.
+func s3PrefixOr(envKey, def string) string {
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return def
 }
 
 // resolveServiceTemplate resolves the template for a service: the exact name
@@ -633,10 +666,13 @@ func dfClusterRenderData(prof map[string]any) (map[string]any, error) {
 		// Native S3 snapshots (operator feature, dragonfly >= v1.12): only when
 		// the operator env carries the S3 settings — otherwise DR is the
 		// explicit backup-s3.sh/restore-s3.sh cycle.
-		"S3Snapshot":   os.Getenv("S3_BUCKET") != "" && os.Getenv("S3_ENDPOINT") != "",
-		"S3Bucket":     envOr("S3_BUCKET", ""),
-		"S3Prefix":     envOr("S3_PREFIX", "df"),
-		"S3Endpoint":   envOr("S3_ENDPOINT", ""),
+		"S3Snapshot": os.Getenv("S3_BUCKET") != "" && os.Getenv("S3_ENDPOINT") != "",
+		"S3Bucket":   envOr("S3_BUCKET", ""),
+		"S3Prefix":   s3PrefixOr("DF_S3_PREFIX", "df"),
+		// Dragonfly's --s3_endpoint wants the bare host (no scheme): passing
+		// "https://..." makes it resolve the host "https" and the snapshot
+		// load fails (the container exits on boot).
+		"S3Endpoint":   bareS3Host(envOr("S3_ENDPOINT", "")),
 		"S3Region":     envOr("S3_REGION", "us-east-005"),
 		"S3AccessKey":  envOr("S3_ACCESS_KEY", ""),
 		"S3SecretKey":  envOr("S3_SECRET_KEY", ""),
@@ -693,20 +729,23 @@ func pgsqlCNPGRenderData(prof map[string]any) (map[string]any, error) {
 	}
 	backup := os.Getenv("S3_BUCKET") != "" && os.Getenv("S3_ENDPOINT") != ""
 	return map[string]any{
-		"Namespace":       envOr("PG_K8S_NAMESPACE", "pg"),
-		"Name":            envOr("PG_K8S_NAME", "pg"),
-		"Instances":       envOr("PG_K8S_INSTANCES", "3"),
-		"StorageClass":    envOr("PG_K8S_STORAGE_CLASS", "local-path"),
-		"StorageSize":     prof["StorageSize"],
-		"CPU":             prof["CPU"],
-		"Cpus":            prof["Cpus"],
-		"Mem":             prof["Mem"],
-		"MemLimit":        prof["MemLimit"],
-		"MaxConnections":  prof["MaxConnections"],
-		"BackupEnabled":   backup,
-		"S3Bucket":        envOr("S3_BUCKET", ""),
-		"S3Prefix":        envOr("S3_PREFIX", "pg"),
-		"S3Endpoint":      envOr("S3_ENDPOINT", ""),
+		"Namespace":      envOr("PG_K8S_NAMESPACE", "pg"),
+		"Name":           envOr("PG_K8S_NAME", "pg"),
+		"Instances":      envOr("PG_K8S_INSTANCES", "3"),
+		"StorageClass":   envOr("PG_K8S_STORAGE_CLASS", "local-path"),
+		"StorageSize":    prof["StorageSize"],
+		"CPU":            prof["CPU"],
+		"Cpus":           prof["Cpus"],
+		"Mem":            prof["Mem"],
+		"MemLimit":       prof["MemLimit"],
+		"MaxConnections": prof["MaxConnections"],
+		"BackupEnabled":  backup,
+		"S3Bucket":       envOr("S3_BUCKET", ""),
+		"S3Prefix":       s3PrefixOr("PG_S3_PREFIX", "pg"),
+		// The template composes endpointURL as "https://{{ .S3Endpoint }}":
+		// pass the bare host so an S3_ENDPOINT given with scheme is not
+		// doubled ("https://https://...").
+		"S3Endpoint":      bareS3Host(envOr("S3_ENDPOINT", "")),
 		"RetentionPolicy": envOr("PG_K8S_RETENTION", "7d"),
 		"OperatorManifest": envOr("PG_K8S_OPERATOR_MANIFEST",
 			"https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.0/cnpg-1.30.0.yaml"),
