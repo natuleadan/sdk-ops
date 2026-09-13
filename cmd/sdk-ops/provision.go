@@ -1919,6 +1919,11 @@ func applyProvisionPeer(pf ProvisionFile, names map[string]string, peer Provisio
 			continue
 		}
 		fmt.Printf("  -> %s can reach %s:%d\n", peer.From, peer.To, p)
+		// Purge any stale allowlist state for this port first: older runs wrote
+		// accept+drop rules into the `exposed` chain and registered the port,
+		// and the 5-minute state watchdog re-applies registry entries - a stale
+		// entry would resurrect the poisoning (kubelet dropped, exec hung).
+		_ = hardening.AllowlistUnexposePort(conn, p)
 		// Peer ports are static host-to-host rules: always the direct persisted
 		// path into the input chain. The provider-allowlist path rewrote the
 		// shared `exposed` chain per port (accept + catch-all drop), wiping the
