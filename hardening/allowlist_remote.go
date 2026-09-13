@@ -480,13 +480,38 @@ sudo nft add rule inet filter exposed %[1]s %[2]d drop`, protoExpr, port), "", n
 	}
 }
 
+// peerCriticalPorts are handled by the fleet peer rules (direct input-chain
+// accepts). Exposing them through the allowlist writes accept+drop rules into
+// the `exposed` chain, which is evaluated before the local accepts — the drop
+// shadows kubelet/apiserver/etcd traffic (observed: every kubectl exec hung).
+var peerCriticalPorts = map[int]bool{
+	8472:  true, // flannel vxlan
+	2379:  true, // etcd client
+	2380:  true, // etcd peer
+	10250: true, // kubelet
+}
+
+// validateAllowlistPort rejects ports the fleet owns as peers: exposing them
+// via the allowlist poisons the `exposed` chain (the state watchdog would even
+// re-apply the entry from the registry every 5 minutes).
+func validateAllowlistPort(port int) error {
+	if peerCriticalPorts[port] {
+		return fmt.Errorf("port %d is a cluster peer port handled by the fleet direct rules - do not expose it via the allowlist", port)
+	}
+	return nil
+}
+
 // AllowlistExposePort opens a port under a scope and records it in the
 // registry. Admin scope restricts to the admin4/admin6 sets (operator IPs,
 // IPv4 and IPv6); global opens to all; ips restricts to an explicit IP list;
-// traefik only registers the port.
+// traefik only registers the port. Declarative per port: the given IP set
+// replaces the previous one (pass every allowed IP in one call).
 func AllowlistExposePort(client *goss.Client, port int, proto string, scope PortScope, ips ...string) error {
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("port out of range: %d", port)
+	}
+	if err := validateAllowlistPort(port); err != nil {
+		return err
 	}
 	if proto != "tcp" && proto != "udp" {
 		return fmt.Errorf("proto must be tcp or udp")
