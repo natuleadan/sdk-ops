@@ -11,14 +11,15 @@ import (
 )
 
 // skipRender lists files that are template metadata, not runtime artifacts.
-// The rendered output is what gets deployed to a node, so bench/readme/test
-// material is excluded.
+// The rendered output is what gets deployed to a node, so bench/readme
+// material is excluded. The acceptance tooling ships with the service:
+// validate.sh lives in the template root and test/ carries the integration
+// tests, so an operator can validate a node without the repo at hand.
 var skipRender = map[string]bool{
 	"profiles.yaml": true,
 	"README.md":     true,
 	"bench.md":      true,
 	"rps.sh":        true,
-	"test":          true,
 }
 
 // renderVerbatim lists file names that must be copied as-is even when they

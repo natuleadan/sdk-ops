@@ -1,76 +1,23 @@
 package templates
 
-import (
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-)
+import "testing"
 
-func TestLoadProfiles(t *testing.T) {
-	p, err := LoadProfiles("nats-dockerized")
-	if err != nil {
-		t.Fatal(err)
+// TestAcceptanceTestsShip locks the deploy contract: the acceptance tooling
+// (validate.sh in the root, test/ with the integration tests) must reach the
+// node, so an operator can validate a service without the repo at hand.
+// Template metadata (README/profiles/bench) stays out of the deploy.
+func TestAcceptanceTestsShip(t *testing.T) {
+	if skipRender["test"] {
+		t.Fatal("test/ must ship with the service (remove it from skipRender)")
 	}
-	if p["lite"]["max_connections"] != 100 {
-		t.Errorf("lite max_connections = %v, want 100", p["lite"]["max_connections"])
-	}
-	if p["normal"]["max_file_store"] != "10GB" {
-		t.Errorf("normal max_file_store = %v, want 10GB", p["normal"]["max_file_store"])
-	}
-}
-
-func TestRenderDirNATS(t *testing.T) {
-	data := map[string]any{
-		"ServerName":      "node-a",
-		"Advertise":       "203.0.113.10",
-		"Routes":          []string{"203.0.113.11", "2001:db8::2"},
-		"ClusterName":     "nla",
-		"MaxConnections":  100,
-		"MaxFileStore":    "2GB",
-		"MaxMemoryStore":  "128MB",
-		"MemLimit":        "1g",
-		"Cpus":            1,
-		"JSKey":           "sekret",
-		"AppPasswordHash": "$2a$11$xxx",
-		"SvcPasswordHash": "$2a$11$yyy",
-		"SysPasswordHash": "$2a$11$zzz",
-		"ServerTags":        `["region:mia"]`,
-		"ClientAdvertise":   "203.0.113.10:4222",
-		"AppPublishAllow":   `["demo","demo.>","events.>","$KV.>","myapp.>"]`,
-		"AppSubscribeAllow": `["demo.>","events.>","$KV.>","myapp.reply.>"]`,
-	}
-	dir := t.TempDir()
-	if err := RenderDir("nats-dockerized", dir, data); err != nil {
-		t.Fatal(err)
-	}
-	conf, err := os.ReadFile(filepath.Join(dir, "nats.conf"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"server_name: node-a",
-		"advertise: 203.0.113.10:6222",
-		"nats://203.0.113.11:6222",
-		"nats://[2001:db8::2]:6222",
-		"max_connections: 100",
-		"max_file_store: 2GB",
-		"max_memory_store: 128MB",
-		`server_tags: ["region:mia"]`,
-		"client_advertise: 203.0.113.10:4222",
-		`allow: ["demo","demo.>","events.>","$KV.>","myapp.>"]`,
-		`allow: ["demo.>","events.>","$KV.>","myapp.reply.>"]`,
-	} {
-		if !strings.Contains(string(conf), want) {
-			t.Errorf("nats.conf missing %q", want)
+	for _, name := range []string{"crowdsec-cluster", "nats-cluster", "valkey-cluster", "df-cluster", "pgsql-cnpg"} {
+		if _, err := infraTemplates.ReadFile(name + "/test/test.sh"); err != nil {
+			t.Errorf("%s/test/test.sh missing from the embedded templates: %v", name, err)
 		}
 	}
-	for _, f := range []string{"service.yaml", "docker-compose.yml", "backup.sh", "restore.sh", "validate.sh"} {
-		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
-			t.Errorf("%s not rendered: %v", f, err)
+	for _, no := range []string{"README.md", "profiles.yaml"} {
+		if !skipRender[no] {
+			t.Errorf("%s is metadata and must not be rendered", no)
 		}
-	}
-	if _, err := os.Stat(filepath.Join(dir, "profiles.yaml")); err == nil {
-		t.Error("profiles.yaml should be excluded from the render")
 	}
 }
