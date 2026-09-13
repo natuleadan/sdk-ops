@@ -248,6 +248,13 @@ Size them with the template **profiles** (`profile: lite|normal|medium|large`)
 and remember the nodes are shared: several services asking full cores will not
 schedule on the small plans.
 
+Changing the profile of a live service works in place only when the change does
+**not** alter its storage size: k3s `local-path` cannot resize PVCs, so a size
+change (up or down) fails the helm/CR apply with "only dynamically provisioned
+pvc can be resized". To change the storage, delete the PVC (the service
+re-bootstraps its data) or expand manually on a storage class that supports it.
+The crowdsec profiles keep a constant LAPI storage for this reason.
+
 DR: every template ships `backup-s3.sh` / `restore-s3.sh` (per-shard RDB for
 valkey, barman PITR for cnpg, native snapshots for df, nkey-sealed streams for
 nats) — see each `templates/<name>/README.md`.

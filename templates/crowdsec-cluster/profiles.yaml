@@ -1,6 +1,9 @@
 # crowdsec-cluster profiles — LAPI and agent sizing. `appsec: "true"` enables
 # the WAF engine (OWASP CRS virtual patching) served by the AppSec component;
 # lite stays stream-only (IP/behavior decisions) to fit small nodes.
+# The LAPI store is a small sqlite (decisions/cache): keep `lapi_storage`
+# constant across profiles — local-path cannot resize PVCs, so a profile
+# switch that changed the size would fail the helm upgrade in place.
 lite:               # 0.2c / 192Mi total (stream mode, no AppSec)
   lapi_cpu: "100m"
   lapi_cpu_limit: "500m"
@@ -21,7 +24,7 @@ normal:             # 0.6c / 640Mi total (AppSec WAF on)
   agent_cpu_limit: "500m"
   agent_mem: 128Mi
   agent_mem_limit: 256Mi
-  lapi_storage: 2Gi
+  lapi_storage: 1Gi
   appsec: "true"
 medium:             # 1.1c / 1.3Gi total (AppSec + more agent headroom)
   lapi_cpu: "500m"
@@ -32,7 +35,7 @@ medium:             # 1.1c / 1.3Gi total (AppSec + more agent headroom)
   agent_cpu_limit: "1"
   agent_mem: 256Mi
   agent_mem_limit: 512Mi
-  lapi_storage: 5Gi
+  lapi_storage: 1Gi
   appsec: "true"
 large:              # 2c / 2.5Gi total
   lapi_cpu: "1"
@@ -43,5 +46,5 @@ large:              # 2c / 2.5Gi total
   agent_cpu_limit: "2"
   agent_mem: 512Mi
   agent_mem_limit: 1Gi
-  lapi_storage: 10Gi
+  lapi_storage: 1Gi
   appsec: "true"
