@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-//go:embed pgsql-docker pgsql-cluster pgsql-bare df-dockerized libsql-dockerized nats-dockerized etcd yuga-docker yuga-bare yuga-cluster nats-cluster nats-bare df-cluster df-bare etcd-cluster etcd-bare valkey-cluster pgsql-cnpg
+//go:embed pgsql-docker pgsql-cluster pgsql-bare df-dockerized libsql-dockerized nats-dockerized etcd yuga-docker yuga-bare yuga-cluster nats-cluster nats-bare df-cluster df-bare etcd-cluster etcd-bare valkey-cluster pgsql-cnpg crowdsec-cluster
 var infraTemplates embed.FS
 
 type Template struct {
@@ -199,6 +199,12 @@ var Templates = map[string]Template{
 		Description: "etcd bare-metal — native etcd binary + systemd on the host (no Docker), 3-member quorum via peer_ip",
 		IsDir:       true,
 		DirName:     "etcd-bare",
+	},
+	"crowdsec-cluster": {
+		Name:        "crowdsec-cluster",
+		Description: "CrowdSec WAF/IPS in k3s — LAPI + agent via helm, Traefik bouncer plugin (stream / AppSec by profile) and default-deny NetworkPolicies",
+		IsDir:       true,
+		DirName:     "crowdsec-cluster",
 	},
 }
 

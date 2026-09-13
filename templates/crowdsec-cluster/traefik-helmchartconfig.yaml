@@ -1,0 +1,23 @@
+# k3s traefik addon override (HelmChartConfig): enables experimental plugin
+# loading and attaches the crowdsec bouncer middleware to both entrypoints, so
+# every routed request passes the IPS (stream mode) and, when the profile
+# enables it, the AppSec WAF. Applied by init.sh — only meaningful when the
+# native k3s traefik addon is present.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    logs:
+      access:
+        enabled: true
+    experimental:
+      plugins:
+        crowdsec-bouncer:
+          moduleName: github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
+          version: {{ .PluginVersion }}
+    additionalArguments:
+      - "--entrypoints.web.http.middlewares={{ .Namespace }}-{{ .Bouncer }}@kubernetescrd"
+      - "--entrypoints.websecure.http.middlewares={{ .Namespace }}-{{ .Bouncer }}@kubernetescrd"

@@ -1,0 +1,74 @@
+# Example: default-deny the APP namespace and open only what the app needs.
+
+# Apply per application namespace with the real names:
+#   kubectl apply -f netpol-app-example.yaml -n <app-namespace>
+# Adjust the datastore namespace label and remove what does not apply.
+
+# 1. Default deny all ingress and egress in the app namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# 2. Ingress only from traefik (kube-system) on the app port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traefik-ingress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+# 3. Egress: DNS + the platform datastores (pg/valkey/nats namespaces) + HTTPS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pg
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: valkey
+      ports:
+        - port: 6379
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nats
+      ports:
+        - port: 4222
+          protocol: TCP
+    - ports:
+        - port: 443
+          protocol: TCP

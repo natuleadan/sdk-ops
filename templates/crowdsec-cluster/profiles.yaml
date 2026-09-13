@@ -1,0 +1,47 @@
+# crowdsec-cluster profiles — LAPI and agent sizing. `appsec: "true"` enables
+# the WAF engine (OWASP CRS virtual patching) served by the AppSec component;
+# lite stays stream-only (IP/behavior decisions) to fit small nodes.
+lite:               # 0.2c / 192Mi total (stream mode, no AppSec)
+  lapi_cpu: "100m"
+  lapi_cpu_limit: "500m"
+  lapi_mem: 96Mi
+  lapi_mem_limit: 256Mi
+  agent_cpu: "100m"
+  agent_cpu_limit: "300m"
+  agent_mem: 64Mi
+  agent_mem_limit: 128Mi
+  lapi_storage: 1Gi
+  appsec: "false"
+normal:             # 0.6c / 640Mi total (AppSec WAF on)
+  lapi_cpu: "250m"
+  lapi_cpu_limit: "1"
+  lapi_mem: 256Mi
+  lapi_mem_limit: 512Mi
+  agent_cpu: "250m"
+  agent_cpu_limit: "500m"
+  agent_mem: 128Mi
+  agent_mem_limit: 256Mi
+  lapi_storage: 2Gi
+  appsec: "true"
+medium:             # 1.1c / 1.3Gi total (AppSec + more agent headroom)
+  lapi_cpu: "500m"
+  lapi_cpu_limit: "2"
+  lapi_mem: 512Mi
+  lapi_mem_limit: 1Gi
+  agent_cpu: "500m"
+  agent_cpu_limit: "1"
+  agent_mem: 256Mi
+  agent_mem_limit: 512Mi
+  lapi_storage: 5Gi
+  appsec: "true"
+large:              # 2c / 2.5Gi total
+  lapi_cpu: "1"
+  lapi_cpu_limit: "4"
+  lapi_mem: 1Gi
+  lapi_mem_limit: 2Gi
+  agent_cpu: "1"
+  agent_cpu_limit: "2"
+  agent_mem: 512Mi
+  agent_mem_limit: 1Gi
+  lapi_storage: 10Gi
+  appsec: "true"

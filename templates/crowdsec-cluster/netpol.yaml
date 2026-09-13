@@ -1,0 +1,58 @@
+# NetworkPolicies for the crowdsec namespace (applied by init.sh):
+#   - default-deny ingress;
+#   - LAPI/AppSec ports reachable from the cluster pod network only
+#     (ipBlock = the k3s pod CIDR; the agent and traefik both come from there);
+#   - restricted egress (DNS + HTTPS for hub/CAPI updates + LAPI/AppSec).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: crowdsec
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-lapi-pods
+  namespace: crowdsec
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: {{ .PodCIDR }}   # k3s pod network (agent + traefik), configurable via CS_K8S_POD_CIDR
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 6060
+          protocol: TCP
+        - port: 7422
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-dns-https-lapi
+  namespace: crowdsec
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 8080
+          protocol: TCP
+        - port: 7422
+          protocol: TCP

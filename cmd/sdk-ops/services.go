@@ -89,6 +89,13 @@ var serviceUninstalls = map[string]serviceUninstall{
 	"valkey-cluster": {script: []string{
 		"sudo k3s kubectl delete ns valkey --force --grace-period=0 2>/dev/null || true",
 	}},
+	"crowdsec-cluster": {script: []string{
+		// The traefik addon override goes first (restores the default addon),
+		// then the release + namespace (the bouncer secret dies with the ns).
+		"sudo k3s kubectl delete helmchartconfig traefik -n kube-system --ignore-not-found 2>/dev/null || true",
+		"sudo /usr/local/bin/helm uninstall crowdsec -n crowdsec 2>/dev/null || true",
+		"sudo k3s kubectl delete ns crowdsec --force --grace-period=0 2>/dev/null || true",
+	}},
 	"pgsql-cnpg": {script: []string{
 		// The CNPG operator stays (shared); the cluster + namespace go.
 		"sudo k3s kubectl delete cluster pg -n pg --ignore-not-found 2>/dev/null || true",
@@ -166,6 +173,7 @@ func orderedServiceNames(services ProvisionServices) []string {
 		"nats", "nats-bare", "nats-cluster",
 		"df", "df-bare", "df-cluster",
 		"valkey-cluster",
+		"crowdsec-cluster",
 		"libsql",
 	}
 	var out []string
@@ -499,6 +507,7 @@ var renderRules = []renderRule{
 	{exact: "valkey-cluster", build: profOnly(valkeyClusterRenderData)},
 	{exact: "pgsql-cnpg", build: profOnly(pgsqlCNPGRenderData)},
 	{exact: "etcd-cluster", build: profOnly(etcdClusterRenderData)},
+	{exact: "crowdsec-cluster", build: profOnly(crowdsecClusterRenderData)},
 	{exact: "etcd-bare", build: etcdRenderData},
 	{prefix: "nats", build: natsRenderData},
 	{exact: "etcd", build: etcdRenderData},
@@ -726,6 +735,41 @@ func etcdClusterRenderData(prof map[string]any) (map[string]any, error) {
 		"Provision":   true,
 	}
 	return data, nil
+}
+
+// crowdsecClusterRenderData builds the render context for
+// templates/crowdsec-cluster (k3s via the official crowdsec helm chart).
+// The profile `appsec` flag is a string ("true"/"false") -> bool so the
+// template conditionals (values.yaml + init.sh middleware) can switch the WAF
+// engine on/off per profile.
+func crowdsecClusterRenderData(prof map[string]any) (map[string]any, error) {
+	envOr := func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
+	return map[string]any{
+		"Namespace":     envOr("CS_K8S_NAMESPACE", "crowdsec"),
+		"Release":       envOr("CS_K8S_RELEASE", "crowdsec"),
+		"Bouncer":       envOr("CS_K8S_BOUNCER", "traefik-bouncer"),
+		"PluginVersion": envOr("CS_K8S_PLUGIN_VERSION", "v1.4.5"),
+		"HelmVersion":   envOr("CS_K8S_HELM_VERSION", "v3.15.4"),
+		"StorageClass":  envOr("CS_K8S_STORAGE_CLASS", "local-path"),
+		"LapiCPU":       prof["lapi_cpu"],
+		"LapiCPULimit":  prof["lapi_cpu_limit"],
+		"LapiMem":       prof["lapi_mem"],
+		"LapiMemLimit":  prof["lapi_mem_limit"],
+		"LapiStorage":   prof["lapi_storage"],
+		"AgentCPU":      prof["agent_cpu"],
+		"AgentCPULimit": prof["agent_cpu_limit"],
+		"AgentMem":      prof["agent_mem"],
+		"AgentMemLimit": prof["agent_mem_limit"],
+		"AppSecEnabled": fmt.Sprint(prof["appsec"]) == "true",
+		"PodCIDR":       envOr("CS_K8S_POD_CIDR", "10.42.0.0/16"),                           // go-check:ignore-ip
+		"TrustedCIDRs":  splitCsv(envOr("CS_K8S_TRUSTED_CIDRS", "10.0.0.0/8,10.42.0.0/16")), // go-check:ignore-ip
+		"Provision":     true,
+	}, nil
 }
 
 // natsRenderData builds the NATS cluster node render context.

@@ -1,0 +1,20 @@
+name: crowdsec-cluster
+description: CrowdSec WAF/IPS in k3s via the official helm chart - LAPI + agent, the Traefik bouncer plugin (stream mode, AppSec/CRS by profile) and default-deny NetworkPolicies. Internal service DNS, no host ports.
+services:
+  - crowdsec/crowdsec helm chart (LAPI + agent, local-path PVC)
+  - traefik bouncer plugin (experimental.plugins enabled on the k3s traefik addon via HelmChartConfig)
+  - default-deny NetworkPolicies (crowdsec namespace)
+env:
+  CS_K8S_NAMESPACE: crowdsec
+  CS_K8S_RELEASE: crowdsec
+  CS_K8S_HELM_VERSION: v3.15.4
+  CS_K8S_BOUNCER: traefik-bouncer
+  CS_K8S_PLUGIN_VERSION: v1.4.5
+  CS_K8S_STORAGE_CLASS: local-path
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  validate: bash validate.sh
+  test: bash test/test.sh

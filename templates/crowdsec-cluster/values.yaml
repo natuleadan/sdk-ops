@@ -1,0 +1,49 @@
+# crowdsec helm values (rendered by sdk-ops: profiles.yaml sizes the LAPI and
+# the agent; {{ .AppSecEnabled }} turns the WAF engine on/off per profile).
+container_runtime: containerd
+
+lapi:
+  replicas: 1
+  resources:
+    requests:
+      cpu: {{ .LapiCPU }}
+      memory: {{ .LapiMem }}
+    limits:
+      cpu: {{ .LapiCPULimit }}
+      memory: {{ .LapiMemLimit }}
+  persistentVolume:
+    data:
+      enabled: true
+      size: {{ .LapiStorage }}
+      storageClassName: {{ .StorageClass }}
+
+agent:
+  resources:
+    requests:
+      cpu: {{ .AgentCPU }}
+      memory: {{ .AgentMem }}
+    limits:
+      cpu: {{ .AgentCPULimit }}
+      memory: {{ .AgentMemLimit }}
+  # Access logs come from the traefik pods (the HelmChartConfig enables them);
+  # the crowdsecurity/traefik parser turns them into HTTP scenarios.
+  acquisition:
+    - namespace: kube-system
+      podName: traefik-*
+      program: traefik
+{{ if .AppSecEnabled }}
+appsec:
+  enabled: true
+  acquisitions:
+    - source: appsec
+      listen_addr: "0.0.0.0:7422"
+      path: /
+      appsec_configs:
+        - crowdsecurity/appsec-default
+        - crowdsecurity/crs
+      labels:
+        type: appsec
+  env:
+    - name: COLLECTIONS
+      value: "crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-crs crowdsecurity/appsec-generic-rules"
+{{ end }}
