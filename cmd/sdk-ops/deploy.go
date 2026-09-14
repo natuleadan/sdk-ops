@@ -845,10 +845,30 @@ Examples:
 }
 
 func newServiceCmd() *cobra.Command {
-	var cmd = &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "service",
 		Short: "Manage deployed services",
 	}
+	baseCmds := newServiceBaseCmds()
+	scriptCmds := newServiceScriptCmds()
+	rotateCmd := newServiceRotateCmd()
+	all := append(append([]*cobra.Command{}, baseCmds...), scriptCmds...)
+	for _, sc := range all {
+		sc.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
+		sc.Flags().StringP("user", "u", "root", "SSH user")
+		sc.Flags().StringP("key", "k", "", "SSH private key path")
+		sc.Flags().IntP("port", "p", 22, "SSH port")
+	}
+	for _, sc := range all {
+		cmd.AddCommand(sc)
+	}
+	cmd.AddCommand(rotateCmd)
+	return cmd
+}
+
+// newServiceBaseCmds builds the day-to-day `service` subcommands (status,
+// logs, restart, rollback, versions).
+func newServiceBaseCmds() []*cobra.Command {
 
 	statusCmd := &cobra.Command{
 		Use:   "status [name]",
@@ -923,55 +943,11 @@ Examples:
 		},
 	}
 
-	validateCmd := &cobra.Command{
-		Use:   "validate <name>",
-		Short: "Run the service acceptance validate.sh on the node (with timing)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			nodeIP, user, key, port := getNodeFlags(cmd)
-			return runServiceScript(nodeIP, user, key, port, args[0], "validate")
-		},
-	}
+	return []*cobra.Command{statusCmd, logsCmd, restartCmd, rollbackCmd, versionsCmd}
+}
 
-	testCmd := &cobra.Command{
-		Use:   "test <name>",
-		Short: "Run the service integration test/test.sh on the node (with timing)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			nodeIP, user, key, port := getNodeFlags(cmd)
-			return runServiceScript(nodeIP, user, key, port, args[0], "test")
-		},
-	}
-
-	drCmd := &cobra.Command{
-		Use:   "dr <name> [backup|restore]",
-		Short: "Run the S3 DR script shipped with the service (backup-s3.sh / restore-s3.sh)",
-		Long: `Run the disaster-recovery script that ships with a cluster service.
-
-  sdk-ops service dr pgsql-cnpg backup            # on-demand S3 backup
-  sdk-ops service dr pgsql-cnpg restore --yes     # destructive: restores the S3 dump
-
-Restore replaces the service data with the dump and requires --yes.`,
-		Args: cobra.RangeArgs(1, 2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			nodeIP, user, key, port := getNodeFlags(cmd)
-			action := "backup"
-			if len(args) > 1 {
-				action = args[1]
-			}
-			yes, _ := cmd.Flags().GetBool("yes")
-			return runServiceDR(nodeIP, user, key, port, args[0], action, yes)
-		},
-	}
-	drCmd.Flags().Bool("yes", false, "Confirm the destructive restore (passes --yes to the script)")
-
-	for _, sc := range []*cobra.Command{statusCmd, logsCmd, restartCmd, rollbackCmd, versionsCmd, validateCmd, testCmd, drCmd} {
-		sc.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
-		sc.Flags().StringP("user", "u", "root", "SSH user")
-		sc.Flags().StringP("key", "k", "", "SSH private key path")
-		sc.Flags().IntP("port", "p", 22, "SSH port")
-	}
-
+// newServiceRotateCmd builds the secret-rotation family of `service`.
+func newServiceRotateCmd() *cobra.Command {
 	rotateCmd := &cobra.Command{
 		Use:   "rotate",
 		Short: "Rotate secrets (DB passwords, env vars)",
@@ -1085,15 +1061,56 @@ Examples:
 
 	rotateCmd.AddCommand(rotateDBCmd)
 	rotateCmd.AddCommand(rotateEnvCmd)
+	return rotateCmd
+}
 
-	cmd.AddCommand(statusCmd)
-	cmd.AddCommand(logsCmd)
-	cmd.AddCommand(restartCmd)
-	cmd.AddCommand(rollbackCmd)
-	cmd.AddCommand(versionsCmd)
-	cmd.AddCommand(rotateCmd)
+// newServiceScriptCmds builds the node-side script runners of `service`:
+// validate.sh, test/test.sh and the S3 DR scripts, all printing output with
+// timing. Kept out of newServiceCmd to hold its cyclomatic complexity down.
+func newServiceScriptCmds() []*cobra.Command {
+	validateCmd := &cobra.Command{
+		Use:   "validate <name>",
+		Short: "Run the service acceptance validate.sh on the node (with timing)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, user, key, port := getNodeFlags(cmd)
+			return runServiceScript(nodeIP, user, key, port, args[0], "validate")
+		},
+	}
 
-	return cmd
+	testCmd := &cobra.Command{
+		Use:   "test <name>",
+		Short: "Run the service integration test/test.sh on the node (with timing)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, user, key, port := getNodeFlags(cmd)
+			return runServiceScript(nodeIP, user, key, port, args[0], "test")
+		},
+	}
+
+	drCmd := &cobra.Command{
+		Use:   "dr <name> [backup|restore]",
+		Short: "Run the S3 DR script shipped with the service (backup-s3.sh / restore-s3.sh)",
+		Long: `Run the disaster-recovery script that ships with a cluster service.
+
+  sdk-ops service dr pgsql-cnpg backup            # on-demand S3 backup
+  sdk-ops service dr pgsql-cnpg restore --yes     # destructive: restores the S3 dump
+
+Restore replaces the service data with the dump and requires --yes.`,
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, user, key, port := getNodeFlags(cmd)
+			action := "backup"
+			if len(args) > 1 {
+				action = args[1]
+			}
+			yes, _ := cmd.Flags().GetBool("yes")
+			return runServiceDR(nodeIP, user, key, port, args[0], action, yes)
+		},
+	}
+	drCmd.Flags().Bool("yes", false, "Confirm the destructive restore (passes --yes to the script)")
+
+	return []*cobra.Command{validateCmd, testCmd, drCmd}
 }
 
 func getNodeFlags(cmd *cobra.Command) (ip, user, key string, port int) {
