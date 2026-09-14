@@ -118,6 +118,16 @@ EOF
   printf '%s' "$CS_BOUNCER_KEY" > "$KEY_FILE"; chmod 0600 "$KEY_FILE"
   BOUNCER_API_URL="$LAPI_URL"
   BOUNCER_API_KEY="$CS_BOUNCER_KEY"
+  # The agent reads the credentials at startup: restart it so the switch to
+  # the remote LAPI takes effect, then prove the link (firewall/peers + creds).
+  systemctl enable crowdsec >/dev/null 2>&1 || true
+  systemctl restart crowdsec
+  lapi_ok=0
+  for i in $(seq 1 30); do
+    if cscli lapi status >/dev/null 2>&1; then lapi_ok=1; break; fi
+    sleep 2
+  done
+  [ "$lapi_ok" = 1 ] || fail "remote LAPI $LAPI_URL not reachable (peers/firewall or credentials)"
   log "client mode: agent -> $LAPI_URL, bouncer consumes its decisions"
 else
   # Standalone: local LAPI. Wait for it, then (re)register the bouncer.
