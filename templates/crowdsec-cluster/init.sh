@@ -49,13 +49,21 @@ done
 [ "$lapi_ok" = 1 ] || fail "lapi rollout"
 log "enabling agents (phase 2/2)"
 helm upgrade --install "$REL" crowdsec/crowdsec -n "$NS" -f "$DIR/values.yaml" >/dev/null || fail "helm crowdsec (agents)"
+# Enabling the agents can roll the shared config: wait for the LAPI again
+# before asking for its pod (the lookup below must not race a rollout).
+$KUBECTL -n "$NS" rollout status "deploy/$REL-lapi" --timeout=300s >/dev/null 2>&1 || true
 $KUBECTL -n "$NS" rollout status "daemonset/$REL-agent" --timeout=300s >/dev/null 2>&1 \
   || $KUBECTL -n "$NS" rollout status "deploy/$REL-agent" --timeout=300s >/dev/null 2>&1 \
   || log "warn: agent rollout not confirmed (continuing)"
 
 # 3. Bouncer key (idempotent): reuse the key stored in the secret, create it
 #    once otherwise.
-LAPI_POD="$($KUBECTL -n "$NS" get pods --no-headers -o custom-columns=':.metadata.name' | grep -- "-lapi-" | head -1 || true)"
+LAPI_POD=""
+for i in $(seq 1 12); do
+  LAPI_POD="$($KUBECTL -n "$NS" get pods --no-headers -o custom-columns=':.metadata.name' 2>/dev/null | grep -- "-lapi-" | grep -v Terminating | head -1 || true)"
+  [ -n "$LAPI_POD" ] && break
+  sleep 10
+done
 [ -n "$LAPI_POD" ] || fail "lapi pod not found in namespace $NS"
 KEY="$($KUBECTL -n "$NS" get secret crowdsec-bouncer-key -o jsonpath='{.data.key}' 2>/dev/null | base64 -d 2>/dev/null || true)"
 if [ -z "$KEY" ]; then
