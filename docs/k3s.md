@@ -248,6 +248,12 @@ Size them with the template **profiles** (`profile: lite|normal|medium|large`)
 and remember the nodes are shared: several services asking full cores will not
 schedule on the small plans.
 
+Services install **strictly in queue**: each one finishes its init (workloads
+ready) before the next starts, plus a short settle pause so image pulls and IO
+drain instead of stacking up (`SDKOPS_SERVICE_SETTLE` seconds, default 10, 0
+disables). Dependency order first (postgres before the rest), then the
+template order.
+
 Changing the profile of a live service works in place only when the change does
 **not** alter its storage size: k3s `local-path` cannot resize PVCs, so a size
 change (up or down) fails the helm/CR apply with "only dynamically provisioned

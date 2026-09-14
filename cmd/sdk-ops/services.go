@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 	golang_ssh "golang.org/x/crypto/ssh"
@@ -154,14 +155,37 @@ func applyServicesOn(pf ProvisionFile, h ProvisionHost) error {
 
 	// Deterministic service order — the dependencies first (etcd = the DCS the
 	// postgres needs; the map iteration alone is random and a postgres deploy
-	// racing its own etcd would miss the DCS during the bootstrap).
+	// racing its own etcd would miss the DCS during the bootstrap). Strictly
+	// in queue: each service finishes its own init (workloads ready) before the
+	// next starts, with a short settle pause so image pulls / IO drain on small
+	// nodes instead of stacking up.
+	settle := serviceSettleDelay()
 	for _, name := range orderedServiceNames(r.services) {
 		cfg := r.services[name]
 		if err := deployServiceOn(conn, pf, h, name, cfg); err != nil {
 			return fmt.Errorf("services %s on %s: %w", name, h.Name, err)
 		}
+		if settle > 0 {
+			fmt.Printf("  -> %s done; settling %s before the next service\n", name, settle)
+			time.Sleep(settle)
+		}
 	}
 	return nil
+}
+
+// serviceSettleDelay is the pause between services of the queue (default 10s,
+// SDKOPS_SERVICE_SETTLE=N to tune, 0 disables).
+func serviceSettleDelay() time.Duration {
+	fallback := 10 * time.Second
+	v := os.Getenv("SDKOPS_SERVICE_SETTLE")
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return fallback
+	}
+	return time.Duration(n) * time.Second
 }
 
 // orderedServiceNames sorts the declared services deterministically: the
