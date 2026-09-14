@@ -122,6 +122,50 @@ func TestCrowdsecBareRenderData(t *testing.T) {
 	}
 }
 
+// TestCrowdsecDockerizedRenderData locks the standalone/client switch, the
+// image/plugin pins and that the compose renders with the chosen tag.
+func TestCrowdsecDockerizedRenderData(t *testing.T) {
+	prof := map[string]any{"mem_limit": "256M", "cpus": "0.5", "collections": "crowdsecurity/linux"}
+	h := ProvisionHost{Name: "web"}
+	data, err := crowdsecDockerizedRenderData(ProvisionFile{}, h, prof, ServiceConfig{Profile: "lite"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if client, _ := data["Client"].(bool); client {
+		t.Error("standalone by default: Client must be false without CS_LAPI_URL")
+	}
+	if data["ImageTag"] != "v1.8.1" || data["PluginVersion"] != "v1.7.1" {
+		t.Errorf("pins wrong: image=%v plugin=%v", data["ImageTag"], data["PluginVersion"])
+	}
+	if data["MemLimit"] != "256M" || data["Cpus"] != "0.5" {
+		t.Errorf("profile mapping wrong: mem=%v cpus=%v", data["MemLimit"], data["Cpus"])
+	}
+	if cidrs, ok := data["TrustedCIDRs"].([]string); !ok || len(cidrs) != 4 {
+		t.Errorf("trusted cidrs default = %v", data["TrustedCIDRs"])
+	}
+
+	t.Setenv("CS_LAPI_URL", "http://192.0.2.20:30080")
+	data, err = crowdsecDockerizedRenderData(ProvisionFile{}, h, prof, ServiceConfig{Profile: "lite"})
+	if err != nil {
+		t.Fatalf("render client: %v", err)
+	}
+	if client, _ := data["Client"].(bool); !client {
+		t.Error("CS_LAPI_URL must switch to client mode")
+	}
+
+	dir := t.TempDir()
+	if err := templates.RenderDir("crowdsec-dockerized", dir, data); err != nil {
+		t.Fatalf("render dir: %v", err)
+	}
+	compose, err := os.ReadFile(filepath.Join(dir, "docker-compose.yml"))
+	if err != nil {
+		t.Fatalf("read rendered compose: %v", err)
+	}
+	if !strings.Contains(string(compose), "crowdsecurity/crowdsec:v1.8.1") {
+		t.Errorf("image pin not rendered:\n%s", string(compose))
+	}
+}
+
 // TestCrowdsecBareUninstallAndOrder keeps the bare service in the declared
 // cleanup map (units disabled on removal) and in the queue order.
 func TestCrowdsecBareUninstallAndOrder(t *testing.T) {

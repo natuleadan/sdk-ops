@@ -1,0 +1,16 @@
+name: crowdsec-dockerized
+description: CrowdSec in a container plus the Traefik bouncer plugin auto-enabled on the sdk-ops host Traefik - L7 WAF on docker fleets. Standalone (local LAPI) or client of a remote LAPI.
+services:
+  - crowdsec (engine + LAPI container, pinned image tag)
+  - traefik bouncer plugin (experimental.plugins on the sdk-ops Traefik + entrypoint middleware)
+env:
+  CS_IMAGE_TAG: v1.8.1
+  CS_PLUGIN_VERSION: v1.7.1
+  CS_COLLECTIONS: crowdsecurity/linux crowdsecurity/base-http-scenarios
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  validate: bash validate.sh
+  test: bash test/test.sh

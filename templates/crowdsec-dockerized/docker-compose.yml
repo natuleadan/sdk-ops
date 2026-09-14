@@ -1,0 +1,34 @@
+services:
+  crowdsec:
+    image: crowdsecurity/crowdsec:{{ .ImageTag }}
+    container_name: crowdsec
+    restart: unless-stopped
+    environment:
+      - GID=1000
+      - COLLECTIONS={{ .Collections }}
+      - CUSTOM_HOSTNAME={{ .BouncerName }}
+    volumes:
+      - cc-config:/etc/crowdsec
+      - cc-data:/var/lib/crowdsec/data
+      # Access log shared with the sdk-ops Traefik (the template enables it).
+      - /var/log/traefik:/var/log/traefik:ro
+      - ./acquis-traefik.yaml:/etc/crowdsec/acquis.d/traefik.yaml:ro
+    networks:
+      - sdk-ops-net
+    ports:
+      # LAPI on the host loopback: the Traefik plugin uses it when Traefik runs
+      # on the host network; on the bridge Traefik reaches `crowdsec:8080`.
+      - "127.0.0.1:8080:8080"
+    deploy:
+      resources:
+        limits:
+          memory: {{ .MemLimit }}
+          cpus: "{{ .Cpus }}"
+
+networks:
+  sdk-ops-net:
+    external: true
+
+volumes:
+  cc-config:
+  cc-data:

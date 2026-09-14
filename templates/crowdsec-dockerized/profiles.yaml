@@ -1,0 +1,15 @@
+# crowdsec-dockerized profiles - container sizing (compose deploy limits) and
+# the hub collections the agent installs. The engine parses the Traefik access
+# log the template wires into /var/log/traefik/access.log.
+lite:                 # 0.5c / 256M - stream IPS on a small docker host
+  mem_limit: 256M
+  cpus: "0.5"
+  collections: crowdsecurity/linux crowdsecurity/base-http-scenarios
+normal:               # 1c / 512M - stream IPS + more HTTP scenarios
+  mem_limit: 512M
+  cpus: "1"
+  collections: crowdsecurity/linux crowdsecurity/base-http-scenarios
+large:                # 2c / 1G
+  mem_limit: 1G
+  cpus: "2"
+  collections: crowdsecurity/linux crowdsecurity/base-http-scenarios

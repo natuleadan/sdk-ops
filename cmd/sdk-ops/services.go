@@ -69,6 +69,12 @@ var serviceUninstalls = map[string]serviceUninstall{
 	"df-bare":   {units: []string{"dragonfly-primary", "dragonfly-replica-1", "dragonfly-replica-2", "haproxy"}},
 	"etcd-bare": {units: []string{"etcd"}},
 	"crowdsec-bare": {units: []string{"crowdsec-firewall-bouncer", "crowdsec"}},
+	"crowdsec-dockerized": {script: []string{
+		// Drop the container + the middleware the init added to the file
+		// provider (the plugin flags in the creation template stay: harmless).
+		"sudo docker rm -f crowdsec 2>/dev/null || true",
+		"sudo rm -f /etc/traefik/conf.d/01-crowdsec.yml 2>/dev/null || true",
+	}},
 	// k3s cluster services (release/CR + namespace; the dragonfly operator
 	// itself stays — it is shared infrastructure)
 	"yuga-cluster": {script: []string{
@@ -237,8 +243,8 @@ func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg Ser
 		return wireValkeyOn(conn, svcDir)
 	case "df-cluster":
 		return wireDFOn(conn, svcDir)
-	case "crowdsec-bare":
-		return wireCrowdsecBareOn(conn, svcDir, nodeName)
+	case "crowdsec-bare", "crowdsec-dockerized":
+		return wireCrowdsecClientEnvOn(conn, svcDir, nodeName)
 	default:
 		// Dockerized templates (yugabyte, libsql, df, ...) need no special
 		// wiring — they are self-contained compose stacks driven by init.sh.
@@ -326,13 +332,14 @@ func wireDFOn(conn *golang_ssh.Client, svcDir string) error {
 	return nil
 }
 
-// wireCrowdsecBareOn writes the client-mode .env (remote LAPI URL, machine
-// credentials and the bouncer key) when the operator provides them. Standalone
-// mode needs nothing: the engine registers its own bouncer key on the node.
-// Per-host overrides (CS_LAPI_USER_<HOST>, CS_BOUNCER_KEY_<HOST>, ...) let one
-// fleet point several clients at the same central with distinct credentials;
-// the host name is uppercased with non-alphanumerics mapped to underscores.
-func wireCrowdsecBareOn(conn *golang_ssh.Client, svcDir, nodeName string) error {
+// wireCrowdsecClientEnvOn writes the client-mode .env (remote LAPI URL,
+// machine credentials and the bouncer key) for the CrowdSec host templates
+// (bare/dockerized). Standalone mode needs nothing: the engine registers its
+// own bouncer key on the node. Per-host overrides (CS_LAPI_USER_<HOST>,
+// CS_BOUNCER_KEY_<HOST>, ...) let one fleet point several clients at the same
+// central with distinct credentials; the host name is uppercased with
+// non-alphanumerics mapped to underscores.
+func wireCrowdsecClientEnvOn(conn *golang_ssh.Client, svcDir, nodeName string) error {
 	envHost := func(key string) string {
 		suffix := strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(nodeName))
 		if v := os.Getenv(key + "_" + suffix); v != "" {
@@ -348,12 +355,12 @@ func wireCrowdsecBareOn(conn *golang_ssh.Client, svcDir, nodeName string) error 
 		}
 	}
 	if len(lines) == 0 {
-		verbosef("service crowdsec-bare: standalone mode (no CS_LAPI_* env)")
+		verbosef("crowdsec (%s): standalone mode (no CS_LAPI_* env)", nodeName)
 		return nil
 	}
 	cmd := fmt.Sprintf("umask 077; cat > %s/.env <<'SDKOPS_CS_ENV'\n%s\nSDKOPS_CS_ENV", svcDir, strings.Join(lines, "\n"))
 	if _, _, err := ssh.Run(conn, cmd); err != nil {
-		return fmt.Errorf("write crowdsec-bare .env: %w", err)
+		return fmt.Errorf("write crowdsec .env: %w", err)
 	}
 	return nil
 }
@@ -603,6 +610,7 @@ var renderRules = []renderRule{
 	{exact: "etcd-cluster", build: profOnly(etcdClusterRenderData)},
 	{exact: "crowdsec-cluster", build: profOnly(crowdsecClusterRenderData)},
 	{exact: "crowdsec-bare", build: crowdsecBareRenderData},
+	{exact: "crowdsec-dockerized", build: crowdsecDockerizedRenderData},
 	{exact: "etcd-bare", build: etcdRenderData},
 	{prefix: "nats", build: natsRenderData},
 	{exact: "etcd", build: etcdRenderData},
@@ -913,6 +921,34 @@ func crowdsecBareRenderData(_ ProvisionFile, h ProvisionHost, prof map[string]an
 		"MemLimit":       fmt.Sprint(prof["mem_limit"]),
 		"CpuQuota":       fmt.Sprint(prof["cpu_quota"]),
 		"Provision":      true,
+	}, nil
+}
+
+// crowdsecDockerizedRenderData builds the render context for
+// templates/crowdsec-dockerized (engine container + the Traefik bouncer plugin
+// auto-enabled on the sdk-ops host Traefik). Standalone by default; CS_LAPI_URL
+// switches to client mode. Secrets are written to the node .env by the wiring.
+func crowdsecDockerizedRenderData(_ ProvisionFile, h ProvisionHost, prof map[string]any, _ ServiceConfig) (map[string]any, error) {
+	envOr := func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
+	lapiURL := os.Getenv("CS_LAPI_URL")
+	return map[string]any{
+		"ImageTag":      envOr("CS_IMAGE_TAG", "v1.8.1"),
+		"PluginVersion": envOr("CS_PLUGIN_VERSION", "v1.7.1"),
+		"BouncerName":   envOr("CS_BOUNCER_NAME", h.Name),
+		"Collections":   envOr("CS_COLLECTIONS", fmt.Sprint(prof["collections"])),
+		"MemLimit":      fmt.Sprint(prof["mem_limit"]),
+		"Cpus":          fmt.Sprint(prof["cpus"]),
+		"LapiURL":       lapiURL,
+		"Client":        lapiURL != "",
+		// Ranges whose X-Forwarded-For is trusted (the plugin reads the real
+		// client IP from the edge/CDN only for these).
+		"TrustedCIDRs": splitCsv(envOr("CS_TRUSTED_CIDRS", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1")), // go-check:ignore-ip
+		"Provision":    true,
 	}, nil
 }
 

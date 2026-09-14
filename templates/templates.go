@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-//go:embed pgsql-docker pgsql-cluster pgsql-bare df-dockerized libsql-dockerized nats-dockerized etcd yuga-docker yuga-bare yuga-cluster nats-cluster nats-bare df-cluster df-bare etcd-cluster etcd-bare valkey-cluster pgsql-cnpg crowdsec-cluster crowdsec-bare
+//go:embed pgsql-docker pgsql-cluster pgsql-bare df-dockerized libsql-dockerized nats-dockerized etcd yuga-docker yuga-bare yuga-cluster nats-cluster nats-bare df-cluster df-bare etcd-cluster etcd-bare valkey-cluster pgsql-cnpg crowdsec-cluster crowdsec-bare crowdsec-dockerized
 var infraTemplates embed.FS
 
 type Template struct {
@@ -211,6 +211,12 @@ var Templates = map[string]Template{
 		Description: "CrowdSec bare-metal — native engine + nftables firewall bouncer under systemd (pinned apt repo), standalone or client of a remote LAPI",
 		IsDir:       true,
 		DirName:     "crowdsec-bare",
+	},
+	"crowdsec-dockerized": {
+		Name:        "crowdsec-dockerized",
+		Description: "CrowdSec in docker + the Traefik bouncer plugin auto-enabled on the sdk-ops host Traefik — L7 WAF for docker fleets, standalone or client of a remote LAPI",
+		IsDir:       true,
+		DirName:     "crowdsec-dockerized",
 	},
 }
 
