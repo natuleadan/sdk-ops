@@ -84,8 +84,16 @@ if ! $KUBECTL -n "$NS" get cluster "$NAME" >/dev/null 2>&1; then
 fi
 {{- end }}
 
-# 4. The Cluster CR (instances, storage, resources, backups).
-$KUBECTL apply -f "$DIR/cluster.yaml" || fail "Cluster CR apply"
+# 4. The Cluster CR (instances, storage, resources, backups). The admission
+#    webhook may still be warming up right after the operator rollout on slow
+#    nodes (first image pull): retry instead of failing the provision.
+cr_ok=0
+for i in 1 2 3 4 5 6; do
+  if $KUBECTL apply -f "$DIR/cluster.yaml"; then cr_ok=1; break; fi
+  log "Cluster CR apply retry $i (webhook warming up)"
+  sleep 10
+done
+[ "$cr_ok" = 1 ] || fail "Cluster CR apply"
 
 # 5. Wait for every instance to be ready.
 log "waiting for $NAME ({{ .Instances }} instances)"

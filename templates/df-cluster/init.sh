@@ -57,8 +57,16 @@ else
   log "operator already installed"
 fi
 
-# 3. The Dragonfly CR (primary + replicas, automatic failover, snapshots).
-$KUBECTL apply -f "$DIR/dragonfly.yaml" || fail "Dragonfly CR apply"
+# 3. The Dragonfly CR (primary + replicas, automatic failover, snapshots). The
+#    apiserver may still be warming the CRD/webhook after the operator rollout
+#    on slow nodes: retry instead of failing the provision.
+cr_ok=0
+for i in 1 2 3 4 5 6; do
+  if $KUBECTL apply -f "$DIR/dragonfly.yaml"; then cr_ok=1; break; fi
+  log "Dragonfly CR apply retry $i (controller warming up)"
+  sleep 10
+done
+[ "$cr_ok" = 1 ] || fail "Dragonfly CR apply"
 
 # 4. Wait for the pods (df-0..N) to be READY (Running phase alone is not
 # enough: a crash-looping pod is also "Running").
