@@ -13,7 +13,7 @@ bouncer (detection without enforcement) and was never YAML-driven.
 | `crowdsec-bare` | any (host) | L3/L4: engine + nftables firewall bouncer |
 
 Each template runs in **standalone** mode (local LAPI) or **client** mode
-(`CS_LAPI_URL` set → the local agent reports to a remote LAPI and the local
+(`CS_LAPI_URL` set: the local agent reports to a remote LAPI and the local
 bouncer consumes its decisions — the multi-host / VLAN layout).
 
 - **Automatic**: the agent parses the proxy access logs into scenarios; LAPI
