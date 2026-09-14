@@ -78,7 +78,13 @@ echo "node_exporter uninstalled"
 `
 		return runUninstallScript(conn, script)
 	case "k3s":
-		script := `sudo /usr/local/bin/k3s-uninstall.sh 2>/dev/null || sudo /usr/local/bin/k3s-uninstaller.sh 2>/dev/null || echo "k3s uninstaller not found"; echo "k3s removed"`
+		// Server and agent nodes ship DIFFERENT uninstallers: an agent node
+		// only has k3s-agent-uninstall.sh, so the server one alone left the
+		// agent (and its cluster join state) behind.
+		script := `
+sudo /usr/local/bin/k3s-uninstall.sh 2>/dev/null || true
+sudo /usr/local/bin/k3s-agent-uninstall.sh 2>/dev/null || true
+echo "k3s removed (server or agent uninstaller)"`
 		return runUninstallScript(conn, script)
 	case "security":
 		return hardening.RemoveSecurityWatch(conn)
