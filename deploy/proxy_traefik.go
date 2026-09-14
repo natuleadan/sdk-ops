@@ -34,7 +34,7 @@ func baseTraefikScript(client *goss.Client, cfg ProxyConfig) string {
 	for _, e := range cfg.Env {
 		envArgs.WriteString(" -e " + e)
 	}
-	runCmd := fmt.Sprintf(`sudo docker run -d --name traefik --restart unless-stopped %s%s -v /etc/traefik:/etc/traefik:ro -v /opt/traefik:/opt/traefik traefik:v3.2 --configFile=/etc/traefik/traefik.yml`, netArgs, envArgs.String())
+	runCmd := fmt.Sprintf(`sudo docker run -d --entrypoint traefik --name traefik --restart unless-stopped %s%s -v /etc/traefik:/etc/traefik:ro -v /opt/traefik:/opt/traefik traefik:v3.2 --configFile=/etc/traefik/traefik.yml`, netArgs, envArgs.String())
 
 	var envCheck strings.Builder
 	envCheck.WriteString("ENVS_OK=1")
@@ -239,7 +239,7 @@ func TraefikCreateScript(client *goss.Client, cfg ProxyConfig) (string, error) {
 	for _, e := range cfg.Env {
 		envArgs.WriteString(" -e " + e)
 	}
-	runCmd := fmt.Sprintf(`sudo docker run -d --name traefik --restart unless-stopped %s%s -v /etc/traefik:/etc/traefik:ro -v /opt/traefik:/opt/traefik traefik:v3.2 --configFile=/etc/traefik/traefik.yml`, netArgs, envArgs.String())
+	runCmd := fmt.Sprintf(`sudo docker run -d --entrypoint traefik --name traefik --restart unless-stopped %s%s -v /etc/traefik:/etc/traefik:ro -v /opt/traefik:/opt/traefik traefik:v3.2 --configFile=/etc/traefik/traefik.yml`, netArgs, envArgs.String())
 	return fmt.Sprintf(`#!/bin/bash
 set -e
 %s
