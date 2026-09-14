@@ -1,0 +1,16 @@
+# crowdsec-bare profiles - sizing for the systemd drop-in (MemoryMax /
+# CPUQuota on the engine) plus the hub collections to install. The real
+# attack surface is the log acquisition: `sshd` parses auth.log for
+# brute-force scenarios, `linux` is the base collection.
+lite:                 # 0.5c / 256M - small nodes, SSH protection only
+  mem_limit: 256M
+  cpu_quota: 50%
+  collections: crowdsecurity/linux crowdsecurity/sshd
+normal:               # 1c / 512M - SSH + app logs on a busier host
+  mem_limit: 512M
+  cpu_quota: 100%
+  collections: crowdsecurity/linux crowdsecurity/sshd crowdsecurity/base-http-scenarios
+large:                # 2c / 1G - large host, full HTTP scenario set
+  mem_limit: 1G
+  cpu_quota: 200%
+  collections: crowdsecurity/linux crowdsecurity/sshd crowdsecurity/base-http-scenarios crowdsecurity/http-cve

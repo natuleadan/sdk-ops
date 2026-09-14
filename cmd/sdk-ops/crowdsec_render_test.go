@@ -1,8 +1,12 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/natuleadan/sdk-ops/templates"
 )
 
 func TestCrowdsecClusterRenderData(t *testing.T) {
@@ -65,6 +69,69 @@ func TestCrowdsecClusterUninstallAndOrder(t *testing.T) {
 	svc := ProvisionServices{"crowdsec-cluster": {Profile: "lite"}, "nats-cluster": {Profile: "lite"}}
 	ordered := orderedServiceNames(svc)
 	if len(ordered) != 2 || ordered[0] != "nats-cluster" || ordered[1] != "crowdsec-cluster" {
+		t.Errorf("order wrong: %v", ordered)
+	}
+}
+
+// TestCrowdsecBareRenderData locks the standalone/client switch and the
+// profile mapping of the bare template, and asserts the embedded template
+// renders cleanly in both modes (a syntax error would fail the deploy late).
+func TestCrowdsecBareRenderData(t *testing.T) {
+	prof := map[string]any{"mem_limit": "256M", "cpu_quota": "50%", "collections": "crowdsecurity/linux crowdsecurity/sshd"}
+	h := ProvisionHost{Name: "mia-02"}
+	data, err := crowdsecBareRenderData(ProvisionFile{}, h, prof, ServiceConfig{Profile: "lite"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if client, _ := data["Client"].(bool); client {
+		t.Error("standalone by default: Client must be false without CS_LAPI_URL")
+	}
+	if data["BouncerName"] != "mia-02" || data["CSVersion"] != "1.8.1" || data["BouncerVersion"] != "0.0.36" {
+		t.Errorf("defaults wrong: bouncer=%v cs=%v bouncer_ver=%v", data["BouncerName"], data["CSVersion"], data["BouncerVersion"])
+	}
+	if data["MemLimit"] != "256M" || data["CpuQuota"] != "50%" {
+		t.Errorf("profile mapping wrong: mem=%v cpu=%v", data["MemLimit"], data["CpuQuota"])
+	}
+	if data["LapiListen"] != "127.0.0.1:8080" {
+		t.Errorf("lapi listen default = %v", data["LapiListen"])
+	}
+
+	t.Setenv("CS_LAPI_URL", "http://192.0.2.10:30080")
+	t.Setenv("CS_VERSION", "1.8.2")
+	data, err = crowdsecBareRenderData(ProvisionFile{}, h, prof, ServiceConfig{Profile: "lite"})
+	if err != nil {
+		t.Fatalf("render client: %v", err)
+	}
+	if client, _ := data["Client"].(bool); !client {
+		t.Error("CS_LAPI_URL must switch to client mode")
+	}
+	if data["LapiURL"] != "http://192.0.2.10:30080" || data["CSVersion"] != "1.8.2" {
+		t.Errorf("client render wrong: url=%v cs=%v", data["LapiURL"], data["CSVersion"])
+	}
+
+	dir := t.TempDir()
+	if err := templates.RenderDir("crowdsec-bare", dir, data); err != nil {
+		t.Fatalf("render dir: %v", err)
+	}
+	initSh, err := os.ReadFile(filepath.Join(dir, "init.sh"))
+	if err != nil {
+		t.Fatalf("read rendered init.sh: %v", err)
+	}
+	if !strings.Contains(string(initSh), `CLIENT="1"`) {
+		t.Errorf("client mode not baked into init.sh:\n%s", string(initSh)[:200])
+	}
+}
+
+// TestCrowdsecBareUninstallAndOrder keeps the bare service in the declared
+// cleanup map (units disabled on removal) and in the queue order.
+func TestCrowdsecBareUninstallAndOrder(t *testing.T) {
+	u, ok := serviceUninstalls["crowdsec-bare"]
+	if !ok || len(u.units) == 0 {
+		t.Fatal("crowdsec-bare must declare systemd units to disable")
+	}
+	svc := ProvisionServices{"crowdsec-bare": {Profile: "lite"}, "nats-cluster": {Profile: "lite"}}
+	ordered := orderedServiceNames(svc)
+	if len(ordered) != 2 || ordered[0] != "nats-cluster" || ordered[1] != "crowdsec-bare" {
 		t.Errorf("order wrong: %v", ordered)
 	}
 }

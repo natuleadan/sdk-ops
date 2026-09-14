@@ -1,0 +1,16 @@
+name: crowdsec-bare
+description: CrowdSec bare-metal - native engine + nftables firewall bouncer under systemd (no Docker), pinned apt repo. Standalone (local LAPI) or client mode (CS_LAPI_URL -> remote LAPI).
+services:
+  - crowdsec (native engine + LAPI, systemd unit crowdsec.service)
+  - crowdsec-firewall-bouncer-nftables (kernel-level IP blocking)
+env:
+  CS_VERSION: "1.8.1"
+  CS_BOUNCER_VERSION: "0.0.36"
+  CS_COLLECTIONS: crowdsecurity/linux crowdsecurity/sshd
+health:
+  path: /
+  interval: 15
+commands:
+  init: bash init.sh
+  validate: bash validate.sh
+  test: bash test/test.sh
