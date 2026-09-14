@@ -31,10 +31,11 @@ else
   bad "traefik container not running"
 fi
 
-if sudo docker inspect traefik 2>/dev/null | grep -q "crowdsec-bouncer"; then
-  ok "traefik carries the crowdsec-bouncer plugin"
+if sudo grep -q "crowdsec-bouncer" /etc/traefik/traefik.yml 2>/dev/null \
+   && sudo grep -q "crowdsec@file" /etc/traefik/traefik.yml 2>/dev/null; then
+  ok "traefik.yml wires the plugin + entrypoint middleware"
 else
-  bad "traefik was not recreated with the plugin flags"
+  bad "traefik.yml missing the plugin/entrypoint middleware wiring"
 fi
 
 if [ -f /etc/traefik/conf.d/01-crowdsec.yml ]; then
