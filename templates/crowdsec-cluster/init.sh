@@ -12,6 +12,7 @@ REL="{{ .Release }}"
 BOUNCER="{{ .Bouncer }}"
 PLUGIN_VER="{{ .PluginVersion }}"
 HELM_VER="{{ .HelmVersion }}"
+NODEPORT="{{ .LapiNodePort }}"
 KUBECTL="sudo k3s kubectl"
 # kubectl exec can occasionally hang (kubelet streaming flake) — bound it.
 KEXEC() { for a in 1 2 3; do timeout -k 5 30 $KUBECTL exec "$@" && return 0; sleep 2; done; return 1; }
@@ -47,6 +48,27 @@ for i in 1 2 3; do
   helm upgrade --install "$REL" crowdsec/crowdsec -n "$NS" -f "$DIR/values.yaml" --set agent.enabled=false >/dev/null 2>&1 || true
 done
 [ "$lapi_ok" = 1 ] || fail "lapi rollout"
+
+# 2b. Optional: expose the LAPI on a NodePort so clients on OTHER hosts (the
+#     VLAN layout) can consume this central engine. The selector is copied
+#     from the chart's ClusterIP service — the NodePort never creates a second
+#     rule set, it reuses the LAPI endpoints. The port still has to be opened
+#     to the peers (fleet YAML `peers`).
+if [ -n "$NODEPORT" ]; then
+  log "exposing the LAPI on nodePort $NODEPORT"
+  $KUBECTL -n "$NS" create service nodeport "$REL-lapi-nodeport" \
+    --tcp=8080:8080 --node-port="$NODEPORT" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null \
+    || fail "lapi nodeport service"
+  # Copy the selector from the chart's ClusterIP service. A JSON patch with
+  # `replace` swaps the WHOLE map: a merge patch would union it with the
+  # default selector kubectl create puts in, leaving a rule that matches no
+  # pod (Service without endpoints).
+  SEL="$($KUBECTL -n "$NS" get svc "$REL-service" -o jsonpath='{.spec.selector}' 2>/dev/null || true)"
+  [ -n "$SEL" ] && $KUBECTL -n "$NS" patch svc "$REL-lapi-nodeport" --type json \
+    -p "[{\"op\":\"replace\",\"path\":\"/spec/selector\",\"value\":$SEL}]" >/dev/null 2>&1 || true
+  log "lapi reachable on the node VLAN IP, port $NODEPORT"
+fi
+
 log "enabling agents (phase 2/2)"
 helm upgrade --install "$REL" crowdsec/crowdsec -n "$NS" -f "$DIR/values.yaml" >/dev/null || fail "helm crowdsec (agents)"
 # Enabling the agents can roll the shared config: wait for the LAPI again
@@ -141,5 +163,34 @@ fi
 # 6. NetworkPolicies (default-deny ingress + restricted egress in the ns).
 $KUBECTL apply -f "$DIR/netpol.yaml" >/dev/null || fail "netpols"
 log "NetworkPolicies applied (namespace $NS)"
+
+# 6b. External clients (NodePort mode): the namespace default-deny rejects the
+#     NodePort traffic (k3s enforces NetworkPolicies in the kernel). Allow the
+#     client CIDR to reach the LAPI on 8080 — the NodePort masquerade rewrites
+#     the source, so the whole private range is allowed, not a single IP.
+if [ -n "$NODEPORT" ]; then
+  cat <<EOF | $KUBECTL apply -f - >/dev/null || fail "lapi nodeport netpol"
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-lapi-nodeport
+  namespace: $NS
+spec:
+  podSelector:
+    matchLabels:
+      k8s-app: crowdsec
+      type: lapi
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: {{ .ClientCIDR }}
+      ports:
+        - port: 8080
+          protocol: TCP
+EOF
+  log "lapi NodePort allowed from {{ .ClientCIDR }} (netpol)"
+fi
 
 log "done: LAPI at crowdsec-service.$NS.svc.cluster.local:8080 (internal only)"

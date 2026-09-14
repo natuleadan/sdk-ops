@@ -11,6 +11,7 @@ env:
   CS_K8S_BOUNCER: traefik-bouncer
   CS_K8S_PLUGIN_VERSION: v1.4.5
   CS_K8S_STORAGE_CLASS: local-path
+  CS_K8S_LAPI_NODEPORT: ""  # set (e.g. 30080) to serve external clients over the VLAN
 health:
   path: /
   interval: 15

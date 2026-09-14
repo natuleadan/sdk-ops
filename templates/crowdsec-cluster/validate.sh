@@ -4,6 +4,7 @@
 NS="{{ .Namespace }}"
 REL="{{ .Release }}"
 BOUNCER="{{ .Bouncer }}"
+NODEPORT="{{ .LapiNodePort }}"
 KUBECTL="sudo k3s kubectl"
 # kubectl exec can occasionally hang (kubelet streaming flake) — bound it.
 KEXEC() { for a in 1 2 3; do timeout -k 5 30 $KUBECTL exec "$@" && return 0; sleep 2; done; return 1; }
@@ -56,6 +57,16 @@ if [ -n "$LAPI_POD" ]; then
   fi
 else
   bad "lapi pod not found"
+fi
+
+if [ -n "$NODEPORT" ]; then
+  if $KUBECTL -n "$NS" get svc "$REL-lapi-nodeport" >/dev/null 2>&1; then
+    ok "lapi nodePort service (port $NODEPORT)"
+  else
+    bad "lapi nodePort service missing (CS_K8S_LAPI_NODEPORT=$NODEPORT)"
+  fi
+else
+  skip "lapi nodePort (in-cluster LAPI only)"
 fi
 
 for np in default-deny-ingress allow-lapi-pods allow-egress-dns-https-lapi; do

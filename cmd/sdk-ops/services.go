@@ -857,6 +857,13 @@ func crowdsecClusterRenderData(prof map[string]any) (map[string]any, error) {
 		"PluginVersion": envOr("CS_K8S_PLUGIN_VERSION", "v1.4.5"),
 		"HelmVersion":   envOr("CS_K8S_HELM_VERSION", "v3.15.4"),
 		"StorageClass":  envOr("CS_K8S_STORAGE_CLASS", "local-path"),
+		// Optional NodePort for the LAPI: lets clients on other hosts (the
+		// VLAN layout) consume this central engine's decisions. Empty = the
+		// LAPI stays ClusterIP-only (in-cluster consumers). The client CIDR
+		// is the source range the namespace default-deny NetworkPolicy must
+		// allow on 8080 (the NodePort masquerade rewrites the source).
+		"LapiNodePort": envOr("CS_K8S_LAPI_NODEPORT", ""),
+		"ClientCIDR":   envOr("CS_K8S_CLIENT_CIDR", "10.0.0.0/8"), // go-check:ignore-ip
 		// Per-component sizing overrides on top of the profile (fit AppSec into
 		// fleets whose scheduling requests are already saturated).
 		"LapiCPU":       envOr("CS_K8S_LAPI_CPU", fmt.Sprint(prof["lapi_cpu"])),

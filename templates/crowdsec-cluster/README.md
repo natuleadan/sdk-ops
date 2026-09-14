@@ -41,6 +41,31 @@ The middleware (`<namespace>-traefik-bouncer`) uses **stream mode**: decisions
 are fetched from the LAPI every 15 s. The bouncer key is generated once and
 kept in the `crowdsec-bouncer-key` secret (re-running init reuses it).
 
+## Distributed layout (central LAPI, clients over the VLAN)
+
+One cluster host runs the engine; other hosts (bare/docker, no engine of their
+own) **consume its decisions**:
+
+1. Expose the LAPI on a NodePort and open it to the peers:
+
+   ```yaml
+   # on the k3s server host
+   services:
+     crowdsec-cluster:
+       profile: lite
+   # env when provisioning: CS_K8S_LAPI_NODEPORT=30080
+   peers:
+     - { from: edge-02, to: cp1, ports: [30080] }   # block form in the YAML
+     - { from: edge-03, to: cp1, ports: [30080] }
+   ```
+
+2. On the client hosts declare `crowdsec-bare` in **client mode** with
+   `CS_LAPI_URL=http://<cp1-vlan-ip>:30080`, the machine credentials and a
+   bouncer key created on the central (`cscli bouncers add <node>`).
+
+The central processes (parses the clients' logs, decides); each client's local
+bouncer pulls the decisions and blocks locally. See `docs/crowdsec.md`.
+
 ## Edge-first (DDoS)
 
 This stack is the **origin** layer: CrowdSec decides per request (cheap).
