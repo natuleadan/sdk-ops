@@ -764,6 +764,9 @@ sdk-ops service rollback <name> [--version v3] [--diff]  # Rollback or show diff
   --version string   Target version to rollback to (e.g. v3)
   --diff             Show changes between versions without rolling back
 sdk-ops service versions <name>                # List deployed versions
+sdk-ops service validate <name>                # Run /opt/sdk-ops/services/<name>/validate.sh (prints output + timing)
+sdk-ops service test <name>                    # Run the integration test/test.sh on the node
+sdk-ops service dr <name> backup|restore       # S3 DR: backup-s3.sh / restore-s3.sh (restore needs --yes)
 sdk-ops service rotate db <container> [flags]  # Rotate DB password
   --type string      Database type: postgres, mysql, redis, mongodb (required)
   --new-pass string  Explicit password (auto-generated if empty)

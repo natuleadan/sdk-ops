@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 	golang_ssh "golang.org/x/crypto/ssh"
@@ -922,7 +923,49 @@ Examples:
 		},
 	}
 
-	for _, sc := range []*cobra.Command{statusCmd, logsCmd, restartCmd, rollbackCmd, versionsCmd} {
+	validateCmd := &cobra.Command{
+		Use:   "validate <name>",
+		Short: "Run the service acceptance validate.sh on the node (with timing)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, user, key, port := getNodeFlags(cmd)
+			return runServiceScript(nodeIP, user, key, port, args[0], "validate")
+		},
+	}
+
+	testCmd := &cobra.Command{
+		Use:   "test <name>",
+		Short: "Run the service integration test/test.sh on the node (with timing)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, user, key, port := getNodeFlags(cmd)
+			return runServiceScript(nodeIP, user, key, port, args[0], "test")
+		},
+	}
+
+	drCmd := &cobra.Command{
+		Use:   "dr <name> [backup|restore]",
+		Short: "Run the S3 DR script shipped with the service (backup-s3.sh / restore-s3.sh)",
+		Long: `Run the disaster-recovery script that ships with a cluster service.
+
+  sdk-ops service dr pgsql-cnpg backup            # on-demand S3 backup
+  sdk-ops service dr pgsql-cnpg restore --yes     # destructive: restores the S3 dump
+
+Restore replaces the service data with the dump and requires --yes.`,
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeIP, user, key, port := getNodeFlags(cmd)
+			action := "backup"
+			if len(args) > 1 {
+				action = args[1]
+			}
+			yes, _ := cmd.Flags().GetBool("yes")
+			return runServiceDR(nodeIP, user, key, port, args[0], action, yes)
+		},
+	}
+	drCmd.Flags().Bool("yes", false, "Confirm the destructive restore (passes --yes to the script)")
+
+	for _, sc := range []*cobra.Command{statusCmd, logsCmd, restartCmd, rollbackCmd, versionsCmd, validateCmd, testCmd, drCmd} {
 		sc.Flags().StringP("node", "n", "", "Target node IP (default: first registered)")
 		sc.Flags().StringP("user", "u", "root", "SSH user")
 		sc.Flags().StringP("key", "k", "", "SSH private key path")
@@ -1084,6 +1127,81 @@ func getNodeFlags(cmd *cobra.Command) (ip, user, key string, port int) {
 		port = 22
 	}
 	return
+}
+
+// serviceScriptPath resolves the node-side script for a service command. The
+// name is validated so it can never escape the service directory.
+func serviceScriptPath(name, kind string) (string, error) {
+	if !regexp.MustCompile(`^[a-z0-9-]+$`).MatchString(name) {
+		return "", fmt.Errorf("invalid service name %q", name)
+	}
+	dir := "/opt/sdk-ops/services/" + name
+	switch kind {
+	case "validate":
+		return dir + "/validate.sh", nil
+	case "test":
+		return dir + "/test/test.sh", nil
+	case "backup", "restore":
+		return dir + "/" + kind + "-s3.sh", nil
+	default:
+		return "", fmt.Errorf("unknown script kind %q (validate, test, backup, restore)", kind)
+	}
+}
+
+// runServiceScript runs validate.sh or test/test.sh of one service and prints
+// the output plus the elapsed time.
+func runServiceScript(ip, user, key string, port int, name, kind string) error {
+	script, err := serviceScriptPath(name, kind)
+	if err != nil {
+		return err
+	}
+	return runNodeScript(ip, user, key, port, name, kind, script, "")
+}
+
+// runServiceDR runs the S3 DR script of a service. Restore is destructive and
+// requires --yes (the script also confirms with it).
+func runServiceDR(ip, user, key string, port int, name, action string, yes bool) error {
+	if action != "backup" && action != "restore" {
+		return fmt.Errorf("dr action must be backup or restore (got %q)", action)
+	}
+	script, err := serviceScriptPath(name, action)
+	if err != nil {
+		return err
+	}
+	extra := ""
+	if action == "restore" {
+		if !yes {
+			return fmt.Errorf("restore is destructive: the service data is replaced by the S3 dump, re-run with --yes")
+		}
+		extra = " --yes"
+	}
+	return runNodeScript(ip, user, key, port, name, "dr "+action, script, extra)
+}
+
+func runNodeScript(ip, user, key string, port int, name, label, script, extraArgs string) error {
+	conn, err := connectNode(ip, user, key, port)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "service: conn close error: %v\n", err)
+		}
+	}()
+	start := time.Now()
+	out, errOut, err := ssh.Run(conn, fmt.Sprintf("sudo bash %s%s", script, extraArgs))
+	if out != "" {
+		fmt.Print(out)
+	}
+	if errOut != "" {
+		fmt.Print(errOut)
+	}
+	elapsed := time.Since(start).Round(time.Millisecond)
+	if err != nil {
+		return fmt.Errorf("%s %s FAILED after %s: %w", name, label, elapsed, err)
+	}
+	fmt.Printf("[%s] %s OK in %s\n", name, label, elapsed)
+	return nil
 }
 
 func connectNode(ip, user, key string, port int) (*golang_ssh.Client, error) {
