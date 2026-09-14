@@ -279,3 +279,36 @@ needed — the CR is declarative.
 **Alternative**: create an explicit NetworkPolicy that allows ingress from
 other namespaces (more secure, more work). The `df-cluster` template uses
 the simpler `networkPolicyEnabled: false` approach.
+
+## Topology Gaps: Remote Router Targets and Jump Hosts
+
+Two capabilities are **not implemented** for the topology "edge host + other
+VPS reachable only over the private VLAN (no public IPv4/IPv6)":
+
+**1. Remote router targets.** `traefikRouterConfig` targets
+`http://localhost:<port>` on host-network nodes or `http://<service>:<port>`
+on the local docker network — there is no way to declare a backend on another
+host (`http://<vlan-ip>:<port>`). Within k3s this is a non-issue (the routers
+hit in-cluster Services, which already cross nodes over flannel); for
+docker/bare edges the remote target is missing.
+
+**2. Jump host (bastion).** The SSH layer has no `ProxyJump` support, so a
+host with no public IP cannot be reached. Backends behind the edge can still
+*consume* a central service (see the CrowdSec distributed layout:
+`docs/crowdsec.md`), but they cannot be provisioned by sdk-ops.
+
+**Workarounds today**
+
+- Keep the backends **inside the k3s cluster** (routers reach them as Services
+  over the VLAN/flannel) — the fully supported path.
+- Let the backend **consume** datastores over the VLAN (clients point at the
+  private `peer_ip`) without being provisioned by the fleet.
+- Open the specific port to the peer (`peers`, or `allowlist expose <port>
+  --ips`) when the backend runs its own proxy.
+
+**Planned**
+
+- `traefik[].target` (or per-domain backend `ip:port`) rendered into the
+  router file for remote backends.
+- `ssh_jump` / `ProxyJump` per host in the fleet YAML, threaded through the
+  SSH client and the provision fan-out.

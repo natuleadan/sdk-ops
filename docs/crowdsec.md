@@ -22,6 +22,68 @@ bouncer consumes its decisions — the multi-host / VLAN layout).
 - k3s fleets use the in-cluster Traefik as the enforcement point; host/docker
   fleets use the template that matches the mode.
 
+## Deployment matrix (validated)
+
+| Layout | Engine | Enforcement | Status |
+|---|---|---|---|
+| k3s, in-cluster ingress | `crowdsec-cluster` | L7 plugin (stream; AppSec/CRS by profile) | validated |
+| host, no proxy | `crowdsec-bare` standalone | L3/L4 nftables | validated |
+| docker host, host Traefik | `crowdsec-dockerized` | L7 plugin on the sdk-ops Traefik | template ships with docker mode |
+| one engine, many enforcers (VLAN) | central `crowdsec-cluster` + clients `crowdsec-bare` | L3/L4 per client (the central decides) | validated |
+
+## Distributed layout (one engine, many enforcers)
+
+The central engine processes (machines report their logs over the VLAN); every
+client consumes its decisions and blocks locally:
+
+```yaml
+# central (k3s server): expose the LAPI and open it to the peers
+services:
+  crowdsec-cluster:
+    profile: lite
+# provision env: CS_K8S_LAPI_NODEPORT=30080
+peers:
+  - { from: edge-02, to: cp1, ports: [30080] }
+```
+
+```bash
+# on the central, mint the per-client credentials
+cscli machines add edge-02 --password <pw>      # the agent logs in with this
+cscli bouncers add edge-02 -o raw               # the local bouncer key
+```
+
+```yaml
+# clients (any mode): consume the central's decisions
+services:
+  crowdsec-bare:
+    profile: lite
+# provision env (per-host overrides let one fleet carry several clients):
+#   CS_LAPI_URL=http://<cp1-vlan-ip>:30080
+#   CS_LAPI_USER_EDGE_02 / CS_LAPI_PASSWORD_EDGE_02 / CS_BOUNCER_KEY_EDGE_02
+```
+
+Validated on the fleet (2026-09): the central lists both machines heartbeating
+and both bouncers registered, and a decision added at the central is enforced
+by the clients' nftables within ~20 s.
+
+## Topology coverage and gaps
+
+| Topology | Covered |
+|---|---|
+| k3s multi-node over the VLAN (server + agents, flannel) | yes |
+| Backends inside the k3s cluster (cross-node flannel) | yes |
+| Client hosts consuming a central engine over the VLAN (`peer_ip`) | yes (distributed layout above) |
+| Other VPS behind an edge, reachable **only** over the VLAN | **no — see the gaps** |
+
+Two gaps block the "edge + backend VPS with no public IP" topology (tracked in
+`known-issues.md`):
+
+- **No remote router target**: Traefik routers point at `localhost:<port>`
+  (host network) or at a container on the local docker network. There is no
+  `target: http://<vlan-ip>:<port>` for a backend on another host.
+- **No jump host**: the provisioner has no `ProxyJump`/bastion support, so a
+  host without a public IP cannot be provisioned.
+
 > **Migration**: `infra init --crowdsec` no longer exists. Use a service
 > declaration instead:
 >
