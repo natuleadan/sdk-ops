@@ -51,7 +51,6 @@ Flags:
   --ssh-port int          Migrate SSH to custom port (0 = keep port 22)
   --lock-root             Lock root password after creating sdkops user
   --monitor               Install Prometheus node_exporter (port 9100)
-  --crowdsec              Install CrowdSec WAF/IPS
   --logs string           Install Promtail, ship logs to Loki URL
   --alerts string         Install Alertmanager with Slack webhook URL
   --firewall-allowlist string
@@ -85,7 +84,7 @@ Flags:
 5. SSH hardening: disable password auth, restrict root login
 6. nftables firewall: allow ports 22, 80, 443, 6443 (keep port 22 open); 9100
    is also opened when `--monitor` is set
-7. Optional: node_exporter (--monitor), CrowdSec (--crowdsec)
+7. Optional: node_exporter (--monitor)
 8. Docker install (unless --bare)
 9. k3s server + Traefik (if --k3s)
 10. Optional: Promtail (--logs), Alertmanager (--alerts)

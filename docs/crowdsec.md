@@ -1,16 +1,39 @@
 # CrowdSec (WAF/IPS) — usage
 
-`sdk-ops` deploys CrowdSec via the `crowdsec-cluster` template: **LAPI + agent**
-(helm) plus the **Traefik bouncer plugin** wired to the `web`/`websecure`
-entrypoints, and default-deny NetworkPolicies for the namespace. Everything is
-internal (ClusterIP); the only public surface stays the ingress.
+CrowdSec is a **service** (not part of hardening): declare it in the fleet YAML
+like any other datastore, one template per deployment mode. The engine is
+installed from the **pinned** apt repo (`CS_VERSION`); the previous
+`infra init --crowdsec` flag was **removed** — it installed the engine with no
+bouncer (detection without enforcement) and was never YAML-driven.
 
-- **Automatic**: the agent parses traefik access logs (the HelmChartConfig
-  enables them) into scenarios; LAPI stores decisions; the Traefik plugin
-  (stream mode, 15 s refresh) blocks matching clients with HTTP 403.
-- **Manual**: `cscli` inside the LAPI pod for ad-hoc decisions (see below).
-- No host-level CrowdSec is installed on k3s fleets — the enforcement point is
-  the in-cluster Traefik. (Host/docker fleets use the host `--crowdsec` init.)
+| Template | Mode | Enforcement |
+|---|---|---|
+| `crowdsec-cluster` | k3s | L7 WAF via the Traefik bouncer plugin (stream, AppSec/CRS by profile) |
+| `crowdsec-dockerized` | docker | L7 WAF: engine container + bouncer plugin auto-enabled on the sdk-ops Traefik |
+| `crowdsec-bare` | any (host) | L3/L4: engine + nftables firewall bouncer |
+
+Each template runs in **standalone** mode (local LAPI) or **client** mode
+(`CS_LAPI_URL` set → the local agent reports to a remote LAPI and the local
+bouncer consumes its decisions — the multi-host / VLAN layout).
+
+- **Automatic**: the agent parses the proxy access logs into scenarios; LAPI
+  stores decisions; the bouncer (plugin or nftables) blocks matching clients.
+- **Manual**: `cscli` for ad-hoc decisions (see below).
+- k3s fleets use the in-cluster Traefik as the enforcement point; host/docker
+  fleets use the template that matches the mode.
+
+> **Migration**: `infra init --crowdsec` no longer exists. Use a service
+> declaration instead:
+>
+> ```yaml
+> services:
+>   crowdsec-bare:
+>     profile: lite          # standalone (local LAPI + firewall bouncer)
+> ```
+>
+> The old flag left a bare engine (`cscli`) with no bouncer and no acquisition
+> config; to clean a host that got it, `sudo apt-get remove --purge crowdsec`
+> (or redeclare the host — the provision uninstalls undeclared services).
 
 ## Day-to-day (cscli)
 

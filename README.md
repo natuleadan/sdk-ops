@@ -270,7 +270,6 @@ s.Cluster().Scale("deploy/my-app", 5)
 | `--auditd` | `false` | Install auditd for system auditing (CIS) |
 | `--lynis` | `false` | Install Lynis security auditor |
 | `--usg` | `false` | Install Ubuntu Security Guide (CIS) |
-| `--crowdsec` | `false` | Install CrowdSec WAF/IPS |
 | `--lock-root` | `false` | Lock root password after creating sdkops user |
 | `--logs` | `""` | Install Promtail, ship logs to Loki URL |
 | `--alerts` | `""` | Install Alertmanager with Slack webhook |

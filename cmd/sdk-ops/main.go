@@ -28,7 +28,7 @@ Examples:
   sdk-ops infra init 188.xxx.xxx.xxx --user root --key ~/.ssh/id_ed25519
   sdk-ops infra init 188.xxx.xxx.xxx --docker
   sdk-ops infra init 188.xxx.xxx.xxx --bare
-  sdk-ops infra init 188.xxx.xxx.xxx --k3s --crowdsec`,
+  sdk-ops infra init 188.xxx.xxx.xxx --k3s`,
 		Version: version,
 	}
 

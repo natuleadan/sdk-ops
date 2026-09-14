@@ -36,7 +36,6 @@ type infraFlags struct {
 	key               string
 	port              int
 	mode              string // k3s, docker, bare
-	crowdsec          bool
 	airgap            bool
 	monitor           bool
 	auditd            bool
@@ -121,7 +120,6 @@ With --provider: create a VPS via API, then provision via SSH.
   --docker   Install Docker only (no k3s)
   --bare     Only harden the OS (no Docker, no k3s)
 
-  --crowdsec      Install CrowdSec WAF/IPS (suggested)
   --disable-traefik  Disable Traefik ingress in k3s
 
 Provider options:
@@ -137,7 +135,7 @@ Examples:
   sdk-ops infra init 188.xxx.xxx.xxx
   sdk-ops infra init --provider aws --plan t3.micro --location us-east-1
   sdk-ops infra init --provider vultr --plan vc2-1c-2gb --location ewr
-  sdk-ops infra init 188.xxx.xxx.xxx --docker --crowdsec`,
+  sdk-ops infra init 188.xxx.xxx.xxx --docker`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cobraCmd *cobra.Command, args []string) error {
 			ip := ""
@@ -149,7 +147,6 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&f.mode, "mode", "k3s", "Installation mode: k3s, docker, bare")
-	cmd.Flags().BoolVar(&f.crowdsec, "crowdsec", false, "Install CrowdSec (WAF/IPS)")
 	cmd.Flags().BoolVar(&f.monitor, "monitor", false, "Install Prometheus node_exporter (port 9100)")
 	cmd.Flags().BoolVar(&f.auditd, "auditd", false, "Install auditd for system auditing (CIS)")
 	cmd.Flags().BoolVar(&f.lynis, "lynis", false, "Install Lynis security auditor")
@@ -1973,23 +1970,6 @@ func reconnectAfterHardening(ip string, f infraFlags, hardCfg hardening.Config) 
 	return nil, fmt.Errorf("reconnect: exceeded retries")
 }
 
-func askAndInstallCrowdsec(conn *golang_ssh.Client, f infraFlags) error {
-	if !f.crowdsec && term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Print("  ? Install CrowdSec (WAF/IPS)? [Y/n]: ")
-		var resp string
-		if _, err := fmt.Scanln(&resp); err != nil {
-			log.Printf("infra: scan error: %v", err)
-		}
-		if resp == "" || resp == "y" || resp == "Y" || resp == "yes" {
-			f.crowdsec = true
-		}
-	}
-	if f.crowdsec {
-		return installCrowdSec(conn)
-	}
-	return nil
-}
-
 func runInfraInitSSH(ip string, f infraFlags) error {
 	client := infraSSHClient(ip, f.user, f.port, f)
 
@@ -2017,10 +1997,6 @@ func runInfraInitSSH(ip string, f infraFlags) error {
 			fmt.Fprintf(os.Stderr, "infra: conn close error: %v\n", err)
 		}
 	}()
-
-	if err := askAndInstallCrowdsec(conn, f); err != nil {
-		return err
-	}
 
 	switch f.mode {
 	case "k3s":
@@ -2332,27 +2308,6 @@ func runInfraJoin(serverIP, agentIP, serverUser, token string, f infraFlags) err
 
 	fmt.Printf("\n[OK] Node %s joined to %s\n", agentIP, serverIP)
 	fmt.Printf("   Run: export KUBECONFIG=%s\n", f.kubeconfig)
-	return nil
-}
-
-func installCrowdSec(conn *golang_ssh.Client) error {
-	fmt.Println("  -> Installing CrowdSec...")
-	script := `#!/bin/bash
-set -euo pipefail
-if command -v cscli &>/dev/null; then
-    echo "CrowdSec already installed"
-    exit 0
-fi
-curl -fsSL https://install.crowdsec.net | sudo sh
-sudo systemctl enable crowdsec
-sudo systemctl start crowdsec
-echo "CrowdSec installed"
-`
-	out, _, err := ssh.Run(conn, script)
-	if err != nil {
-		return fmt.Errorf("crowdsec install failed: %w\noutput: %s", err, out)
-	}
-	fmt.Print(out)
 	return nil
 }
 

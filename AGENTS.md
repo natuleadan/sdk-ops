@@ -120,7 +120,6 @@ Full reference: `docs/commands.md`. Categories:
 | `--auditd` | false | Install auditd (CIS) |
 | `--lynis` | false | Install Lynis security auditor |
 | `--usg` | false | Install Ubuntu Security Guide (CIS) |
-| `--crowdsec` | false | Install CrowdSec WAF/IPS |
 | `--insecure` | false | Skip SSH host key verification (env: `SDK_OPS_SSH_STRICT_HOST_KEY=true` for strict) |
 | `--lock-root` | false | Lock root password |
 | `--logs` | "" | Install Promtail to Loki URL |

@@ -13,7 +13,7 @@ This project follows [Conventional Commits](https://www.conventionalcommits.org/
 ### Examples
 
 ```
-feat(cli): add --crowdsec flag to infra init
+feat(cli): add --monitor flag to infra init
 fix(ssh): handle reconnection after port change
 chore(readme): update installation guide
 test(deploy): add unit tests for rollback

@@ -7,7 +7,7 @@ Thanks for your interest in contributing to sdk-ops!
 Every commit must follow `type(scope): description` with a **required scope**.
 
 ```
-feat(cli): add --crowdsec flag to infra init
+feat(cli): add --monitor flag to infra init
 fix(ssh): handle reconnection after port change
 ```
 
