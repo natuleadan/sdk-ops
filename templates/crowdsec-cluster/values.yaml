@@ -34,6 +34,15 @@ agent:
 {{ if .AppSecEnabled }}
 appsec:
   enabled: true
+  # The chart defaults (500m/250Mi) do not fit small fleets: template them so
+  # the WAF can be sized per host like the rest of the components.
+  resources:
+    requests:
+      cpu: {{ .AppSecCPU }}
+      memory: {{ .AppSecMem }}
+    limits:
+      cpu: {{ .AppSecCPULimit }}
+      memory: {{ .AppSecMemLimit }}
   acquisitions:
     - source: appsec
       listen_addr: "0.0.0.0:7422"

@@ -806,10 +806,16 @@ func crowdsecClusterRenderData(prof map[string]any) (map[string]any, error) {
 		"AgentCPULimit": envOr("CS_K8S_AGENT_CPU_LIMIT", fmt.Sprint(prof["agent_cpu_limit"])),
 		"AgentMem":      envOr("CS_K8S_AGENT_MEM", fmt.Sprint(prof["agent_mem"])),
 		"AgentMemLimit": envOr("CS_K8S_AGENT_MEM_LIMIT", fmt.Sprint(prof["agent_mem_limit"])),
-		"AppSecEnabled": fmt.Sprint(prof["appsec"]) == "true",
-		"PodCIDR":       envOr("CS_K8S_POD_CIDR", "10.42.0.0/16"),                           // go-check:ignore-ip
-		"TrustedCIDRs":  splitCsv(envOr("CS_K8S_TRUSTED_CIDRS", "10.0.0.0/8,10.42.0.0/16")), // go-check:ignore-ip
-		"Provision":     true,
+		// The AppSec component (chart default 500m/250Mi) is templated too:
+		// small fleets need it to fit alongside the rest of the cluster.
+		"AppSecCPU":      envOr("CS_K8S_APPSEC_CPU", "100m"),
+		"AppSecCPULimit": envOr("CS_K8S_APPSEC_CPU_LIMIT", "500m"),
+		"AppSecMem":      envOr("CS_K8S_APPSEC_MEM", "128Mi"),
+		"AppSecMemLimit": envOr("CS_K8S_APPSEC_MEM_LIMIT", "256Mi"),
+		"AppSecEnabled":  fmt.Sprint(prof["appsec"]) == "true",
+		"PodCIDR":        envOr("CS_K8S_POD_CIDR", "10.42.0.0/16"),                           // go-check:ignore-ip
+		"TrustedCIDRs":   splitCsv(envOr("CS_K8S_TRUSTED_CIDRS", "10.0.0.0/8,10.42.0.0/16")), // go-check:ignore-ip
+		"Provision":      true,
 	}, nil
 }
 

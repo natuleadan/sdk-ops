@@ -79,6 +79,7 @@ func TestCrowdsecSizingOverrides(t *testing.T) {
 	}
 	t.Setenv("CS_K8S_LAPI_CPU", "150m")
 	t.Setenv("CS_K8S_AGENT_MEM", "96Mi")
+	t.Setenv("CS_K8S_APPSEC_CPU", "50m")
 	data, err := crowdsecClusterRenderData(prof)
 	if err != nil {
 		t.Fatalf("render: %v", err)
@@ -88,6 +89,12 @@ func TestCrowdsecSizingOverrides(t *testing.T) {
 	}
 	if data["AgentMem"] != "96Mi" {
 		t.Errorf("AgentMem override not honored: %v", data["AgentMem"])
+	}
+	if data["AppSecCPU"] != "50m" {
+		t.Errorf("AppSecCPU override not honored: %v", data["AppSecCPU"])
+	}
+	if data["AppSecMem"] != "128Mi" {
+		t.Errorf("AppSecMem default broken: %v", data["AppSecMem"])
 	}
 	if data["LapiMem"] != "256Mi" || data["AgentCPU"] != "250m" {
 		t.Errorf("profile fallback broken: lapi_mem=%v agent_cpu=%v", data["LapiMem"], data["AgentCPU"])
