@@ -334,3 +334,9 @@ ssh root@<ip> "cd /root/pg && bash init.sh"
 +-- backups/
 +-- logs/
 ```
+
+## Host runtime inventory
+
+Everything the provision leaves running on a host (timers, watchdogs, scripts,
+and how to audit or remove them) is documented in
+[`docs/host-runtime.md`](host-runtime.md).
