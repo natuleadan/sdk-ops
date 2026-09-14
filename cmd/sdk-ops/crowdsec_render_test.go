@@ -73,13 +73,19 @@ func TestCrowdsecClusterUninstallAndOrder(t *testing.T) {
 	}
 }
 
-// TestCrowdsecBareRenderData locks the standalone/client switch and the
-// profile mapping of the bare template, and asserts the embedded template
-// renders cleanly in both modes (a syntax error would fail the deploy late).
-func TestCrowdsecBareRenderData(t *testing.T) {
-	prof := map[string]any{"mem_limit": "256M", "cpu_quota": "50%", "collections": "crowdsecurity/linux crowdsecurity/sshd"}
+// crowdsecBareProf is the profile fixture for the bare-template tests.
+func crowdsecBareProf() map[string]any {
+	return map[string]any{
+		"mem_limit":   "256M",
+		"cpu_quota":   "50%",
+		"collections": "crowdsecurity/linux crowdsecurity/sshd",
+	}
+}
+
+// TestCrowdsecBareStandalone locks the standalone defaults (no CS_LAPI_URL).
+func TestCrowdsecBareStandalone(t *testing.T) {
 	h := ProvisionHost{Name: "mia-02"}
-	data, err := crowdsecBareRenderData(ProvisionFile{}, h, prof, ServiceConfig{Profile: "lite"})
+	data, err := crowdsecBareRenderData(ProvisionFile{}, h, crowdsecBareProf(), ServiceConfig{Profile: "lite"})
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -95,10 +101,15 @@ func TestCrowdsecBareRenderData(t *testing.T) {
 	if data["LapiListen"] != "127.0.0.1:8080" {
 		t.Errorf("lapi listen default = %v", data["LapiListen"])
 	}
+}
 
+// TestCrowdsecBareClientMode asserts CS_LAPI_URL switches to client mode and
+// that the rendered init.sh carries the client flag (a template regression
+// would otherwise only fail at deploy time).
+func TestCrowdsecBareClientMode(t *testing.T) {
 	t.Setenv("CS_LAPI_URL", "http://192.0.2.10:30080")
 	t.Setenv("CS_VERSION", "1.8.2")
-	data, err = crowdsecBareRenderData(ProvisionFile{}, h, prof, ServiceConfig{Profile: "lite"})
+	data, err := crowdsecBareRenderData(ProvisionFile{}, ProvisionHost{Name: "mia-02"}, crowdsecBareProf(), ServiceConfig{Profile: "lite"})
 	if err != nil {
 		t.Fatalf("render client: %v", err)
 	}
