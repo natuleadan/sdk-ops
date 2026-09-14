@@ -76,3 +76,7 @@ manual removal also drops the traefik addon override:
 - The plugin is a **community** traefik plugin (not first-party CrowdSec).
 - `lite` + AppSec off keeps the 2 GiB nodes comfortable; enable AppSec only
   where the node has headroom.
+- The init installs **two phased**: the LAPI first (agents disabled), and only
+  then enables the agents. The agents' registration init does not give up when
+  the LAPI is missing, and on small nodes that retry loop saturates the disk
+  and can take the kube-apiserver down — never start agents before the LAPI.

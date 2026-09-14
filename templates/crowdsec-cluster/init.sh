@@ -26,14 +26,29 @@ fail() { echo "[crowdsec-cluster] FAIL: $1"; exit 1; }
 command -v helm >/dev/null 2>&1 || fail "helm not found - run the fleet provision (it installs helm on k3s hosts)"
 helm version --short 2>/dev/null | grep -q "$HELM_VER" || log "warn: helm $HELM_VER expected, got $(helm version --short 2>/dev/null || echo none)"
 
-# 2. Namespace + chart repo + release (all idempotent).
+# 2. Namespace + chart repo + release (all idempotent). Two phases on purpose:
+#    the agents' init registers against the LAPI and DOES NOT give up when it
+#    is not up yet — on small nodes that retry loop saturates the disk and can
+#    take the kube-apiserver down. Bring the LAPI up alone first, then enable
+#    the agents against a live LAPI (queued, no registration storm).
 $KUBECTL get namespace "$NS" >/dev/null 2>&1 || $KUBECTL create namespace "$NS" >/dev/null
 helm repo add crowdsec https://crowdsecurity.github.io/helm-charts >/dev/null 2>&1 || true
 helm repo update >/dev/null 2>&1 || true
-log "installing CrowdSec ($REL in $NS)"
-helm upgrade --install "$REL" crowdsec/crowdsec -n "$NS" -f "$DIR/values.yaml" >/dev/null || fail "helm crowdsec"
+log "installing CrowdSec ($REL in $NS, phase 1/2: lapi)"
+helm upgrade --install "$REL" crowdsec/crowdsec -n "$NS" -f "$DIR/values.yaml" --set agent.enabled=false >/dev/null || fail "helm crowdsec (lapi)"
 log "waiting for LAPI rollout"
-$KUBECTL -n "$NS" rollout status "deploy/$REL-lapi" --timeout=420s >/dev/null || fail "lapi rollout"
+lapi_ok=0
+for i in 1 2 3; do
+  if $KUBECTL -n "$NS" rollout status "deploy/$REL-lapi" --timeout=600s >/dev/null 2>&1; then
+    lapi_ok=1
+    break
+  fi
+  log "LAPI rollout retry $i (images pulling on a slow node?)"
+  helm upgrade --install "$REL" crowdsec/crowdsec -n "$NS" -f "$DIR/values.yaml" --set agent.enabled=false >/dev/null 2>&1 || true
+done
+[ "$lapi_ok" = 1 ] || fail "lapi rollout"
+log "enabling agents (phase 2/2)"
+helm upgrade --install "$REL" crowdsec/crowdsec -n "$NS" -f "$DIR/values.yaml" >/dev/null || fail "helm crowdsec (agents)"
 $KUBECTL -n "$NS" rollout status "daemonset/$REL-agent" --timeout=300s >/dev/null 2>&1 \
   || $KUBECTL -n "$NS" rollout status "deploy/$REL-agent" --timeout=300s >/dev/null 2>&1 \
   || log "warn: agent rollout not confirmed (continuing)"
