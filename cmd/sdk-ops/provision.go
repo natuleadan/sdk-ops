@@ -2147,7 +2147,28 @@ func k3sClusterJoin(pf ProvisionFile, hosts []ProvisionHost) error {
 		}
 	}
 	// Every fleet host must show up Ready (retries: raft/agent convergence).
-	return waitForFleetReady(serverConn, len(hosts))
+	if err := waitForFleetReady(serverConn, len(hosts)); err != nil {
+		return err
+	}
+	// Agents create flannel.1 when they join, which can happen AFTER the host
+	// tuning phase ran: re-apply the vxlan/underlay offload fix now that every
+	// device exists. virtio-net leaves the inner vxlan checksum incomplete
+	// otherwise and receivers drop the corrupted packets as invalid conntrack
+	// (symptom: same-node pod traffic works, cross-node times out).
+	for _, h := range hosts {
+		conn, err := infraConnect(h.Host, &infraFlags{
+			user: fleetUser(h), key: h.SSHKey, port: hostPort(&h), noHardening: true,
+		})
+		if err != nil {
+			return fmt.Errorf("net tuning %s: %w", h.Name, err)
+		}
+		err = k3s.EnsureNetOffloadsOff(conn, pf.K3sIface)
+		closeConn(conn)
+		if err != nil {
+			return fmt.Errorf("net tuning %s: %w", h.Name, err)
+		}
+	}
+	return nil
 }
 
 // k3sReadyNodeIPs snapshots the Ready nodes' internal IPs from the server.
