@@ -19,6 +19,9 @@ if [ ! -f "$PGDATA/PG_VERSION" ]; then
   cat > "$PGDATA/postgresql.auto.conf" << EOF
 primary_conninfo = 'host=$PRIMARY_HOST port=$PRIMARY_PORT user=replicator password=$REPLICATOR_PASSWORD sslmode=prefer'
 EOF
+  if [ -n "${PRIMARY_SLOT_NAME:-}" ]; then
+    printf "\nprimary_slot_name = '%s'\n" "$PRIMARY_SLOT_NAME" >> "$PGDATA/postgresql.auto.conf"
+  fi
   chown -R 70:70 "$PGDATA"
   chmod 755 "$(dirname "$PGDATA")"
   echo "Replica: clone complete, starting standby"

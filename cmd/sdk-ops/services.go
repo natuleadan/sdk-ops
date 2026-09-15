@@ -249,6 +249,8 @@ func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg Ser
 		return wireValkeyOn(conn, svcDir)
 	case "df-cluster", "df-dockerized":
 		return wireDFOn(conn, svcDir)
+	case "pgsql-docker":
+		return wirePGDockerOn(conn, svcDir)
 	case "crowdsec-bare", "crowdsec-dockerized":
 		return wireCrowdsecClientEnvOn(conn, svcDir, nodeName)
 	default:
@@ -313,6 +315,36 @@ func wireValkeyOn(conn *golang_ssh.Client, svcDir string) error {
 	cmd := fmt.Sprintf("umask 077; cat > %s/.env <<'SDKOPS_VK_ENV'\n%s\nSDKOPS_VK_ENV", svcDir, strings.Join(lines, "\n"))
 	if _, _, err := ssh.Run(conn, cmd); err != nil {
 		return fmt.Errorf("write valkey-cluster .env: %w", err)
+	}
+	return nil
+}
+
+// wirePGDockerOn writes the pgsql-docker .env (db credentials + S3) the
+// compose stack (via ${VAR} interpolation from init.sh, which auto-exports
+// the file) and the per-service scripts consume. Secrets never live in the
+// fleet YAML.
+func wirePGDockerOn(conn *golang_ssh.Client, svcDir string) error {
+	pick := func(key, def string) string {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+		return def
+	}
+	lines := []string{
+		fmt.Sprintf("PG_USER='%s'", strings.ReplaceAll(pick("PG_USER", "dev"), "'", `'\''`)),
+		fmt.Sprintf("PG_PASSWORD='%s'", strings.ReplaceAll(pick("PG_PASSWORD", "devpass"), "'", `'\''`)),
+		fmt.Sprintf("PG_DATABASE='%s'", strings.ReplaceAll(pick("PG_DATABASE", "postgres"), "'", `'\''`)),
+		fmt.Sprintf("REPLICATOR_PASSWORD='%s'", strings.ReplaceAll(pick("REPLICATOR_PASSWORD", "replicatorpass"), "'", `'\''`)),
+	}
+	for _, k := range []string{"S3_ENDPOINT", "S3_BUCKET", "S3_KEY", "S3_SECRET", "S3_REGION"} {
+		if v := os.Getenv(k); v != "" {
+			v = strings.ReplaceAll(v, "'", `'\''`)
+			lines = append(lines, fmt.Sprintf("%s='%s'", k, v))
+		}
+	}
+	cmd := fmt.Sprintf("umask 077; cat > %s/.env <<'SDKOPS_PG_ENV'\n%s\nSDKOPS_PG_ENV", svcDir, strings.Join(lines, "\n"))
+	if _, _, err := ssh.Run(conn, cmd); err != nil {
+		return fmt.Errorf("write pgsql-docker .env: %w", err)
 	}
 	return nil
 }

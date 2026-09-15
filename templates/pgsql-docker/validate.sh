@@ -2,6 +2,9 @@
 # pgsql-docker validate — all checks inside Docker
 set -e
 
+SVC_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SVC_DIR/.env" ]; then set -a; . "$SVC_DIR/.env"; set +a; fi
+
 CONTAINER="${CONTAINER:-pgsql-docker-postgres-1}"
 PG_USER="${PG_USER:-dev}"
 PG_PASSWORD="${PG_PASSWORD:-devpass}"
@@ -13,13 +16,13 @@ PSQL_D() { docker exec -e PGPASSWORD="$PG_PASSWORD" pgsql-docker-postgres-1 psql
 echo "=== pgsql-docker validate ==="
 
 echo -n "Primary: "
-docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" pg_isready -U "$PG_USER" -h localhost -q && echo "OK" || echo "FAIL"
+docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" pg_isready -U "$PG_USER" -d "$PG_DATABASE" -h localhost -q && echo "OK" || echo "FAIL"
 
 echo -n "Replica-1: "
-docker exec -e PGPASSWORD="$PG_PASSWORD" pgsql-docker-pg-replica-1 pg_isready -U "$PG_USER" -h localhost -q && echo "OK" || echo "FAIL"
+docker exec -e PGPASSWORD="$PG_PASSWORD" pgsql-docker-pg-replica-1 pg_isready -U "$PG_USER" -d "$PG_DATABASE" -h localhost -q && echo "OK" || echo "FAIL"
 
 echo -n "Replica-2: "
-docker compose exec -e PGPASSWORD="$PG_PASSWORD" pg-replica-2 pg_isready -U "$PG_USER" -h localhost -q 2>/dev/null && echo "OK" || echo "FAIL"
+docker exec -e PGPASSWORD="$PG_PASSWORD" pgsql-docker-pg-replica-2-1 pg_isready -U "$PG_USER" -d "$PG_DATABASE" -h localhost -q 2>/dev/null && echo "OK" || echo "FAIL"
 
 echo -n "PgDog: "
 docker exec -e PGPASSWORD="$PG_PASSWORD" pgsql-docker-postgres-1 psql -U "$PG_USER" -h pgdog -p 6432 -d "$PG_DATABASE" -tAc "SELECT 1" 2>/dev/null | grep -q "1" && echo "OK" || echo "FAIL"

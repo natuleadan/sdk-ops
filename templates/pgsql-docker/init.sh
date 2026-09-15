@@ -2,6 +2,12 @@
 # pgsql-docker init — PostgreSQL 18 + PgDog + SSL + pgbackrest (local or S3)
 set -e
 
+# Secrets written by the provision into .env (0600). Scripts run over SSH with
+# a bare environment (sudo strips it): auto-export the file so both this shell
+# and the compose ${VAR} interpolation below see the operator values.
+SVC_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SVC_DIR/.env" ]; then set -a; . "$SVC_DIR/.env"; set +a; fi
+
 PG_USER="${PG_USER:-dev}"
 PG_PASSWORD="${PG_PASSWORD:-devpass}"
 PG_DATABASE="${PG_DATABASE:-postgres}"
@@ -30,6 +36,12 @@ if [ ! -f ssl/server.key ]; then
     chown -R 70:70 /ssl && chmod 600 /ssl/server.key && chmod 644 /ssl/server.crt
   ' 2>/dev/null
 fi
+# SSL key ownership on EVERY run (not just at generation): uploads normalize
+# ownership to the ssh user and postgres refuses a key it doesn't own
+# ("must be owned by the database user or root" -> crash loop).
+chown 70:70 ssl/server.key ssl/server.crt ssl/root.crt 2>/dev/null || true
+chmod 600 ssl/server.key 2>/dev/null || true
+chmod 644 ssl/server.crt ssl/root.crt 2>/dev/null || true
 
 # Replace placeholders in config files (cross-platform sed)
 _ni() { sed -i.bak "$1" "$2" && rm -f "${2}.bak"; }
@@ -44,42 +56,34 @@ done
 # Configure pgbackrest storage backend
 if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_BUCKET" ] && [ -n "$S3_KEY" ] && [ -n "$S3_SECRET" ]; then
   echo "Backup: S3 ($S3_ENDPOINT/$S3_BUCKET)"
+  # Canonical repo schema ([global] repo1-*): a [stanza:storage] section with
+  # bare type=/s3- keys is silently IGNORED and backups land local.
+  S3_HOST="$(printf '%s' "$S3_ENDPOINT" | sed -E 's#^https?://##; s#/$##')"
   cat > pgbackrest.conf << EOF
-[pgbackrest]
+[global]
 compress-type=zst
 compress-level=3
 process-max=2
 start-fast=y
-buffer-path=/tmp
-
-[main]
-pg1-path=/var/lib/postgresql/18/docker
-pg1-port=5432
-pg1-user=$PG_USER
-
-repo1-path=/var/lib/pgbackrest
+log-level-console=warn
+spool-path=/var/spool/pgbackrest
+repo1-type=s3
+repo1-path=/pgbackrest
+repo1-s3-bucket=$S3_BUCKET
+repo1-s3-endpoint=$S3_HOST
+repo1-s3-region=${S3_REGION:-auto}
+repo1-s3-key=$S3_KEY
+repo1-s3-key-secret=$S3_SECRET
 repo1-retention-full=2
 repo1-retention-diff=4
 repo1-cipher-type=none
 repo1-bundle=y
 repo1-block=y
 
-[global]
-spool-path=/var/spool/pgbackrest
-
-[global:archive-push]
-compress-level=1
-
-[global:archive-get]
-compress-level=1
-
-[main:storage]
-type=s3
-s3-bucket=$S3_BUCKET
-s3-region=$S3_REGION
-s3-endpoint=$S3_ENDPOINT
-s3-key=$S3_KEY
-s3-key-secret=$S3_SECRET
+[main]
+pg1-path=/var/lib/postgresql/18/docker
+pg1-port=5432
+pg1-user=$PG_USER
 EOF
 else
   echo "Backup: local (/var/lib/pgbackrest)"
@@ -101,7 +105,10 @@ docker compose up -d --force-recreate postgres 2>&1 | tail -3
 
 # Wait for PostgreSQL
 echo "Waiting for PostgreSQL..."
-until docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" pg_isready -U "$PG_USER" -h localhost 2>/dev/null; do
+tries=0
+until docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" pg_isready -U "$PG_USER" -d "$PG_DATABASE" -h localhost 2>/dev/null; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 60 ]; then echo " FAIL: primary never ready"; exit 1; fi
   sleep 2
 done
 echo "  PostgreSQL ready"
@@ -123,10 +130,21 @@ docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" psql -U "$PG_USER" -d "$PG
   docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" psql -U "$PG_USER" -d "$PG_DATABASE" -h localhost -c \
     "CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD '${REPLICATOR_PASSWORD:-replicatorpass}';" 2>&1 | tail -1
 }
+# Converge the password every run (self-heals drift, enables rotation).
+docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" psql -U "$PG_USER" -d "$PG_DATABASE" -h localhost -c \
+  "ALTER ROLE replicator WITH PASSWORD '${REPLICATOR_PASSWORD:-replicatorpass}';" 2>&1 | tail -1
 docker exec "$CONTAINER" sh -c \
-  "echo 'host replication replicator 0.0.0.0/0 scram-sha-256' >> /var/lib/postgresql/18/docker/pg_hba.conf"
+  "grep -q 'host replication replicator' /var/lib/postgresql/18/docker/pg_hba.conf || echo 'host replication replicator 0.0.0.0/0 scram-sha-256' >> /var/lib/postgresql/18/docker/pg_hba.conf"
 docker exec "$CONTAINER" psql -U "$PG_USER" -d "$PG_DATABASE" -h localhost -c "SELECT pg_reload_conf();" 2>&1 | tail -1
 echo "  Replication user: replicator"
+
+# Physical replication slots (idempotent): without them the primary recycles
+# WAL the standbys still need and they stall forever ("already been removed").
+for SLOT in rep1 rep2; do
+  docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" psql -U "$PG_USER" -d "$PG_DATABASE" -h localhost -tAc \
+    "SELECT pg_create_physical_replication_slot('$SLOT') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = '$SLOT')" 2>&1 | tail -1
+done
+echo "  Replication slots: rep1 rep2"
 
 # Create pgbackrest stanza (idempotent — already exists / no backup yet is OK;
 # never fail the init over the stanza: replicas must still come up).
@@ -146,7 +164,10 @@ echo "Starting replicas..."
 docker compose up -d pg-replica pg-replica-2 2>&1 | tail -3
 echo "  Waiting for replicas..."
 for REP in pg-replica pg-replica-2; do
-  until docker compose exec -e PGPASSWORD="$PG_PASSWORD" "$REP" pg_isready -U "$PG_USER" -h localhost 2>/dev/null; do
+  tries=0
+  until docker compose exec -e PGPASSWORD="$PG_PASSWORD" "$REP" pg_isready -U "$PG_USER" -d "$PG_DATABASE" -h localhost 2>/dev/null; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 24 ]; then echo " FAIL: $REP never ready (after a restore, wipe data/$REP with the container stopped and restart to reclone)"; exit 1; fi
     sleep 5
   done
   echo "  $REP ready"

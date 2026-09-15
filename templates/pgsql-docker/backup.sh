@@ -2,6 +2,9 @@
 # pgsql-docker backup — pgbackrest full backup to local or S3 storage
 set -e
 
+SVC_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SVC_DIR/.env" ]; then set -a; . "$SVC_DIR/.env"; set +a; fi
+
 CONTAINER="${CONTAINER:-pgsql-docker-postgres-1}"
 PG_USER="${PG_USER:-dev}"
 PG_PASSWORD="${PG_PASSWORD:-devpass}"
