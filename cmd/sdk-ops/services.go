@@ -85,6 +85,12 @@ var serviceUninstalls = map[string]serviceUninstall{
 		"sudo /usr/local/bin/helm uninstall nats -n nats 2>/dev/null || true",
 		"sudo k3s kubectl delete ns nats --force --grace-period=0 2>/dev/null || true",
 	}},
+	// nats (dockerized) owns systemd timers (validate every 5m, backup daily)
+	// that must die with the service, or they fire against a removed dir.
+	"nats": {units: []string{
+		"nats-validate.timer", "nats-validate.service",
+		"nats-backup.timer", "nats-backup.service",
+	}},
 	"etcd-cluster": {script: []string{
 		"sudo /usr/local/bin/helm uninstall etcd -n etcd 2>/dev/null || true",
 		"sudo k3s kubectl delete ns etcd --force --grace-period=0 2>/dev/null || true",
