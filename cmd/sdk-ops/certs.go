@@ -292,6 +292,12 @@ func newCertsImportCmd(f *infraFlags, cf *certsFlags) *cobra.Command {
 	return cmd
 }
 
+// certFileSlug maps a domain to its conf.d snippet name (dots are not valid
+// in all file-provider contexts; mirrors the provision router filenames).
+func certFileSlug(domain string) string {
+	return strings.ReplaceAll(domain, ".", "_")
+}
+
 // refreshServicesBash copies the store cert into each consuming service and
 // reloads it. Used by `certs import` (one-shot manual certs).
 func refreshServicesBash(domain string, services []string) string {
@@ -308,7 +314,11 @@ func refreshServicesBash(domain string, services []string) string {
 			b.WriteString("sudo mkdir -p /opt/traefik/certs/" + domain + "\n")
 			b.WriteString("sudo cp /etc/sdk-ops/certs/" + domain + "/fullchain.pem /opt/traefik/certs/" + domain + "/fullchain.pem\n")
 			b.WriteString("sudo cp /etc/sdk-ops/certs/" + domain + "/privkey.pem /opt/traefik/certs/" + domain + "/privkey.pem\n")
-			b.WriteString("sudo docker restart traefik 2>/dev/null || true\n")
+			// Wire the cert into Traefik's file provider (hot-loaded, no
+			// restart): the store files alone are never served.
+			b.WriteString("sudo tee /etc/traefik/conf.d/tls-" + certFileSlug(domain) + ".yml > /dev/null << 'TLSEOF'\n")
+			b.WriteString("tls:\n  certificates:\n    - certFile: /opt/traefik/certs/" + domain + "/fullchain.pem\n      keyFile: /opt/traefik/certs/" + domain + "/privkey.pem\n")
+			b.WriteString("TLSEOF\n")
 		}
 	}
 	return b.String()
@@ -410,7 +420,10 @@ func newCertsRemoveCmd(f *infraFlags, cf *certsFlags) *cobra.Command {
 			if domain != "" {
 				remote := "sudo rm -f /etc/sdk-ops/certs/" + domain + ".json\n" +
 					"sudo rm -f /etc/traefik/conf.d/acme-" + domain + ".yml\n" +
+					"sudo rm -f /etc/traefik/conf.d/tls-" + certFileSlug(domain) + ".yml\n" +
+					"sudo rm -f /etc/traefik/conf.d/" + certFileSlug(domain) + ".yml\n" +
 					"sudo rm -rf /etc/sdk-ops/certs/" + domain + "\n" +
+					"sudo rm -rf /opt/traefik/certs/" + domain + "\n" +
 					"echo 'domain removed'"
 				if out, _, err := ssh.Run(conn, remote); err != nil {
 					return fmt.Errorf("remove domain: %w\n%s", err, out)
