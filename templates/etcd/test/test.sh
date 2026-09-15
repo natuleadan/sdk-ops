@@ -20,7 +20,7 @@ bad()  { echo "  [FAIL] $*"; FAIL=1; }
 skip() { echo "  [SKIP] $*"; }
 
 # Resolve the local etcd container dynamically (never hardcode suffixes).
-LOCAL_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E 'etcd' | head -1)
+LOCAL_CONTAINER=$(docker ps --format '{{"{{"}}.Names{{"}}"}}' 2>/dev/null | grep -E 'etcd' | head -1)
 ECTL_LOCAL() { docker exec "$LOCAL_CONTAINER" etcdctl --endpoints=127.0.0.1:2379 --command-timeout=6s "$@"; }
 # Cross-host etcdctl via a throwaway container on the host network.
 ECTL_REMOTE() { docker run --rm --network host "$ETCD_IMAGE" etcdctl --command-timeout=6s "$@"; }

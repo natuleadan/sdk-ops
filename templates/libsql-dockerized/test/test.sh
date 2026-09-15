@@ -19,11 +19,11 @@ echo "--- Step 1: Verify services ---"
 # docker ps (not compose ps): after a failover the controller recreates the
 # sqld containers via `docker run` (same labels, but not compose-managed), so
 # `docker compose ps` only lists etcd/router/controller. docker ps sees all.
-docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^$PRIMARY_CONTAINER$" || {
+docker ps --format '{{"{{"}}.Names{{"}}"}}' 2>/dev/null | grep -q "^$PRIMARY_CONTAINER$" || {
   echo "ERROR: primary container not running"
   exit 1
 }
-docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^$REPLICA_CONTAINER$" || {
+docker ps --format '{{"{{"}}.Names{{"}}"}}' 2>/dev/null | grep -q "^$REPLICA_CONTAINER$" || {
   echo "ERROR: replica container not running"
   exit 1
 }
