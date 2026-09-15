@@ -2,6 +2,9 @@
 # pgsql-docker restore — pgbackrest restore with PITR support
 set -e
 
+SVC_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SVC_DIR/.env" ]; then set -a; . "$SVC_DIR/.env"; set +a; fi
+
 CONTAINER="${CONTAINER:-pgsql-docker-postgres-1}"
 PG_USER="${PG_USER:-dev}"
 PG_PASSWORD="${PG_PASSWORD:-devpass}"
@@ -64,13 +67,17 @@ fi
 
 case "$MODE" in
   latest)
-    ARGS="--stanza=$STANZA --db-path=/var/lib/postgresql/18/docker --type=none"
-    echo "Target: latest backup"
+    # --type=immediate: recover to the backup consistency point and promote
+    # (new timeline, no WAL replay past it). This pins data at the backup
+    # moment AND keeps the archive consistent (no resetwal, no diverged
+    # segments wedging the archiver).
+    ARGS="--stanza=$STANZA --db-path=/var/lib/postgresql/18/docker --type=immediate"
+    echo "Target: latest backup (recover to consistency, then promote)"
     ;;
   full)
     BACKUP_SET=$(docker exec -e PGPASSWORD="$PG_PASSWORD" $CONTAINER pgbackrest --stanza=$STANZA info 2>/dev/null | grep -oE 'full backup: [0-9T\-]+' | tail -1 | cut -d' ' -f3)
-    ARGS="$ARGS --set=$BACKUP_SET"
-    echo "Target: full backup $BACKUP_SET"
+    ARGS="$ARGS --set=$BACKUP_SET --type=immediate"
+    echo "Target: full backup $BACKUP_SET (recover to consistency, then promote)"
     ;;
   pitr)
     if [ -z "$TARGET" ]; then
@@ -102,29 +109,60 @@ docker compose -f "$COMPOSE_DIR/docker-compose.yml" stop postgres 2>&1 | tail -1
 echo "Removing old data..."
 rm -rf "$COMPOSE_DIR/data/pg/18/docker"
 
-# Run restore via temporary container with same volumes
+# Run restore with the same postgres image the service uses (it carries
+# pgbackrest) and the stopped primary's volumes (data + pgbackrest.conf).
+# A named helper image does not exist - a previous revision tried
+# `docker run pgsql-docker:latest` here, which always failed and then
+# reported success on an empty datadir.
 echo "Running pgbackrest restore..."
-docker run --rm \
-  -v "$COMPOSE_DIR/data/pg:/var/lib/postgresql" \
-  -v "$COMPOSE_DIR/data/pgbackrest:/var/lib/pgbackrest" \
-  -v "$COMPOSE_DIR/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro" \
-  -e PGPASSWORD="$PG_PASSWORD" \
-  pgsql-docker:latest \
-  sh -c "
+IMG="$(docker inspect "$CONTAINER" --format '{{"{{"}}.Config.Image{{"}}"}}')"
+rc=0
+docker run --rm --entrypoint sh --volumes-from "$CONTAINER" "$IMG" \
+  -c "
 pgbackrest $ARGS restore 2>&1
-# Reset WAL so PostgreSQL can start without recovery
-rm -f /var/lib/postgresql/18/docker/postgresql.auto.conf
-rm -f /var/lib/postgresql/18/docker/backup_label
-rm -f /var/lib/postgresql/18/docker/recovery.signal
-chown -R postgres:postgres /var/lib/postgresql/18/docker 2>/dev/null
-su -s /bin/sh postgres -c 'pg_resetwal -f -D /var/lib/postgresql/18/docker' 2>/dev/null || \
-su -s /bin/sh postgres -c 'pg_reset_wal -f -D /var/lib/postgresql/18/docker' 2>/dev/null || true
-" 2>&1 | tail -3
+# The helper runs as root: hand the restored files back to postgres.
+chown -R postgres:postgres /var/lib/postgresql/18/docker 2>/dev/null || true
+" > /tmp/pg-restore-out.log 2>&1 || rc=$?
+tail -3 /tmp/pg-restore-out.log
+if [ "$rc" -ne 0 ]; then echo "FAIL: pgbackrest restore failed (see above)"; exit 1; fi
+# Recovery (backup_label/recovery.signal) is left intact on purpose: postgres
+# replays to the restore target and promotes on a NEW timeline, so the archive
+# never diverges (a resetwal hack here recycles segment numbers and wedges the
+# archiver on checksum collisions).
 
 # Start PostgreSQL
 echo "Starting PostgreSQL..."
 docker compose -f "$COMPOSE_DIR/docker-compose.yml" start postgres 2>&1 | tail -1
+tries=0
+until docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" pg_isready -U "$PG_USER" -d "$PG_DATABASE" -h localhost 2>/dev/null; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 60 ]; then echo "FAIL: postgres never came back after restore"; exit 1; fi
+  sleep 2
+done
+
+# --type=immediate recovers to consistency and PAUSES: resume to promote,
+# otherwise the primary stays read-only and the stanza check goes red.
+echo "Resuming recovery (promote)..."
+docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" psql -U "$PG_USER" -d "$PG_DATABASE" -h localhost -tAc \
+  "SELECT pg_wal_replay_resume();" 2>&1 | tail -1
+tries=0
+until docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" psql -U "$PG_USER" -d "$PG_DATABASE" -h localhost -tAc \
+  "SELECT pg_is_in_recovery();" 2>/dev/null | grep -q "^f$"; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 30 ]; then echo "FAIL: postgres never promoted (still in recovery)"; exit 1; fi
+  sleep 2
+done
+echo "  Promoted (writable primary)"
+
+# The wipe dropped the replication slots: recreate them before replicas start.
+for SLOT in rep1 rep2; do
+  docker exec -e PGPASSWORD="$PG_PASSWORD" "$CONTAINER" psql -U "$PG_USER" -d "$PG_DATABASE" -h localhost -tAc \
+    "SELECT pg_create_physical_replication_slot('$SLOT') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = '$SLOT')" 2>&1 | tail -1
+done
+echo "  Replication slots: rep1 rep2 (recreate any standby with a wiped PGDATA + restart so it reclones)"
 
 echo ""
 echo "=== restore complete ==="
-echo "  Verify: PGPASSWORD=$PG_PASSWORD psql -h localhost -U $PG_USER -d postgres -c 'SELECT now();'"
+echo "  Verify: PGPASSWORD=<redacted> psql -h localhost -U $PG_USER -d $PG_DATABASE -c 'SELECT count(*) FROM <table>;'"
+echo "  NOTE: standbys keep newer WAL and cannot stream backwards - wipe their"
+echo "  PGDATA (data/pg-replica*, container stopped) and restart them to reclone."
