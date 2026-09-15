@@ -114,9 +114,14 @@ else
   log "standalone mode: bouncer $BOUNCER registered (plugin -> $LAPI_HOST)"
 fi
 
-# 4. Middleware in the Traefik file provider (dynamic: no Traefik restart).
+# 4. Middleware in the Traefik file provider. Written atomically (temp file +
+#    rename): an in-place rewrite can be caught torn by the file provider
+#    watch, which drops the middleware until the next restart. A content
+#    change also recreates Traefik (section 6) so the plugin always loads clean.
+MW_CHANGED=0
 sudo mkdir -p /etc/traefik/conf.d
-sudo tee /etc/traefik/conf.d/01-crowdsec.yml > /dev/null <<EOF
+MW_TMP="$(sudo mktemp /etc/traefik/conf.d/.01-crowdsec.XXXXXX)"
+sudo tee "$MW_TMP" > /dev/null <<EOF
 http:
   middlewares:
     crowdsec:
@@ -134,8 +139,15 @@ http:
             - {{ . }}
 {{- end }}
 EOF
-sudo chmod 0644 /etc/traefik/conf.d/01-crowdsec.yml
-log "middleware crowdsec@file written"
+sudo chmod 0644 "$MW_TMP"
+if [ -f /etc/traefik/conf.d/01-crowdsec.yml ] && cmp -s "$MW_TMP" /etc/traefik/conf.d/01-crowdsec.yml; then
+  sudo rm -f "$MW_TMP"
+  log "middleware crowdsec@file unchanged"
+else
+  sudo mv "$MW_TMP" /etc/traefik/conf.d/01-crowdsec.yml
+  MW_CHANGED=1
+  log "middleware crowdsec@file written"
+fi
 
 # 5. Probe router: a plain web (:80) router so the entrypoint middleware is
 #    exercised by the acceptance test without a TLS certificate (websecure has
@@ -166,6 +178,10 @@ log "probe router written (web/waf-probe.invalid -> $PROBE_BACKEND)"
 #    - attach the middleware to the web/websecure entrypoints.
 YML=/etc/traefik/traefik.yml
 CHANGED=0
+if [ "$MW_CHANGED" = 1 ]; then
+  log "middleware content changed - traefik will be recreated"
+  CHANGED=1
+fi
 # 6a. Normalize the creation template: drop any legacy CLI plugin flags (the
 #     wiring now lives in traefik.yml), make sure the shared access-log volume
 #     is mounted (the engine reads the file it writes) and run the binary

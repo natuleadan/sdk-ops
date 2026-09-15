@@ -64,6 +64,9 @@ option; the cluster template enables it per profile (AppSec adds ~200 MiB).
 
 - **Requires the sdk-ops host Traefik**: this template wires the plugin into
   it. A custom/third-party proxy needs the plugin enabled in its own config.
+- The middleware file is written atomically (temp + rename) and Traefik is
+  recreated when its content changes: an in-place rewrite can be caught torn
+  by the file provider watch, which drops the middleware until restart.
 - The plugin downloads from `plugins.traefik.io` at Traefik startup: the host
   needs **egress 443**; without it Traefik logs "Plugins are disabled" and
   `init.sh` retries the container once.
