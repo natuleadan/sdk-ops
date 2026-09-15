@@ -239,3 +239,54 @@ func TestParseAdminIPsRejectsBad(t *testing.T) {
 		t.Errorf("want 1v4 + 1v6, got %v / %v", admin4, admin6)
 	}
 }
+
+func TestModeSwitchDecision(t *testing.T) {
+	if got := normalizeProvisionMode(""); got != "bare" {
+		t.Errorf("empty mode must normalize to bare, got %q", got)
+	}
+	if got := normalizeProvisionMode("docker"); got != "docker" {
+		t.Errorf("docker must stay docker, got %q", got)
+	}
+	cases := []struct {
+		name              string
+		installed         string
+		requested         string
+		allow             bool
+		wantProceed       bool
+		wantForce         bool
+		wantNoticeContain string
+	}{
+		{"legacy marker proceeds", "", "docker", false, true, false, ""},
+		{"same mode proceeds", "docker", "docker", false, true, false, ""},
+		{"change blocked", "k3s", "docker", false, false, false, "allow_mode_switch"},
+		{"change allowlisted", "k3s", "docker", true, true, true, "full docker init"},
+	}
+	for _, c := range cases {
+		proceed, force, notice := modeSwitchDecision(c.installed, c.requested, c.allow)
+		if proceed != c.wantProceed || force != c.wantForce {
+			t.Errorf("%s: proceed=%v force=%v, want %v/%v", c.name, proceed, force, c.wantProceed, c.wantForce)
+		}
+		if c.wantNoticeContain != "" && !strings.Contains(notice, c.wantNoticeContain) {
+			t.Errorf("%s: notice %q must contain %q", c.name, notice, c.wantNoticeContain)
+		}
+		if c.wantNoticeContain == "" && notice != "" {
+			t.Errorf("%s: notice must be empty, got %q", c.name, notice)
+		}
+	}
+	_, _, blocked := modeSwitchDecision("docker", "k3s", false)
+	if !strings.Contains(blocked, "infra uninstall docker") {
+		t.Errorf("block notice must name the manual uninstall, got %q", blocked)
+	}
+}
+
+func TestParseInitMarkerMode(t *testing.T) {
+	if got := parseInitMarkerMode("sdk-ops-init mode=docker"); got != "docker" {
+		t.Errorf("stamped marker: got %q", got)
+	}
+	if got := parseInitMarkerMode("sdk-ops-init"); got != "" {
+		t.Errorf("legacy marker: got %q", got)
+	}
+	if got := parseInitMarkerMode(""); got != "" {
+		t.Errorf("empty marker: got %q", got)
+	}
+}

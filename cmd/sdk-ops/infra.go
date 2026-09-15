@@ -680,9 +680,10 @@ func parseAllowlistFlag(raw string) (hardening.AllowlistProfile, string, error) 
 	return hardening.AllowlistNormal, raw, nil
 }
 
-// createSDKOpsStructure creates the /opt/sdk-ops/ layout on the node.
-func createSDKOpsStructure(conn *golang_ssh.Client) {
-	if _, _, err := ssh.Run(conn, `sudo mkdir -p /opt/sdk-ops/services /opt/sdk-ops/backups /opt/sdk-ops/logs && echo "sdk-ops-init" | sudo tee /opt/sdk-ops/.version > /dev/null`); err != nil {
+// createSDKOpsStructure creates the /opt/sdk-ops/ layout on the node, stamping
+// the init mode so later provisions can refuse silent mode changes.
+func createSDKOpsStructure(conn *golang_ssh.Client, mode string) {
+	if _, _, err := ssh.Run(conn, `sudo mkdir -p /opt/sdk-ops/services /opt/sdk-ops/backups /opt/sdk-ops/logs && echo "sdk-ops-init mode=`+normalizeProvisionMode(mode)+`" | sudo tee /opt/sdk-ops/.version > /dev/null`); err != nil {
 		log.Printf("infra: ssh run error: %v", err)
 	}
 	// The service ownership user (files land 0600 sdkops:sdkops even on
@@ -2082,7 +2083,7 @@ func runInfraInitPostInstall(conn *golang_ssh.Client, ip string, f infraFlags, h
 
 	// Create /opt/sdk-ops/ structure
 	fmt.Println("  -> Creating /opt/sdk-ops/ structure...")
-	createSDKOpsStructure(conn)
+	createSDKOpsStructure(conn, f.mode)
 
 	// Detect architecture
 	archOut, _, _ := ssh.Run(conn, "uname -m")

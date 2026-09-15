@@ -384,6 +384,9 @@ parallel, then peers and bans are applied.
 
 ```yaml
 mode: docker                # k3s | docker | bare
+allow_mode_switch: false    # true = run the requested mode's full init over
+                            # nodes initialized with another mode (old-mode
+                            # leftovers are NOT removed - uninstall first)
 parallel: 3
 firewall_allowlist: cf      # cf | url:... | dns:... | strict | "" (skip)
 admin_ips: "203.0.113.10,2001:db8::1"   # explicit, never auto-detected
@@ -441,6 +444,12 @@ mode routes to `http://<service>:<container_port>` over the shared
 ```bash
 sdk-ops infra provision <file.yaml> --insecure
 ```
+
+Mode changes are guarded: provisioning `mode: k3s` onto a node initialized
+as `docker` (or any other mismatch) refuses before touching the node, because
+a half-installed node serves neither mode. Migrate with
+`infra uninstall <old-mode>` first, or set `allow_mode_switch: true` to run
+the requested mode's full init over the node (old leftovers stay).
 
 The fleet files live in `backend/vps-config/` (per-project convention), so the
 whole VPS network is reproducible with one command.

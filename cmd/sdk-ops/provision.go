@@ -27,7 +27,12 @@ import (
 // from an optional group, with peers, bans, telegram, security, ssl and
 // traefik sections. Precedence: host override > group > global.
 type ProvisionFile struct {
-	Mode              string `yaml:"mode"`
+	Mode string `yaml:"mode"`
+	// AllowModeSwitch acknowledges a mode change onto already-initialized
+	// nodes: the full init for the requested mode runs over them (without it
+	// the provision refuses). Old-mode leftovers are NEVER removed
+	// automatically - uninstall the old mode first (infra uninstall <mode>).
+	AllowModeSwitch   bool   `yaml:"allow_mode_switch,omitempty"`
 	Parallel          int    `yaml:"parallel"`
 	FirewallAllowlist string `yaml:"firewall_allowlist"`
 	AdminIPs          string `yaml:"admin_ips"`
@@ -745,7 +750,17 @@ func provisionHost(pf ProvisionFile, h ProvisionHost) provisionResult {
 	// without roles keeps working (see applyK3sTopology).
 	applyK3sTopology(&f, pf, h)
 	fmt.Printf("\n--- Host %s (%s) [group=%s] ---\n", h.Name, h.Host, h.Group)
-	already := hostAlreadyInitialized(h, &f)
+	already, installed := hostInitState(h, &f)
+	if already {
+		proceed, forceInit, notice := modeSwitchDecision(installed, normalizeProvisionMode(pf.Mode), pf.AllowModeSwitch)
+		if !proceed {
+			return provisionResult{Name: h.Name, Host: h.Host, Error: fmt.Errorf("host %s: %s", h.Name, notice)}
+		}
+		if forceInit {
+			fmt.Printf("  -> WARNING: %s\n", notice)
+			already = false
+		}
+	}
 	if !already {
 		err := runInfraInitSSH(h.Host, f)
 		if err != nil {
@@ -769,15 +784,23 @@ func provisionHost(pf ProvisionFile, h ProvisionHost) provisionResult {
 	return provisionResult{Name: h.Name, Host: h.Host}
 }
 
-// hostAlreadyInitialized reports whether the node carries the sdk-ops init
-// marker, in which case provisioning skips the full init and only applies
-// the fleet phases (fast re-provision).
-func hostAlreadyInitialized(h ProvisionHost, f *infraFlags) bool {
+// hostInitState reports whether the node carries the sdk-ops init marker (in
+// which case provisioning skips the full init and only applies the fleet
+// phases) and, when it does, the mode the node was initialized with
+// ("k3s"|"docker"|"bare"; "" for legacy markers that predate mode stamping).
+func hostInitState(h ProvisionHost, f *infraFlags) (already bool, installed string) {
 	port := h.Port
 	if port == 0 {
 		port = 22
 	}
 	f.port = port
+	readMarker := func(conn *golang_ssh.Client) (string, error) {
+		out, _, err := ssh.Run(conn, `cat /opt/sdk-ops/.version 2>/dev/null || echo MISSING`)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(out), nil
+	}
 	// Try the post-init user (sdkops) first: hardened nodes block root login.
 	// A fresh node has no sdkops user, so this returns false and the caller
 	// falls back to the YAML user (root) for the first init.
@@ -786,17 +809,57 @@ func hostAlreadyInitialized(h ProvisionHost, f *infraFlags) bool {
 		f2.user = "sdkops"
 		if conn, err := infraConnect(h.Host, &f2); err == nil {
 			defer closeConn(conn)
-			out, _, err := ssh.Run(conn, `test -f /opt/sdk-ops/.version && echo yes || echo no`)
-			return err == nil && strings.TrimSpace(out) == "yes"
+			if text, err := readMarker(conn); err == nil && text != "" && text != "MISSING" {
+				return true, parseInitMarkerMode(text)
+			}
+			return false, ""
 		}
 	}
 	conn, err := infraConnect(h.Host, f)
 	if err != nil {
-		return false
+		return false, ""
 	}
 	defer closeConn(conn)
-	out, _, err := ssh.Run(conn, `test -f /opt/sdk-ops/.version && echo yes || echo no`)
-	return err == nil && strings.TrimSpace(out) == "yes"
+	text, err := readMarker(conn)
+	if err != nil || text == "" || text == "MISSING" {
+		return false, ""
+	}
+	return true, parseInitMarkerMode(text)
+}
+
+// parseInitMarkerMode extracts mode=X from the init marker. Legacy
+// "sdk-ops-init" markers carry no mode and yield "" (proceed, see
+// modeSwitchDecision).
+func parseInitMarkerMode(text string) string {
+	for field := range strings.FieldsSeq(text) {
+		if after, ok := strings.CutPrefix(field, "mode="); ok {
+			return after
+		}
+	}
+	return ""
+}
+
+// normalizeProvisionMode maps the fleet mode to what the init actually
+// installs: empty falls through to the bare init (see runInfraInitSSH).
+func normalizeProvisionMode(m string) string {
+	if m == "" {
+		return "bare"
+	}
+	return m
+}
+
+// modeSwitchDecision gates a provision onto an already-initialized node.
+// Same mode (or a legacy marker with no mode on record): proceed, phases only.
+// Different mode: blocked unless allowModeSwitch, in which case the full init
+// for the requested mode runs over the node (old-mode leftovers stay put).
+func modeSwitchDecision(installed, requested string, allow bool) (proceed, forceInit bool, notice string) {
+	if installed == "" || installed == requested {
+		return true, false, ""
+	}
+	if allow {
+		return true, true, fmt.Sprintf("mode change %s -> %s acknowledged: running the full %s init (old-mode leftovers are NOT removed)", installed, requested, requested)
+	}
+	return false, false, fmt.Sprintf("refusing mode change %s -> %s without allow_mode_switch (node initialized as %q): migrate manually (infra uninstall %s on the node, then re-provision) or set allow_mode_switch: true at the top of the fleet YAML", installed, requested, installed, installed)
 }
 
 // applySwapSize resizes the swap file to an explicit size in MB.
