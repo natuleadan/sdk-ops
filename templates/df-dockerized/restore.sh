@@ -3,6 +3,9 @@
 # Verification runs inside Docker container
 set -e
 
+SVC_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SVC_DIR/.env" ]; then . "$SVC_DIR/.env"; fi
+
 DF_PASSWORD="${DF_PASSWORD:-dragonfly}"
 PRIMARY_CONTAINER="df-dockerized-dragonfly-primary-1"
 COMPOSE_DIR="$(cd "$(dirname "$0")" && pwd)"

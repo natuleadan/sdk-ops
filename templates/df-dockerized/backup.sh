@@ -2,6 +2,9 @@
 # df-dockerized backup — trigger BGSAVE, copy snapshot to local or S3 storage
 set -e
 
+SVC_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SVC_DIR/.env" ]; then . "$SVC_DIR/.env"; fi
+
 DF_PASSWORD="${DF_PASSWORD:-dragonfly}"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 DATE=$(date +%F-%H%M%S)

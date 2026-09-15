@@ -247,13 +247,17 @@ func wireService(conn *golang_ssh.Client, svcDir, nodeName, name string, cfg Ser
 		return wireCNPGOn(conn, svcDir)
 	case "valkey-cluster":
 		return wireValkeyOn(conn, svcDir)
-	case "df-cluster":
+	case "df-cluster", "df-dockerized":
 		return wireDFOn(conn, svcDir)
 	case "crowdsec-bare", "crowdsec-dockerized":
 		return wireCrowdsecClientEnvOn(conn, svcDir, nodeName)
 	default:
-		// Dockerized templates (yugabyte, libsql, df, ...) need no special
+		// Dockerized templates (yugabyte, libsql, ...) need no special
 		// wiring — they are self-contained compose stacks driven by init.sh.
+		// Templates whose scripts read secrets from the node .env
+		// (df-dockerized, nats-dockerized, pgsql-docker, crowdsec-*) MUST have
+		// an explicit case above: with no .env their scripts silently fall
+		// back to defaults and hang or misconfigure.
 		verbosef("service %s: no extra wiring (dockerized template)", name)
 		return nil
 	}

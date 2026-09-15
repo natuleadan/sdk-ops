@@ -3,6 +3,9 @@
 # Uses s3cmd on the host (pre-installed, ~/.s3cfg). External S3 only.
 set -e
 
+SVC_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SVC_DIR/.env" ]; then . "$SVC_DIR/.env"; fi
+
 DF_PASSWORD="${DF_PASSWORD:-dragonfly}"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 S3_BUCKET="${S3_BUCKET:-df-backups}"

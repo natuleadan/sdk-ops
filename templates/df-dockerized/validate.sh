@@ -4,6 +4,9 @@
 # suffixes — never hardcode them.
 set -e
 
+SVC_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SVC_DIR/.env" ]; then . "$SVC_DIR/.env"; fi
+
 DF_PASSWORD="${DF_PASSWORD:-dragonfly}"
 
 find_container() {

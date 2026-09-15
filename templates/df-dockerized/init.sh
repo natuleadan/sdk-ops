@@ -2,6 +2,12 @@
 # df-dockerized init — SSL, services, cluster config
 set -e
 
+# Secrets written by the provision into .env (0600). Scripts run over SSH with
+# a bare environment (sudo strips it), so read them from the file next to the
+# script instead of relying on inherited variables.
+SVC_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SVC_DIR/.env" ]; then . "$SVC_DIR/.env"; fi
+
 DF_PASSWORD="${DF_PASSWORD:-dragonfly}"
 PRIMARY_HOST="${PRIMARY_HOST:-dragonfly-primary}"
 REPLICA_HOST="${REPLICA_HOST:-dragonfly-replica}"
@@ -38,15 +44,30 @@ echo "Starting Dragonfly..."
 docker compose up -d 2>&1 | tail -1
 
 echo -n "Waiting for primary..."
-until RC PING | grep -q "PONG"; do sleep 2; done
+tries=0
+until RC PING 2>/dev/null | grep -q "PONG"; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 60 ]; then echo " FAIL: primary never answered (password? TLS?)"; exit 1; fi
+  sleep 2
+done
 echo " OK"
 
 echo -n "Waiting for replica-1..."
-until RC_REP PING | grep -q "PONG"; do sleep 2; done
+tries=0
+until RC_REP PING 2>/dev/null | grep -q "PONG"; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 60 ]; then echo " FAIL: replica-1 never answered (password? TLS?)"; exit 1; fi
+  sleep 2
+done
 echo " OK"
 
 echo -n "Waiting for replica-2..."
-until RC_REP2 PING | grep -q "PONG"; do sleep 2; done
+tries=0
+until RC_REP2 PING 2>/dev/null | grep -q "PONG"; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 60 ]; then echo " FAIL: replica-2 never answered (password? TLS?)"; exit 1; fi
+  sleep 2
+done
 echo " OK"
 
 echo "Configuring replication..."
