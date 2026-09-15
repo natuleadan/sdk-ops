@@ -18,10 +18,23 @@ IMAGE_TAG="{{ .ImageTag }}"
 PLUGIN_VERSION="{{ .PluginVersion }}"
 COLLECTIONS="{{ .Collections }}"
 BOUNCER="{{ .BouncerName }}"
-CLIENT="{{ if .Client }}1{{ else }}0{{ end }}"
 # Secrets (client mode) written by the provision with umask 077.
 # shellcheck disable=SC1091
 [ -f "$DIR/.env" ] && . "$DIR/.env"
+# Per-host overrides (CS_LAPI_URL_<HOST>, ...) collapse onto the plain names
+# so one provision run can carry a central plus distinct clients. The suffix
+# uppercases the node name mapping non-alphanumerics to underscores (same rule
+# as the provision wiring).
+SUFFIX="$(printf '%s' "$BOUNCER" | tr '[:lower:]' '[:upper:]' | sed 's/[-.]/_/g')"
+for k in CS_LAPI_URL CS_LAPI_USER CS_LAPI_PASSWORD CS_BOUNCER_KEY; do
+  eval "v=\${${k}_$SUFFIX:-}"
+  if [ -n "$v" ]; then printf -v "$k" '%s' "$v"; fi
+done
+unset v SUFFIX
+# Client mode is runtime-driven: the .env may carry a per-host CS_LAPI_URL_*
+# override, which the render cannot see. A remote URL means the agent reports
+# there and the plugin reads decisions from there.
+CLIENT="0"; [ -n "${CS_LAPI_URL:-}" ] && CLIENT="1"
 
 log() { echo "[crowdsec-dockerized] $1"; }
 fail() { echo "[crowdsec-dockerized] FAIL: $1"; exit 1; }
@@ -72,7 +85,9 @@ if [ "$CLIENT" = "1" ]; then
   LAPI_URL="${CS_LAPI_URL:-}"
   [ -n "$LAPI_URL" ] || fail "client mode needs CS_LAPI_URL"
   [ -n "${CS_BOUNCER_KEY:-}" ] || fail "client mode needs CS_BOUNCER_KEY (create on the central)"
-  sudo docker exec crowdsec sh -c "cat > /etc/crowdsec/local_api_credentials.yaml" <<EOF
+  # NOTE: docker exec needs -i here, otherwise the heredoc never reaches
+  # the container's stdin and the credentials file keeps stale content.
+  sudo docker exec -i crowdsec sh -c "cat > /etc/crowdsec/local_api_credentials.yaml" <<EOF
 url: ${LAPI_URL}
 login: ${CS_LAPI_USER:-}
 password: ${CS_LAPI_PASSWORD:-}

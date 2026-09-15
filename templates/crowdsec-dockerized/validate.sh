@@ -50,6 +50,16 @@ else
   bad "lapi status failed (${CS_LAPI_URL:-local})"
 fi
 
+if [ -n "${CS_LAPI_URL:-}" ]; then
+  # Client mode must really point at the central: lapi status alone also
+  # passes against a stale standalone credential file.
+  if sudo docker exec crowdsec grep -q -F "url: ${CS_LAPI_URL}" /etc/crowdsec/local_api_credentials.yaml 2>/dev/null; then
+    ok "engine credentials point at the central"
+  else
+    bad "engine credentials do not point at ${CS_LAPI_URL} (stale standalone file?)"
+  fi
+fi
+
 if sudo docker exec crowdsec cscli bouncers list -o json 2>/dev/null | grep -q "\"$BOUNCER\""; then
   ok "bouncer $BOUNCER registered"
 elif [ "$MODE" != "standalone" ]; then

@@ -177,6 +177,29 @@ func TestCrowdsecDockerizedRenderData(t *testing.T) {
 	}
 }
 
+// TestCrowdsecDockerizedClientRuntime locks client mode being runtime-driven:
+// the provision writes per-host CS_LAPI_URL_* into .env, which the render
+// cannot see, so init.sh derives CLIENT from the environment at runtime.
+func TestCrowdsecDockerizedClientRuntime(t *testing.T) {
+	prof := map[string]any{"mem_limit": "256M", "cpus": "0.5", "collections": "crowdsecurity/linux"}
+	h := ProvisionHost{Name: "web"}
+	t.Setenv("CS_LAPI_URL", "http://192.0.2.20:30080")
+	data, err := crowdsecDockerizedRenderData(ProvisionFile{}, h, prof, ServiceConfig{Profile: "lite"})
+	if err != nil {
+		t.Fatalf("render client: %v", err)
+	}
+	dir := t.TempDir()
+	if err := templates.RenderDir("crowdsec-dockerized", dir, data); err != nil {
+		t.Fatalf("render dir: %v", err)
+	}
+	initSh, err := os.ReadFile(filepath.Join(dir, "init.sh"))
+	if err != nil {
+		t.Fatalf("read rendered init.sh: %v", err)
+	}
+	if !strings.Contains(string(initSh), `[ -n "${CS_LAPI_URL:-}" ] && CLIENT="1"`) {
+		t.Error("client mode must be runtime-driven from CS_LAPI_URL (per-host .env)")
+	}
+}
 // TestCrowdsecBareUninstallAndOrder keeps the bare service in the declared
 // cleanup map (units disabled on removal) and in the queue order.
 func TestCrowdsecBareUninstallAndOrder(t *testing.T) {
