@@ -328,8 +328,8 @@ echo "-- step 6: S3 DR cycle --"
 # upload only and document the unseal half as [SKIP] (still PASS).
 if [ -z "${S3_BUCKET:-}" ] || [ -z "${S3_ACCESS_KEY:-}" ] || [ -z "${S3_SECRET_KEY:-}" ]; then
   echo "  [SKIP] S3 DR (S3_BUCKET/S3_ACCESS_KEY/S3_SECRET_KEY not set)"
-elif ! command -v docker >/dev/null 2>&1; then
-  echo "  [SKIP] S3 DR (docker required for the mc client)"
+elif ! command -v s3cmd >/dev/null 2>&1; then
+  echo "  [SKIP] S3 DR (s3cmd required for upload/download/ls)"
 else
   : "${S3_ENDPOINT:=s3.us-east-005.backblazeb2.com}"
   # Scheme-aware endpoint: a bare host defaults to https (production S3); an
@@ -345,10 +345,8 @@ else
   mkdir -p "$WORK"
   # Idempotent: drop a leftover DR stream from a previous run.
   "$BIN" stream rm "$DR_STREAM" -f "${APP[@]}" >/dev/null 2>&1
-  # mc runs inside docker; the work dir is mounted so the container sees the
-  # sealed blob (repo pattern: --entrypoint sh, no jq in mc:latest).
-  MC() { docker run --rm --entrypoint sh -v "$WORK:/work" minio/mc:latest -c "$1"; }
-  MCALIAS="mc alias set s3 $S3_URL $S3_ACCESS_KEY $S3_SECRET_KEY --api S3v4 >/dev/null 2>&1"
+  # S3 via the host s3cmd (minio/mc is not on Docker Hub anymore): the
+  # work dir is local, no container mount needed.
   # S3 key layout mirrors backup.sh: s3://$S3_BUCKET/$S3_PREFIX/$stream/$TS.nkey
   S3_KEY="$S3_PREFIX/$DR_STREAM/$TS.nkey"
   DR_OK=0
@@ -375,11 +373,11 @@ else
         echo "  [FAIL] sealed backup empty"
         FAILED=1
       fi
-      if MC "$MCALIAS && mc cp /work/$DR_STREAM.nkey s3/$S3_BUCKET/$S3_KEY >/dev/null 2>&1"; then
+      if s3cmd put "$WORK/$DR_STREAM.nkey" "s3://$S3_BUCKET/$S3_KEY" >/dev/null 2>&1; then
         echo "  [OK] sealed backup uploaded to s3://$S3_BUCKET/$S3_KEY"
         DR_OK=1
       else
-        echo "  [FAIL] mc upload of sealed backup"
+        echo "  [FAIL] s3cmd upload of sealed backup"
         FAILED=1
       fi
     else
@@ -406,7 +404,7 @@ else
     [ -n "$SENDER_NK" ] && [ -f "$SENDER_NK" ] && SENDER_PUB="$("$BIN" auth nkey show "$SENDER_NK" 2>/dev/null)"
     if [ "$DR_OK" -eq 1 ] && [ -n "$RECIPIENT_NK" ] && [ -f "$RECIPIENT_NK" ]; then
       if [ -n "$SENDER_PUB" ]; then
-        if MC "$MCALIAS && mc cp s3/$S3_BUCKET/$S3_KEY /work/backup.nkey >/dev/null 2>&1" \
+        if s3cmd get "s3://$S3_BUCKET/$S3_KEY" "$WORK/backup.nkey" >/dev/null 2>&1 \
            && "$BIN" auth nkey unseal "$WORK/backup.nkey" "$RECIPIENT_NK" "$SENDER_PUB" --output "$WORK/backup.tar.gz" >/dev/null 2>&1 \
            && mkdir -p "$WORK/restore" \
            && tar xzf "$WORK/backup.tar.gz" -C "$WORK/restore" \
@@ -429,12 +427,11 @@ else
       fi
     else
       # Partial verification: the sealed blob is local and the upload landed.
-      # grep runs on the HOST (mc:latest busybox has no grep).
       echo "  [SKIP] unseal (operator NKey not on this host)"
-      if MC "$MCALIAS && mc ls s3/$S3_BUCKET/$S3_PREFIX/$DR_STREAM/" | grep -q "$TS"; then
-        echo "  [OK] S3 upload confirmed (mc ls s3://$S3_BUCKET/$S3_PREFIX/$DR_STREAM/$TS.nkey)"
+      if s3cmd ls "s3://$S3_BUCKET/$S3_PREFIX/$DR_STREAM/" 2>/dev/null | grep -q "$TS"; then
+        echo "  [OK] S3 upload confirmed (s3cmd ls s3://$S3_BUCKET/$S3_PREFIX/$DR_STREAM/$TS.nkey)"
       else
-        echo "  [FAIL] S3 upload not found via mc ls"
+        echo "  [FAIL] S3 upload not found via s3cmd ls"
         FAILED=1
       fi
     fi
@@ -443,7 +440,7 @@ else
     if "$BIN" stream info "$DR_STREAM" "${APP[@]}" >/dev/null 2>&1; then
       "$BIN" stream rm "$DR_STREAM" -f "${APP[@]}" >/dev/null 2>&1 && echo "  [OK] DR stream cleaned up"
     fi
-    if MC "$MCALIAS && mc rm s3/$S3_BUCKET/$S3_KEY >/dev/null 2>&1"; then
+    if s3cmd del "s3://$S3_BUCKET/$S3_KEY" >/dev/null 2>&1; then
       echo "  [OK] S3 test object removed"
     fi
     rm -rf "$WORK"

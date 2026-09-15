@@ -169,6 +169,7 @@ func writeS3Cfg(conn *golang_ssh.Client) error {
 	if endpoint == "" {
 		return fmt.Errorf("S3_ENDPOINT not set")
 	}
+	endpoint = bareS3Host(endpoint)
 	cfg := fmt.Sprintf(`[default]
 access_key = %s
 secret_key = %s
