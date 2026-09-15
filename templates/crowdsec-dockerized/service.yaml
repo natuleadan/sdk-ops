@@ -6,7 +6,7 @@ services:
 env:
   CS_IMAGE_TAG: v1.8.1
   CS_PLUGIN_VERSION: v1.7.1
-  CS_COLLECTIONS: crowdsecurity/linux crowdsecurity/base-http-scenarios
+  CS_COLLECTIONS: crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/traefik
 health:
   path: /
   interval: 15

@@ -4,12 +4,12 @@
 lite:                 # 0.5c / 256M - stream IPS on a small docker host
   mem_limit: 256M
   cpus: "0.5"
-  collections: crowdsecurity/linux crowdsecurity/base-http-scenarios
+  collections: crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/traefik
 normal:               # 1c / 512M - stream IPS + more HTTP scenarios
   mem_limit: 512M
   cpus: "1"
-  collections: crowdsecurity/linux crowdsecurity/base-http-scenarios
+  collections: crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/traefik
 large:                # 2c / 1G
   mem_limit: 1G
   cpus: "2"
-  collections: crowdsecurity/linux crowdsecurity/base-http-scenarios
+  collections: crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/traefik

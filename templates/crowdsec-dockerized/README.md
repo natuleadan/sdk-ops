@@ -9,12 +9,17 @@ It is the L7 WAF for docker-mode fleets: the plugin asks the LAPI per request
 
 1. Checks the sdk-ops host Traefik exists (it is the enforcement point).
 2. Patches the persistent Traefik creation template
-   (`/opt/sdk-ops/traefik/install.sh`): enables the plugin
-   (`experimental.plugins.crowdsec-bouncer`), turns on the access log to
-   `/var/log/traefik/access.log`, attaches the `crowdsec@file` middleware to
-   both entrypoints and mounts the shared log dir. Then recreates the
-   container so the flags apply (the watchdog rebuilds it with the plugin too).
-3. Brings the engine container up on the shared `sdk-ops-net` network.
+   (`/opt/sdk-ops/traefik/install.sh`): runs the binary directly
+   (`--entrypoint traefik`, the image entrypoint otherwise swallows every
+   flag), mounts the shared log dir. The plugin registry, the access log
+   (JSON, so headers are captured) and the `crowdsec@file` entrypoint
+   middlewares live in `/etc/traefik/traefik.yml` (config file, not CLI
+   flags). Then recreates the container so it all applies (the watchdog
+   rebuilds it the same way).
+3. Brings the engine container up on the shared `sdk-ops-net` network and
+   installs the hub collections (including `crowdsecurity/traefik`, the
+   access-log parser — without it nothing is detected; the engine restarts
+   once when new collections land so the parsers load).
 4. Registers a bouncer (`cscli bouncers add <node>`) and writes the middleware
    into the Traefik file provider (`/etc/traefik/conf.d/01-crowdsec.yml`).
 5. The engine parses the Traefik access log (acquisition shipped as

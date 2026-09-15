@@ -69,6 +69,11 @@ if sudo docker logs traefik --tail=400 2>&1 | grep -qi "Plugins are disabled"; t
 else
   ok "traefik plugin state ok"
 fi
+if sudo docker exec crowdsec cscli parsers list 2>/dev/null | grep -q "traefik-logs"; then
+  ok "traefik parser installed (access log is parsed)"
+else
+  bad "traefik-logs parser missing (detection cannot fire)"
+fi
 
 if [ "$FAILED" -ne 0 ]; then echo "=== validate: FAILED ==="; exit 1; fi
 echo "=== validate: OK ==="

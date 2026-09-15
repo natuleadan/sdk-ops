@@ -50,9 +50,22 @@ for i in $(seq 1 30); do
   sleep 2
 done
 sudo docker exec crowdsec cscli lapi status >/dev/null 2>&1 || fail "engine LAPI not answering"
+NEWCOLL=0
 for c in $COLLECTIONS; do
-  sudo docker exec crowdsec cscli collections install "$c" >/dev/null 2>&1 || log "warn: collection $c not installed"
+  out="$(sudo docker exec crowdsec cscli collections install "$c" 2>&1)" || log "warn: collection $c not installed"
+  echo "$out" | grep -qi "enabling" && NEWCOLL=1
 done
+if [ "$NEWCOLL" = 1 ]; then
+  # The daemon loads parsers/scenarios at startup: restart once so the newly
+  # enabled collections actually parse (otherwise lines stay unparsed).
+  log "new collections enabled - restarting the engine to load parsers"
+  sudo docker restart crowdsec >/dev/null
+  for i in $(seq 1 30); do
+    if sudo docker exec crowdsec cscli lapi status >/dev/null 2>&1; then break; fi
+    sleep 2
+  done
+  sudo docker exec crowdsec cscli lapi status >/dev/null 2>&1 || fail "engine LAPI not answering after restart"
+fi
 
 # 3. Mode wiring: bouncer key (standalone) or remote credentials (client).
 if [ "$CLIENT" = "1" ]; then
@@ -201,3 +214,13 @@ fi
 
 sudo docker ps --filter name=crowdsec --filter name=traefik
 log "node ready ($BOUNCER)"
+  format: json
+# 6b. Migrate older nodes to the JSON access log: CLF drops the headers (no
+#     User-Agent), so crowdsec parses the paths but never the bad-UA scenario.
+#     JSON keeps every header; truncate so the file has a single format.
+if ! sudo grep -q "format: json" "$YML"; then
+  log "traefik.yml: switching the access log to JSON (headers captured)"
+  sudo sed -i '/^accessLog:$/a\  format: json' "$YML"
+  sudo truncate -s 0 /var/log/traefik/access.log 2>/dev/null || true
+  CHANGED=1
+fi
