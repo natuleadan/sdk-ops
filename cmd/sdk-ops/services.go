@@ -945,6 +945,8 @@ func crowdsecDockerizedRenderData(_ ProvisionFile, h ProvisionHost, prof map[str
 		"Cpus":          fmt.Sprint(prof["cpus"]),
 		"LapiURL":       lapiURL,
 		"Client":        lapiURL != "",
+		"Central":       cfg.Central,
+		"PeerIP":        h.PeerIP,
 		// Ranges whose X-Forwarded-For is trusted (the plugin reads the real
 		// client IP from the edge/CDN only for these).
 		"TrustedCIDRs": splitCsv(envOr("CS_TRUSTED_CIDRS", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1")), // go-check:ignore-ip

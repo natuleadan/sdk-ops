@@ -19,6 +19,11 @@ services:
       # LAPI on the host loopback: the Traefik plugin uses it when Traefik runs
       # on the host network; on the bridge Traefik reaches `crowdsec:8080`.
       - "127.0.0.1:8080:8080"
+{{ if and .Central .PeerIP }}
+      # Central mode: publish the LAPI on the VLAN peer IP so remote clients
+      # consume decisions (gated by peers/firewall; loopback stays local).
+      - "{{ .PeerIP }}:8080:8080"
+{{ end }}
     deploy:
       resources:
         limits:

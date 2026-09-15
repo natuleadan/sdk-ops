@@ -6,6 +6,8 @@ set -u
 
 DIR="${CS_DIR:-/opt/sdk-ops/services/crowdsec-dockerized}"
 BOUNCER="${CS_BOUNCER_NAME:-{{ .BouncerName }}}"
+CENTRAL="{{ .Central }}"
+PEERIP="{{ .PeerIP }}"
 # shellcheck disable=SC1091
 [ -f "$DIR/.env" ] && . "$DIR/.env"
 
@@ -89,6 +91,15 @@ if sudo docker exec crowdsec cscli parsers list 2>/dev/null | grep -q "crowdsecu
   ok "default whitelists present (engine not left weakened)"
 else
   bad "whitelists parser missing (loopback/RFC1918 exposed)"
+fi
+
+if [ "$CENTRAL" = "true" ] && [ -n "$PEERIP" ]; then
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$PEERIP:8080/" 2>/dev/null || echo 000)"
+  if [ "$code" != "000" ]; then
+    ok "lapi published on $PEERIP (central, http $code)"
+  else
+    bad "lapi not reachable on $PEERIP:8080 (central publish missing?)"
+  fi
 fi
 
 if [ "$FAILED" -ne 0 ]; then echo "=== validate: FAILED ==="; exit 1; fi

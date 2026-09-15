@@ -121,6 +121,11 @@ type ServiceConfig struct {
 	Seeds           int      `yaml:"seeds,omitempty"`
 	ServerTags      []string `yaml:"server_tags,omitempty"`
 	ClientAdvertise string   `yaml:"client_advertise,omitempty"`
+	// Central marks this host as a CrowdSec LAPI central: the engine
+	// publishes the LAPI on the host peer_ip (VLAN) so remote
+	// crowdsec-bare/dockerized clients consume its decisions (the port stays
+	// firewalled; open it with peers).
+	Central bool `yaml:"central,omitempty"`
 	// Mode is the postgres deployment mode: "cluster" (default, n>=2 nodes)
 	// or "single" (1 node — Patroni + local DCS, no quorum).
 	Mode string `yaml:"mode,omitempty"`

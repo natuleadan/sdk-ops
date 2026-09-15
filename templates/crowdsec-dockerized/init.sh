@@ -245,13 +245,3 @@ fi
 
 sudo docker ps --filter name=crowdsec --filter name=traefik
 log "node ready ($BOUNCER)"
-  format: json
-# 6b. Migrate older nodes to the JSON access log: CLF drops the headers (no
-#     User-Agent), so crowdsec parses the paths but never the bad-UA scenario.
-#     JSON keeps every header; truncate so the file has a single format.
-if ! sudo grep -q "format: json" "$YML"; then
-  log "traefik.yml: switching the access log to JSON (headers captured)"
-  sudo sed -i '/^accessLog:$/a\  format: json' "$YML"
-  sudo truncate -s 0 /var/log/traefik/access.log 2>/dev/null || true
-  CHANGED=1
-fi

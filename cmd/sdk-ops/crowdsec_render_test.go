@@ -200,6 +200,48 @@ func TestCrowdsecDockerizedClientRuntime(t *testing.T) {
 		t.Error("client mode must be runtime-driven from CS_LAPI_URL (per-host .env)")
 	}
 }
+
+// TestCrowdsecDockerizedCentralPublish locks the central mode: with
+// central:true and a peer IP the compose publishes the LAPI on the VLAN for
+// remote clients; otherwise only loopback is published.
+func TestCrowdsecDockerizedCentralPublish(t *testing.T) {
+	prof := map[string]any{"mem_limit": "256M", "cpus": "0.5", "collections": "crowdsecurity/linux"}
+	h := ProvisionHost{Name: "waf-01", PeerIP: "192.0.2.10"}
+	data, err := crowdsecDockerizedRenderData(ProvisionFile{}, h, prof, ServiceConfig{Profile: "lite", Central: true})
+	if err != nil {
+		t.Fatalf("render central: %v", err)
+	}
+	if central, _ := data["Central"].(bool); !central {
+		t.Error("central:true must reach the render context")
+	}
+	dir := t.TempDir()
+	if err := templates.RenderDir("crowdsec-dockerized", dir, data); err != nil {
+		t.Fatalf("render dir: %v", err)
+	}
+	compose, err := os.ReadFile(filepath.Join(dir, "docker-compose.yml"))
+	if err != nil {
+		t.Fatalf("read rendered compose: %v", err)
+	}
+	if !strings.Contains(string(compose), `"192.0.2.10:8080:8080"`) {
+		t.Errorf("central must publish the LAPI on the peer IP:\n%s", string(compose))
+	}
+
+	data, err = crowdsecDockerizedRenderData(ProvisionFile{}, h, prof, ServiceConfig{Profile: "lite"})
+	if err != nil {
+		t.Fatalf("render standalone: %v", err)
+	}
+	dir = t.TempDir()
+	if err := templates.RenderDir("crowdsec-dockerized", dir, data); err != nil {
+		t.Fatalf("render dir: %v", err)
+	}
+	compose, err = os.ReadFile(filepath.Join(dir, "docker-compose.yml"))
+	if err != nil {
+		t.Fatalf("read rendered compose: %v", err)
+	}
+	if strings.Contains(string(compose), "192.0.2.10:8080") {
+		t.Error("standalone must not publish the LAPI on the peer IP")
+	}
+}
 // TestCrowdsecBareUninstallAndOrder keeps the bare service in the declared
 // cleanup map (units disabled on removal) and in the queue order.
 func TestCrowdsecBareUninstallAndOrder(t *testing.T) {

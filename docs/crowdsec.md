@@ -30,6 +30,7 @@ bouncer consumes its decisions — the multi-host / VLAN layout).
 | host, no proxy | `crowdsec-bare` standalone | L3/L4 nftables | validated |
 | docker host, host Traefik | `crowdsec-dockerized` | L7 plugin on the sdk-ops Traefik | template ships with docker mode |
 | one engine, many enforcers (VLAN) | central `crowdsec-cluster` + clients `crowdsec-bare` | L3/L4 per client (the central decides) | validated |
+| one engine, many enforcers (VLAN, docker) | central `crowdsec-dockerized` (`central: true`) + clients `crowdsec-dockerized` | L7 plugin per client (the central decides) | validated |
 
 ## Distributed layout (one engine, many enforcers)
 
@@ -65,6 +66,43 @@ services:
 Validated on the fleet (2026-09): the central lists both machines heartbeating
 and both bouncers registered, and a decision added at the central is enforced
 by the clients' nftables within ~20 s.
+
+### Dockerized variant (L7 on every client)
+
+Same shape, L7 enforcement per client instead of nftables:
+
+```yaml
+hosts:
+  - name: central
+    peer_ip: 192.0.2.10
+    services:
+      crowdsec-dockerized: { profile: lite, central: true }  # LAPI on the VLAN
+  - name: web
+    peer_ip: 192.0.2.11
+    services:
+      crowdsec-dockerized: { profile: lite }
+peers:
+  - { from: web, to: central, ports: [8080] }
+```
+
+```bash
+# 1. provision once (no client env: central publishes, clients standalone)
+# 2. on the central, mint per-client credentials (note -f: it must NOT
+#    overwrite the central's own local_api_credentials.yaml)
+sudo docker exec crowdsec cscli machines add web --password <pw> -f /tmp/x.yaml
+sudo docker exec crowdsec cscli bouncers add web -o raw   # -> key
+# 3. provision again with per-host env (the init collapses CS_*_<HOST>
+#    onto the plain names at runtime, so one run carries both roles)
+export CS_LAPI_URL_WEB=http://192.0.2.10:8080 CS_LAPI_USER_WEB=web \
+  CS_LAPI_PASSWORD_WEB=<pw> CS_BOUNCER_KEY_WEB=<key>
+```
+
+Validated on the fleet (2026-09): all three machines heartbeating on the
+central; a central ban returns 403 on both clients; a scan against a client is
+detected by its engine, reported to the central (crowdsec-kind alert),
+auto-banned there and enforced back on the client (403). Restoring standalone
+needs `docker compose down -v` + removing `.env`/`bouncer.key` first (volumes
+and credentials persist — see the template README).
 
 ## Topology coverage and gaps
 
