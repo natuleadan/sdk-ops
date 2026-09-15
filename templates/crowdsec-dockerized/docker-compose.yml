@@ -13,6 +13,11 @@ services:
       # Access log shared with the sdk-ops Traefik (the template enables it).
       - /var/log/traefik:/var/log/traefik:ro
       - ./acquis-traefik.yaml:/etc/crowdsec/acquis.d/traefik.yaml:ro
+{{ if .AppSec }}
+      # AppSec WAF server (normal+): the acquisition is written by the template
+      # and mounted here; init.sh installs the configs/rules before up.
+      - ./acquis-appsec.yaml:/etc/crowdsec/acquis.d/appsec.yaml:ro
+{{ end }}
     networks:
       - sdk-ops-net
     ports:

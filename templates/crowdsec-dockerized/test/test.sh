@@ -8,6 +8,10 @@
 # of DISTINCT sensitive paths must raise a crowdsec-kind alert and auto-ban
 # (403), then everything is cleaned up and the whitelist restored.
 #
+# Phase 3 (AppSec profiles only): in-band CRS - SQLi 403s first try, benign
+# stays normal. Uses HTTP (:80) because websecure has no certificate for the
+# probe host.
+#
 # The client IP Traefik observes depends on the network mode: bridged Traefik
 # sees the docker gateway (port publishing SNATs the source), host-network
 # Traefik sees 127.0.0.1. Both are banned for the probe. In client mode the
@@ -16,6 +20,7 @@ set -u
 
 DIR="${CS_DIR:-/opt/sdk-ops/services/crowdsec-dockerized}"
 PROBE_HOST="${PROBE_HOST:-waf-probe.invalid}"
+APPSEC="{{ .AppSec }}"
 # shellcheck disable=SC1091
 [ -f "$DIR/.env" ] && . "$DIR/.env"
 MODE="standalone"; [ -n "${CS_LAPI_URL:-}" ] && MODE="client"
@@ -73,14 +78,6 @@ if [ "$banned" = 1 ]; then
     echo "  [FAIL] unexpected response after unban: $after"
     FAILED=1
   fi
-else
-  if sudo grep -q "crowdsec@file" /etc/traefik/traefik.yml 2>/dev/null; then
-    echo "  [PASS] plugin wired in traefik.yml"
-  else
-    echo "  [FAIL] plugin wiring missing from traefik.yml"
-    FAILED=1
-  fi
-fi
 
   # Phase 2 - automatic detection. CrowdSec whitelists loopback/RFC1918 by
   # default and node-local traffic always comes from there (127.0.0.1 on
@@ -166,6 +163,52 @@ fi
     echo "  [FAIL] still $after after cleanup"
     FAILED=1
   fi
+else
+  if sudo grep -q "crowdsec@file" /etc/traefik/traefik.yml 2>/dev/null; then
+    echo "  [PASS] plugin wired in traefik.yml"
+  else
+    echo "  [FAIL] plugin wiring missing from traefik.yml"
+    FAILED=1
+  fi
+fi
+
+if [ "$APPSEC" = "true" ]; then
+  # Phase 3 - in-band WAF: a SQLi probe must 403 on the first try (no ban,
+  # no stream wait - the AppSec server answers synchronously), then a benign
+  # request stays normal. Out-of-band scenarios may still ban the probe source
+  # as a side effect, so decisions are cleared before the benign check.
+  echo "  [INFO] appsec phase (in-band CRS: first-try block, no ban needed)"
+  for ip in $PROBE_IPS; do
+    sudo docker exec crowdsec cscli decisions delete --ip "$ip" >/dev/null 2>&1 || true
+  done
+  got=000
+  for i in $(seq 1 5); do
+    got="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 -H "Host: $PROBE_HOST" "http://127.0.0.1/?id=1%27%20UNION%20SELECT%201,2,3--" 2>/dev/null || echo 000)"
+    [ "$got" = "403" ] && break
+    sleep 3
+  done
+  if [ "$got" = "403" ]; then
+    echo "  [PASS] appsec blocked the SQLi in-band (403 first try)"
+  else
+    echo "  [FAIL] expected in-band 403 for the SQLi probe, got $got"
+    FAILED=1
+  fi
+  for ip in $PROBE_IPS; do
+    sudo docker exec crowdsec cscli decisions delete --ip "$ip" >/dev/null 2>&1 || true
+  done
+  benign=403
+  for i in $(seq 1 15); do
+    benign="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 -H "Host: $PROBE_HOST" "http://127.0.0.1/" 2>/dev/null || echo 000)"
+    [ "$benign" != "403" ] && break
+    sleep 2
+  done
+  if [ "$benign" != "403" ] && [ "$benign" != "000" ]; then
+    echo "  [PASS] benign requests stay normal ($benign)"
+  else
+    echo "  [FAIL] benign request got $benign"
+    FAILED=1
+  fi
+fi
 
 if [ "$FAILED" -ne 0 ]; then echo "=== test: FAILED ==="; exit 1; fi
 echo "=== test: OK ==="

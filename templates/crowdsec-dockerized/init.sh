@@ -68,6 +68,32 @@ for c in $COLLECTIONS; do
   out="$(sudo docker exec crowdsec cscli collections install "$c" 2>&1)" || log "warn: collection $c not installed"
   echo "$out" | grep -qi "enabling" && NEWCOLL=1
 done
+{{ if .AppSec }}
+# AppSec WAF (normal+ profiles): server configs + rule packs for the :7422
+# server (acquis-appsec.yaml is mounted by compose). Missing rules are fatal
+# at engine startup (crash loop), so installs retry and every item is verified
+# before the restart below - a persistent hub failure fails the provision loud
+# instead of deploying a crash-looping engine.
+appsec_install() {
+  local kind="$1"; shift
+  local item i
+  for item in "$@"; do
+    for i in 1 2 3; do
+      if sudo docker exec crowdsec cscli "$kind" install "$item" >/dev/null 2>&1; then break; fi
+      sleep 5
+    done
+  done
+}
+appsec_install appsec-configs crowdsecurity/appsec-default crowdsecurity/crs-inband
+appsec_install appsec-rules crowdsecurity/base-config crowdsecurity/crs crowdsecurity/experimental-no-user-agent crowdsecurity/appsec-generic-test crowdsecurity/generic-freemarker-ssti crowdsecurity/vpatch-CVE-2017-9841
+for item in crowdsecurity/appsec-default crowdsecurity/crs-inband; do
+  sudo docker exec crowdsec cscli appsec-configs inspect "$item" 2>/dev/null | grep -q "installed: true" || fail "appsec config $item missing after install"
+done
+for item in crowdsecurity/base-config crowdsecurity/crs crowdsecurity/experimental-no-user-agent crowdsecurity/appsec-generic-test crowdsecurity/generic-freemarker-ssti crowdsecurity/vpatch-CVE-2017-9841; do
+  sudo docker exec crowdsec cscli appsec-rules inspect "$item" 2>/dev/null | grep -q "installed: true" || fail "appsec rule $item missing after install"
+done
+NEWCOLL=1
+{{ end }}
 if [ "$NEWCOLL" = 1 ]; then
   # The daemon loads parsers/scenarios at startup: restart once so the newly
   # enabled collections actually parse (otherwise lines stay unparsed).
@@ -134,6 +160,12 @@ http:
           crowdsecLapiHost: $LAPI_HOST
           crowdsecLapiPath: /
           crowdsecLapiKey: $LAPI_KEY
+{{ if .AppSec }}
+          crowdsecAppsecEnabled: true
+          crowdsecAppsecHost: crowdsec:7422
+          crowdsecAppsecFailureBlock: true
+          crowdsecAppsecUnreachableBlock: false
+{{ end }}
           forwardedHeadersTrustedIPs:
 {{- range .TrustedCIDRs }}
             - {{ . }}
@@ -210,7 +242,17 @@ experimental:
       version: $PLUGIN_VERSION
 accessLog:
   filePath: /var/log/traefik/access.log
+  format: json
 EOF
+  CHANGED=1
+fi
+# 6b. Migrate older nodes to the JSON access log: CLF drops the headers (no
+#     User-Agent), so crowdsec parses the paths but never the bad-UA scenario.
+#     JSON keeps every header; truncate so the file has a single format.
+if ! sudo grep -q "format: json" "$YML"; then
+  log "traefik.yml: switching the access log to JSON (headers captured)"
+  sudo sed -i '/^accessLog:$/a\  format: json' "$YML"
+  sudo truncate -s 0 /var/log/traefik/access.log 2>/dev/null || true
   CHANGED=1
 fi
 if ! sudo grep -q "crowdsec@file" "$YML"; then

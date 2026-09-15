@@ -928,7 +928,7 @@ func crowdsecBareRenderData(_ ProvisionFile, h ProvisionHost, prof map[string]an
 // templates/crowdsec-dockerized (engine container + the Traefik bouncer plugin
 // auto-enabled on the sdk-ops host Traefik). Standalone by default; CS_LAPI_URL
 // switches to client mode. Secrets are written to the node .env by the wiring.
-func crowdsecDockerizedRenderData(_ ProvisionFile, h ProvisionHost, prof map[string]any, _ ServiceConfig) (map[string]any, error) {
+func crowdsecDockerizedRenderData(_ ProvisionFile, h ProvisionHost, prof map[string]any, cfg ServiceConfig) (map[string]any, error) {
 	envOr := func(key, def string) string {
 		if v := os.Getenv(key); v != "" {
 			return v
@@ -947,6 +947,7 @@ func crowdsecDockerizedRenderData(_ ProvisionFile, h ProvisionHost, prof map[str
 		"Client":        lapiURL != "",
 		"Central":       cfg.Central,
 		"PeerIP":        h.PeerIP,
+		"AppSec":        fmt.Sprint(prof["appsec"]) == "true",
 		// Ranges whose X-Forwarded-For is trusted (the plugin reads the real
 		// client IP from the edge/CDN only for these).
 		"TrustedCIDRs": splitCsv(envOr("CS_TRUSTED_CIDRS", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1")), // go-check:ignore-ip

@@ -81,6 +81,7 @@ if sudo docker logs traefik --tail=400 2>&1 | grep -qi "Plugins are disabled"; t
 else
   ok "traefik plugin state ok"
 fi
+
 if sudo docker exec crowdsec cscli parsers list 2>/dev/null | grep -q "traefik-logs"; then
   ok "traefik parser installed (access log is parsed)"
 else
@@ -92,6 +93,14 @@ if sudo docker exec crowdsec cscli parsers list 2>/dev/null | grep -q "crowdsecu
 else
   bad "whitelists parser missing (loopback/RFC1918 exposed)"
 fi
+
+{{ if .AppSec }}
+if sudo docker exec crowdsec netstat -ltn 2>/dev/null | grep -q ":7422"; then
+  ok "appsec server listening on :7422"
+else
+  bad "appsec server not listening on :7422"
+fi
+{{ end }}
 
 if [ "$CENTRAL" = "true" ] && [ -n "$PEERIP" ]; then
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$PEERIP:8080/" 2>/dev/null || echo 000)"

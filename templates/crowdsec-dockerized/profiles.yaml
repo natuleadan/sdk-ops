@@ -1,15 +1,22 @@
 # crowdsec-dockerized profiles - container sizing (compose deploy limits) and
 # the hub collections the agent installs. The engine parses the Traefik access
 # log the template wires into /var/log/traefik/access.log.
+#
+# AppSec WAF switch: `appsec: "true"` (normal+) starts the AppSec server on
+# :7422 (OWASP CRS virtual patching, served in-band through the plugin); lite
+# stays stream-only to fit small nodes (AppSec adds ~200 MiB).
 lite:                 # 0.5c / 256M - stream IPS on a small docker host
   mem_limit: 256M
   cpus: "0.5"
   collections: crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/traefik
-normal:               # 1c / 512M - stream IPS + more HTTP scenarios
+  appsec: "false"
+normal:               # 1c / 512M - stream IPS + AppSec WAF
   mem_limit: 512M
   cpus: "1"
   collections: crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/traefik
-large:                # 2c / 1G
+  appsec: "true"
+large:                # 2c / 1G - stream IPS + AppSec WAF + headroom
   mem_limit: 1G
   cpus: "2"
   collections: crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/traefik
+  appsec: "true"

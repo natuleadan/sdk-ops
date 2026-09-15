@@ -28,7 +28,7 @@ bouncer consumes its decisions — the multi-host / VLAN layout).
 |---|---|---|---|
 | k3s, in-cluster ingress | `crowdsec-cluster` | L7 plugin (stream; AppSec/CRS by profile) | validated |
 | host, no proxy | `crowdsec-bare` standalone | L3/L4 nftables | validated |
-| docker host, host Traefik | `crowdsec-dockerized` | L7 plugin on the sdk-ops Traefik | template ships with docker mode |
+| docker host, host Traefik | `crowdsec-dockerized` | L7 plugin on the sdk-ops Traefik (stream + auto-detection E2E; AppSec/CRS in-band on normal+) | validated |
 | one engine, many enforcers (VLAN) | central `crowdsec-cluster` + clients `crowdsec-bare` | L3/L4 per client (the central decides) | validated |
 | one engine, many enforcers (VLAN, docker) | central `crowdsec-dockerized` (`central: true`) + clients `crowdsec-dockerized` | L7 plugin per client (the central decides) | validated |
 

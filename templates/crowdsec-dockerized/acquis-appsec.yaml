@@ -1,0 +1,10 @@
+# AppSec WAF datasource (normal+ profiles): the daemon starts the AppSec server
+# on :7422 with virtual patching (appsec-default) and OWASP CRS in-band
+# (crs-inband). Mounted by docker-compose only when the profile enables AppSec.
+source: appsec
+listen_addr: 0.0.0.0:7422
+appsec_configs:
+  - crowdsecurity/appsec-default
+  - crowdsecurity/crs-inband
+labels:
+  type: appsec

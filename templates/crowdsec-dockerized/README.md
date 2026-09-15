@@ -73,11 +73,12 @@ Raw commands (ON the node, under `/opt/sdk-ops/services/crowdsec-dockerized/`):
 | Profile | Engine | Notes |
 |---|---|---|
 | `lite` | 256M / 0.5c | stream IPS |
-| `normal` | 512M / 1c | stream IPS |
-| `large` | 1G / 2c | stream IPS |
+| `normal` | 512M / 1c | stream IPS + AppSec WAF (`:7422`, CRS in-band) |
+| `large` | 1G / 2c | stream IPS + AppSec WAF + headroom |
 
-AppSec (OWASP CRS) is available through the plugin's `crowdsecAppsecEnabled`
-option; the cluster template enables it per profile (AppSec adds ~200 MiB).
+AppSec (normal+) serves OWASP CRS in-band through the plugin
+(`crowdsecAppsecHost: crowdsec:7422`, fail-closed on error, fail-open when
+unreachable - same posture as the cluster template).
 
 ## Gotchas
 

@@ -242,6 +242,62 @@ func TestCrowdsecDockerizedCentralPublish(t *testing.T) {
 		t.Error("standalone must not publish the LAPI on the peer IP")
 	}
 }
+
+// TestCrowdsecDockerizedAppSecRender locks the profile-gated AppSec WAF:
+// normal enables the :7422 server (acquis mount, installs, plugin options,
+// validate check), lite stays stream-only.
+func TestCrowdsecDockerizedAppSecRender(t *testing.T) {
+	prof := map[string]any{"mem_limit": "512M", "cpus": "1", "collections": "crowdsecurity/linux", "appsec": "true"}
+	h := ProvisionHost{Name: "web"}
+	data, err := crowdsecDockerizedRenderData(ProvisionFile{}, h, prof, ServiceConfig{Profile: "normal"})
+	if err != nil {
+		t.Fatalf("render normal: %v", err)
+	}
+	if appsec, _ := data["AppSec"].(bool); !appsec {
+		t.Fatal("normal profile must enable AppSec")
+	}
+	dir := t.TempDir()
+	if err := templates.RenderDir("crowdsec-dockerized", dir, data); err != nil {
+		t.Fatalf("render dir: %v", err)
+	}
+	compose, _ := os.ReadFile(filepath.Join(dir, "docker-compose.yml"))
+	if !strings.Contains(string(compose), "acquis-appsec.yaml") {
+		t.Error("normal compose must mount the appsec acquisition")
+	}
+	initSh, _ := os.ReadFile(filepath.Join(dir, "init.sh"))
+	if !strings.Contains(string(initSh), "crowdsecAppsecHost: crowdsec:7422") {
+		t.Error("normal init must wire the plugin to the appsec server")
+	}
+	if !strings.Contains(string(initSh), "crs-inband") {
+		t.Error("normal init must install the in-band CRS config")
+	}
+	validateSh, _ := os.ReadFile(filepath.Join(dir, "validate.sh"))
+	if !strings.Contains(string(validateSh), ":7422") {
+		t.Error("normal validate must check the appsec listener")
+	}
+
+	prof["appsec"] = "false"
+	data, err = crowdsecDockerizedRenderData(ProvisionFile{}, h, prof, ServiceConfig{Profile: "lite"})
+	if err != nil {
+		t.Fatalf("render lite: %v", err)
+	}
+	if appsec, _ := data["AppSec"].(bool); appsec {
+		t.Fatal("lite profile must stay stream-only")
+	}
+	dir = t.TempDir()
+	if err := templates.RenderDir("crowdsec-dockerized", dir, data); err != nil {
+		t.Fatalf("render dir: %v", err)
+	}
+	compose, _ = os.ReadFile(filepath.Join(dir, "docker-compose.yml"))
+	if strings.Contains(string(compose), "acquis-appsec.yaml") {
+		t.Error("lite compose must not mount the appsec acquisition")
+	}
+	initSh, _ = os.ReadFile(filepath.Join(dir, "init.sh"))
+	if strings.Contains(string(initSh), "crowdsecAppsecEnabled") {
+		t.Error("lite init must not wire appsec plugin options")
+	}
+}
+
 // TestCrowdsecBareUninstallAndOrder keeps the bare service in the declared
 // cleanup map (units disabled on removal) and in the queue order.
 func TestCrowdsecBareUninstallAndOrder(t *testing.T) {
