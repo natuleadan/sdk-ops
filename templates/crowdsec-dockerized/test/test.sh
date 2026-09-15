@@ -1,9 +1,12 @@
 #!/bin/bash
 # crowdsec-dockerized test - end-to-end L7 enforcement through the host
-# Traefik: ban the client on the LAPI, assert Traefik answers 403 (the plugin
-# middleware on the web entrypoint), then unban and assert it goes back to the
-# normal response (404 from the probe's catch-all backend). Uses HTTP (:80)
-# because websecure has no certificate for the probe host.
+# Traefik. Phase 1: ban the client on the LAPI, assert Traefik answers 403
+# (the plugin middleware on the web entrypoint), then unban and assert it goes
+# back to the normal response (404 from the probe's catch-all backend).
+# Phase 2 (standalone only): automatic detection - the whitelist parser is
+# removed (node-local traffic is loopback/RFC1918, always whitelisted), a scan
+# of DISTINCT sensitive paths must raise a crowdsec-kind alert and auto-ban
+# (403), then everything is cleaned up and the whitelist restored.
 #
 # The client IP Traefik observes depends on the network mode: bridged Traefik
 # sees the docker gateway (port publishing SNATs the source), host-network
@@ -78,6 +81,91 @@ else
     FAILED=1
   fi
 fi
+
+  # Phase 2 - automatic detection. CrowdSec whitelists loopback/RFC1918 by
+  # default and node-local traffic always comes from there (127.0.0.1 on
+  # host-network Traefik, the docker gateway on bridged), so the whitelist
+  # parser is removed for the scan and restored right after (trap-guarded,
+  # plus validate.sh fails when it is missing). The scenarios count DISTINCT
+  # requests, so hammering one URL never overflows.
+  # NOTE: reruns within ~5m of a detection hit the scenario blackhole and
+  # will not re-fire; wait it out before re-running the test.
+  restore_wl() {
+    sudo docker exec crowdsec cscli parsers install crowdsecurity/whitelists >/dev/null 2>&1 || true
+    sudo docker restart crowdsec >/dev/null 2>&1 || true
+    for i in $(seq 1 30); do
+      if sudo docker exec crowdsec cscli lapi status >/dev/null 2>&1; then break; fi
+      sleep 2
+    done
+  }
+  trap restore_wl EXIT
+  echo "  [INFO] automatic-detection phase (whitelist off, distinct scan)"
+  sudo docker exec crowdsec cscli parsers remove crowdsecurity/whitelists >/dev/null 2>&1 || true
+  sudo docker restart crowdsec >/dev/null
+  for i in $(seq 1 30); do
+    if sudo docker exec crowdsec cscli lapi status >/dev/null 2>&1; then break; fi
+    sleep 2
+  done
+  sudo docker exec crowdsec cscli lapi status >/dev/null 2>&1 || { echo "  [FAIL] engine did not come back after whitelist removal"; FAILED=1; }
+  # Settle: the file tailer starts seconds after the LAPI answers, and lines
+  # written before it tails are missed. (cscli metrics omits idle sources, so
+  # it cannot gate this - a fixed settle is the deterministic option.)
+  sleep 10
+  for ip in $PROBE_IPS; do
+    sudo docker exec crowdsec cscli decisions delete --ip "$ip" >/dev/null 2>&1 || true
+  done
+  for p in .git/config .env wp-config.php config.php server-status phpinfo.php "admin/.git/config" backup.sql db.sqlite .svn/entries .git/HEAD composer.json .DS_Store server-info web.config database.sql dump.sql .htpasswd actuator/env change-password; do
+    curl -s -o /dev/null --max-time 5 -H "Host: $PROBE_HOST" "http://127.0.0.1/$p" >/dev/null 2>&1 || true
+  done
+  echo "  [INFO] scan sent, polling for an automatic alert on the probe source"
+  WL_PAT="$(printf '%s' "$PROBE_IPS" | tr ' ' '|' | sed 's/\./\\./g')"
+  found=""
+  for i in $(seq 1 24); do
+    if sudo docker exec crowdsec cscli alerts list --since 4m 2>/dev/null | grep -Eq "($WL_PAT).*crowdsec"; then found=1; break; fi
+    sleep 5
+  done
+  if [ -n "$found" ]; then
+    echo "  [PASS] engine auto-detected the scan (crowdsec-kind alert)"
+  else
+    echo "  [FAIL] no automatic alert after the scan (parser/scenarios?)"
+    FAILED=1
+  fi
+  got=000
+  for i in $(seq 1 15); do
+    got="$(code_now)"
+    [ "$got" = "403" ] && break
+    sleep 2
+  done
+  if [ "$got" = "403" ]; then
+    echo "  [PASS] auto-ban enforced by Traefik (403)"
+  else
+    echo "  [FAIL] expected 403 from the auto-ban, got $got"
+    FAILED=1
+  fi
+  for ip in $PROBE_IPS; do
+    sudo docker exec crowdsec cscli decisions delete --ip "$ip" >/dev/null 2>&1 || true
+  done
+  echo "  [INFO] auto-ban cleaned up, restoring the whitelist"
+  trap - EXIT
+  restore_wl
+  if sudo docker exec crowdsec cscli parsers list 2>/dev/null | grep -q "crowdsecurity/whitelists"; then
+    echo "  [PASS] whitelist parser restored"
+  else
+    echo "  [FAIL] whitelist parser NOT restored (engine left weakened)"
+    FAILED=1
+  fi
+  after=403
+  for i in $(seq 1 15); do
+    after="$(code_now)"
+    [ "$after" != "403" ] && break
+    sleep 2
+  done
+  if [ "$after" != "403" ] && [ "$after" != "000" ]; then
+    echo "  [PASS] post-cleanup responses normal ($after)"
+  else
+    echo "  [FAIL] still $after after cleanup"
+    FAILED=1
+  fi
 
 if [ "$FAILED" -ne 0 ]; then echo "=== test: FAILED ==="; exit 1; fi
 echo "=== test: OK ==="

@@ -67,6 +67,11 @@ option; the cluster template enables it per profile (AppSec adds ~200 MiB).
 - The plugin downloads from `plugins.traefik.io` at Traefik startup: the host
   needs **egress 443**; without it Traefik logs "Plugins are disabled" and
   `init.sh` retries the container once.
+- Scenarios count DISTINCT requests: hammering one URL never overflows a
+  bucket. CrowdSec also whitelists loopback/RFC1918 by default, so node-local
+  traffic can never trigger scenarios. The acceptance test removes the
+  whitelist parser for its scan and restores it right after (trap-guarded;
+  validate fails when it is missing).
 - Re-provisioning rewrites `/etc/traefik/traefik.yml` and the creation
   template; the service init re-applies the plugin flags afterwards, so the
   order is always converge (services run after the traefik phase).

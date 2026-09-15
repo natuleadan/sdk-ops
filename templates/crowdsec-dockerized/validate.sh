@@ -75,5 +75,11 @@ else
   bad "traefik-logs parser missing (detection cannot fire)"
 fi
 
+if sudo docker exec crowdsec cscli parsers list 2>/dev/null | grep -q "crowdsecurity/whitelists"; then
+  ok "default whitelists present (engine not left weakened)"
+else
+  bad "whitelists parser missing (loopback/RFC1918 exposed)"
+fi
+
 if [ "$FAILED" -ne 0 ]; then echo "=== validate: FAILED ==="; exit 1; fi
 echo "=== validate: OK ==="
