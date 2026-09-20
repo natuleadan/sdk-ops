@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+# pre-push: run the repo precheck before pushing (so a broken push does not turn CI red).
+# Install: git config core.hooksPath .githooks
+# Bypass:  git push --no-verify   |   HOOK_SKIP=1 git push
+set -u
+[ "${HOOK_SKIP:-0}" = "1" ] && { echo "pre-push: skipped (HOOK_SKIP=1)"; exit 0; }
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT" || exit 0
+command -v go >/dev/null 2>&1 || { echo "pre-push: go missing, skip"; exit 0; }
+
+if command -v golangci-lint >/dev/null 2>&1; then
+  echo "pre-push: make lint"
+  make lint || { echo "pre-push: lint failed"; exit 1; }
+else
+  echo "pre-push: golangci-lint missing -> go vet"
+  go vet ./... || { echo "pre-push: vet failed"; exit 1; }
+fi
+echo "pre-push: go build ./..."
+go build ./... || { echo "pre-push: build failed"; exit 1; }
+echo "pre-push: make test"
+make test || { echo "pre-push: tests failed"; exit 1; }
+echo "pre-push: OK"
