@@ -1,0 +1,26 @@
+name: Nightly Dev Tag
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly-tag-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag Dev SHA
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create dev-<sha> tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/dev-${SHORT_SHA}" \
+            -f sha="${GITHUB_SHA}" || echo "Tag dev-${SHORT_SHA} already exists; skipping."

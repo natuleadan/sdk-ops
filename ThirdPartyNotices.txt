@@ -1,0 +1,3 @@
+# Third-Party Notices
+
+No external Go module dependencies (standard library only).
