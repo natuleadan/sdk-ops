@@ -27,7 +27,7 @@ jobs:
         run: |
           go mod verify
           go list -m -json all > dependency-inventory.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dependency-inventory
           path: dependency-inventory.json
