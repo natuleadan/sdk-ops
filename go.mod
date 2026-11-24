@@ -1,7 +1,6 @@
-// Deprecated: sdk-ops is retired and archived. Development continues in Natuleadan Andromeda: https://github.com/natuleadan/andromeda
+// Deprecated: this module is retired and superseded by https://github.com/natuleadan/andromeda.
 module github.com/natuleadan/sdk-ops
 
-go 1.27
+go 1.24
 
-// Retired: every earlier release is withdrawn. Use Andromeda instead.
-retract [v0.0.0-0, v1.0.0]
+retract [v0.0.0-0, v999999.0.0] // retired: superseded by Andromeda
